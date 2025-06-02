@@ -5,7 +5,9 @@ let isRunning = false;
 // Initialize all UI elements
 const startStopBtn = document.getElementById('startStop');
 const resetBtn = document.getElementById('reset');
+const hoursInput = document.getElementById('hours');
 const minutesInput = document.getElementById('minutes');
+const secondsInput = document.getElementById('seconds');
 const display = document.getElementById('display');
 const autoRestartCheck = document.getElementById('autoRestart');
 const darkModeToggle = document.getElementById('darkModeToggle');
@@ -14,6 +16,9 @@ const darkModeToggle = document.getElementById('darkModeToggle');
 darkModeToggle.addEventListener('click', () => {
   document.body.classList.toggle('dark-mode');
   document.body.classList.toggle('light-mode');
+  
+  // Update icon based on mode
+  darkModeToggle.textContent = document.body.classList.contains('dark-mode') ? '☀️' : '🌙';
 
   const isDark = document.body.classList.contains('dark-mode');
   localStorage.setItem('darkMode', isDark ? 'enabled' : 'disabled');
@@ -25,9 +30,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (mode === 'enabled') {
     document.body.classList.add('dark-mode');
     document.body.classList.remove('light-mode');
+    darkModeToggle.textContent = '☀️';
   } else {
     document.body.classList.add('light-mode');
     document.body.classList.remove('dark-mode');
+    darkModeToggle.textContent = '🌙';
   }
 });
 
@@ -42,18 +49,27 @@ startStopBtn.addEventListener('click', () => {
 
 resetBtn.addEventListener('click', resetTimer);
 
-// Update display when minutes input changes
-minutesInput.addEventListener('change', () => {
-  if (minutesInput.value < 1) minutesInput.value = 1;
-  if (!isRunning) {
-    timeLeft = minutesInput.value * 60;
-    updateDisplay();
-  }
+// Update display when time inputs change
+[hoursInput, minutesInput, secondsInput].forEach(input => {
+  input.addEventListener('change', () => {
+    if (input.value < 0) input.value = 0;
+    if (!isRunning) {
+      timeLeft = calculateTotalSeconds();
+      updateDisplay();
+    }
+  });
 });
+
+function calculateTotalSeconds() {
+  const hours = parseInt(hoursInput.value) || 0;
+  const minutes = parseInt(minutesInput.value) || 0;
+  const seconds = parseInt(secondsInput.value) || 0;
+  return (hours * 3600) + (minutes * 60) + seconds;
+}
 
 function startTimer() {
   if (!timeLeft || timeLeft <= 0) {
-    timeLeft = minutesInput.value * 60;
+    timeLeft = calculateTotalSeconds();
   }
   
   isRunning = true;
@@ -62,6 +78,32 @@ function startTimer() {
   timer = setInterval(() => {
     timeLeft--;
     updateDisplay();
+    
+    // Show chatbox in last 30 seconds
+    if (timeLeft === 30) {
+      // Play sound
+      playSound();
+      
+      // Show reflection chat box in the active tab
+      chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        if (!tabs || !tabs[0]) {
+          console.error('No active tab found');
+          return;
+        }
+        
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'showReflectionChatBox',
+          minutes: 0.5, // 30 seconds = 0.5 minutes
+          timeLeft: timeLeft
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Error sending message:', chrome.runtime.lastError);
+          } else {
+            console.log('Chatbox message sent successfully:', response);
+          }
+        });
+      });
+    }
     
     if (timeLeft <= 0) {
       timerComplete();
@@ -77,83 +119,31 @@ function stopTimer() {
 
 function resetTimer() {
   stopTimer();
-  timeLeft = minutesInput.value * 60;
+  timeLeft = calculateTotalSeconds();
   updateDisplay();
 }
 
 function updateDisplay() {
-  const minutes = Math.floor(timeLeft / 60);
+  const hours = Math.floor(timeLeft / 3600);
+  const minutes = Math.floor((timeLeft % 3600) / 60);
   const seconds = timeLeft % 60;
-  display.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  
+  const displayStr = [
+    hours > 0 ? hours.toString() : '',
+    minutes.toString().padStart(2, '0'),
+    seconds.toString().padStart(2, '0')
+  ].filter(Boolean).join(':');
+  
+  display.textContent = displayStr;
 }
 
-function injectChatbox() {
-  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-    chrome.scripting.executeScript({
-      target: { tabId: tabs[0].id },
-      function: createChatbox,
-      args: [minutesInput.value]
-    });
-  });
-}
-
-function createChatbox(minutes) {
-  // Remove existing chatbox if any
-  const existingChatbox = document.getElementById('timer-reflection-chatbox');
-  if (existingChatbox) {
-    existingChatbox.remove();
-  }
-
-  // Create and style chatbox
-  const chatbox = document.createElement('div');
-  chatbox.id = 'timer-reflection-chatbox';
-  chatbox.style.cssText = `
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #2c2c2c;
-    color: white;
-    padding: 20px;
-    border-radius: 10px;
-    width: 300px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.4);
-    z-index: 2147483647;
-    font-family: Arial, sans-serif;
-  `;
-
-  chatbox.innerHTML = `
-    <h3 style="margin: 0 0 10px 0;">Time's Up!</h3>
-    <p style="margin: 0 0 10px 0;">What did you do in the last ${minutes} minutes?</p>
-    <textarea style="width: 100%; min-height: 100px; margin-bottom: 10px; padding: 8px; box-sizing: border-box; border-radius: 5px;"></textarea>
-    <button style="background: #4CAF50; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; width: 100%;">Submit</button>
-  `;
-
-  document.body.appendChild(chatbox);
-
-  // Handle submission
-  const button = chatbox.querySelector('button');
-  button.addEventListener('click', () => {
-    const response = chatbox.querySelector('textarea').value;
-    console.log('Timer reflection:', response);
-    chatbox.remove();
-  });
-
-  // Handle Enter key in textarea
-  const textarea = chatbox.querySelector('textarea');
-  textarea.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      button.click();
-    }
-  });
-
-  // Focus textarea
-  textarea.focus();
+function playSound() {
+  const audio = new Audio(chrome.runtime.getURL('popup.mp3'));
+  audio.play().catch(error => console.log('Error playing sound:', error));
 }
 
 function timerComplete() {
   stopTimer();
-  injectChatbox();
   
   if (autoRestartCheck.checked) {
     resetTimer();
