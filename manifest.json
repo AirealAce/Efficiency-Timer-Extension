@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Simple Timer",
+  "version": "1.0",
+  "description": "A simple countdown timer with reflection",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+} 
