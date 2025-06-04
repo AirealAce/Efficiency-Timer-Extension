@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Timer Extension Settings</title>
+  <style>
+    body {
+      width: 500px;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+    }
+    
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    
+    label {
+      font-weight: bold;
+    }
+    
+    input {
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+    }
+    
+    button {
+      padding: 10px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    button:hover {
+      opacity: 0.9;
+    }
+    
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      display: none;
+    }
+    
+    .success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    
+    .error {
+      background-color: #f2dede;
+      color: #a94442;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Google Sheets Settings</h2>
+    
+    <div class="input-group">
+      <label for="clientEmail">Service Account Email:</label>
+      <input type="text" id="clientEmail" placeholder="Enter your service account email">
+    </div>
+    
+    <div class="input-group">
+      <label for="privateKey">Private Key:</label>
+      <textarea id="privateKey" rows="5" placeholder="Enter your private key"></textarea>
+    </div>
+    
+    <div class="input-group">
+      <label for="spreadsheetId">Spreadsheet ID:</label>
+      <input type="text" id="spreadsheetId" placeholder="Enter your spreadsheet ID">
+    </div>
+    
+    <button id="saveSettings">Save Settings</button>
+    
+    <div id="status" class="status"></div>
+  </div>
+  
+  <script src="settings.js"></script>
+</body>
+</html> 
