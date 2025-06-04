@@ -1,25 +1,46 @@
 {
   "manifest_version": 3,
-  "name": "Simple Timer",
+  "name": "Timer Extension",
   "version": "1.0",
-  "description": "A simple countdown timer with reflection",
+  "description": "A timer extension with Google Sheets integration",
   "permissions": [
-    "activeTab",
+    "storage",
     "scripting",
-    "storage"
+    "alarms",
+    "tabs",
+    "activeTab",
+    "background",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://sheets.googleapis.com/*",
+    "https://oauth2.googleapis.com/*"
   ],
   "action": {
     "default_popup": "popup.html"
   },
+  "options_page": "settings.html",
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "css": ["styles.css"],
       "js": ["content.js"],
-      "css": ["styles.css"]
+      "run_at": "document_start",
+      "all_frames": false
     }
   ],
   "web_accessible_resources": [{
-    "resources": ["popup.mp3"],
+    "resources": [
+      "popup.mp3",
+      "styles.css",
+      "half_moon.webp",
+      "sun-emoji-2048x2048-1je5hwoj.png",
+      "settings.html",
+      "settings.js"
+    ],
     "matches": ["<all_urls>"]
   }]
 } 
