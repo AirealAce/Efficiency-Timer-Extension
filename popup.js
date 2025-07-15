@@ -110,13 +110,11 @@ chrome.storage.local.get(['timerValues', 'sfxVolume', 'startAtTimeSettings', 'sh
   // Restore sheets link
   if (result.sheetsLink) {
     sheetsLinkInput.value = result.sheetsLink;
-    console.log('[Popup] Loaded saved sheets link');
   }
 
   // Restore web app URL
   if (result.webAppUrl) {
     webAppUrlInput.value = result.webAppUrl;
-    console.log('[Popup] Loaded saved web app URL');
   }
 });
 
@@ -135,7 +133,6 @@ if (sheetsLinkInput) {
   sheetsLinkInput.addEventListener('change', () => {
     const link = sheetsLinkInput.value.trim();
     chrome.storage.local.set({ sheetsLink: link }, () => {
-      console.log('[Popup] Saved sheets link:', link);
     });
   });
 
@@ -143,7 +140,6 @@ if (sheetsLinkInput) {
   sheetsLinkInput.addEventListener('input', () => {
     const link = sheetsLinkInput.value.trim();
     chrome.storage.local.set({ sheetsLink: link }, () => {
-      console.log('[Popup] Saved sheets link:', link);
     });
   });
 }
@@ -153,7 +149,6 @@ if (webAppUrlInput) {
   webAppUrlInput.addEventListener('change', () => {
     const url = webAppUrlInput.value.trim();
     chrome.storage.local.set({ webAppUrl: url }, () => {
-      console.log('[Popup] Saved web app URL:', url);
     });
   });
 
@@ -161,7 +156,6 @@ if (webAppUrlInput) {
   webAppUrlInput.addEventListener('input', () => {
     const url = webAppUrlInput.value.trim();
     chrome.storage.local.set({ webAppUrl: url }, () => {
-      console.log('[Popup] Saved web app URL:', url);
     });
   });
 }
@@ -275,7 +269,6 @@ async function showChatboxInActiveTab() {
   try {
     const tabs = await chrome.tabs.query({active: true, currentWindow: true});
     if (!tabs || !tabs[0]) {
-      console.error('No active tab found');
       return false;
     }
     
@@ -288,19 +281,15 @@ async function showChatboxInActiveTab() {
         sheetsLink: sheetsLinkInput.value // Add sheets link to the message
       }, (response) => {
         if (chrome.runtime.lastError) {
-          console.error('Error sending message:', chrome.runtime.lastError);
           resolve(false);
         } else if (!response || !response.success) {
-          console.error('Failed to show chatbox:', response);
           resolve(false);
         } else {
-          console.log('Chatbox shown successfully:', response);
           resolve(true);
         }
       });
     });
   } catch (error) {
-    console.error('Error in showChatboxInActiveTab:', error);
     return false;
   }
 }
@@ -421,7 +410,6 @@ function checkStartTime() {
   
   // If time has passed for today, schedule for tomorrow
   if (targetTime <= now) {
-    console.log('[Popup] Time has passed for today, scheduling for tomorrow');
     targetTime.setDate(targetTime.getDate() + 1);
   }
 
@@ -431,8 +419,6 @@ function checkStartTime() {
     minutes: minutesInput.value || '',
     seconds: secondsInput.value || ''
   };
-
-  console.log('[Popup] Scheduling timer for:', targetTime.toLocaleString());
 
   // Schedule the timer using chrome.alarms
   chrome.runtime.sendMessage({
@@ -558,27 +544,20 @@ function saveStartAtTimeSettings() {
 
 // Dark mode toggle
 function updateDarkModeIcons(isDark) {
-  console.log('[Popup] Updating dark mode icons, isDark:', isDark);
-  console.log('[Popup] Sun icon element:', sunIcon);
-  console.log('[Popup] Moon icon element:', moonIcon);
-  
   // Check if images are loaded
-  moonIcon.onload = () => console.log('[Popup] Moon icon loaded successfully');
-  moonIcon.onerror = (e) => console.error('[Popup] Moon icon failed to load:', e);
-  sunIcon.onload = () => console.log('[Popup] Sun icon loaded successfully');
-  sunIcon.onerror = (e) => console.error('[Popup] Sun icon failed to load:', e);
+  moonIcon.onload = () => {};
+  moonIcon.onerror = (e) => {};
+  sunIcon.onload = () => {};
+  sunIcon.onerror = (e) => {};
   
   sunIcon.style.display = isDark ? 'block' : 'none';
   moonIcon.style.display = isDark ? 'none' : 'block';
   
   // Log the current src attributes
-  console.log('[Popup] Sun icon src:', sunIcon.src);
-  console.log('[Popup] Moon icon src:', moonIcon.src);
 }
 
 // Initialize dark mode on load
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('[Popup] DOM Content Loaded');
   chrome.storage.local.get(['darkMode'], (result) => {
     const isDark = result.darkMode === 'enabled';
     if (isDark) {

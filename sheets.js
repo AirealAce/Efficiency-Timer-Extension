@@ -62,7 +62,6 @@ async function updateA1(credentials) {
     }
 
     const data = await response.json();
-    console.log('Cell A1 updated successfully:', data);
     return data;
   } catch (error) {
     console.error('Error updating cell A1:', error);
@@ -183,7 +182,6 @@ async function appendChatMessage(message) {
       }
     });
 
-    console.log('Message appended:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error appending message:', error);
