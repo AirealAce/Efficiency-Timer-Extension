@@ -1,5 +1,4 @@
 // Log that content script has loaded
-console.log('[Content] Timer extension content script loaded');
 
 // Prevent multiple injections
 if (!window.timerExtensionInitialized) {
@@ -11,7 +10,6 @@ if (!window.timerExtensionInitialized) {
   chrome.storage.local.get(['sfxVolume'], (result) => {
     if (result.sfxVolume !== undefined) {
       sfxVolume = result.sfxVolume / 100;
-      console.log('[Content] Loaded saved volume:', sfxVolume);
     }
   });
 
@@ -31,20 +29,16 @@ if (!window.timerExtensionInitialized) {
   async function playNotificationSound() {
     try {
       const audioUrl = chrome.runtime.getURL('popup.mp3');
-      console.log('[Content] Loading audio from URL:', audioUrl);
       
       const audio = new Audio(audioUrl);
       audio.volume = Math.max(0, Math.min(1, sfxVolume));
-      console.log('[Content] Created audio element with volume:', audio.volume);
       
       // Add error event listener
       audio.onerror = (e) => {
-        console.error('[Content] Audio error:', e);
       };
       
       // Add loadeddata event listener
       audio.onloadeddata = () => {
-        console.log('[Content] Audio loaded successfully');
       };
       
       // Wait for the audio to be loaded
@@ -54,11 +48,8 @@ if (!window.timerExtensionInitialized) {
         audio.load();
       });
       
-      console.log('[Content] About to play sound with volume:', audio.volume);
       await audio.play();
-      console.log('[Content] Notification sound played successfully');
     } catch (error) {
-      console.error('[Content] Error playing sound:', error);
     }
   }
 
@@ -71,22 +62,20 @@ if (!window.timerExtensionInitialized) {
 
   // Function to create and show the reflection chat box
   function showReflectionChatBox(minutes) {
-    console.log('[Content] Attempting to show reflection chatbox with minutes:', minutes);
     
     try {
       // Check if chatbox already exists
       const existingChatbox = document.getElementById('reflection-chatbox');
       if (existingChatbox) {
-        console.log('[Content] Chatbox already exists, not creating another one');
         return true; // Return true to indicate success (chatbox is already shown)
       }
 
-      // Play notification sound first
-      playNotificationSound().then(() => {
-        console.log('[Content] Sound played, now showing chatbox');
-      }).catch(error => {
-        console.error('[Content] Error playing sound:', error);
-      });
+      // Only play sound if this tab is visible
+      if (!document.hidden) {
+        playNotificationSound().then(() => {
+        }).catch(error => {
+        });
+      }
 
       // Get dark mode state from chrome.storage.local
       chrome.storage.local.get(['darkMode'], (darkModeResult) => {
@@ -171,35 +160,41 @@ if (!window.timerExtensionInitialized) {
         // Ensure the chatbox is added to the top-level document
         if (document.body) {
           document.body.appendChild(chatbox);
-          console.log('[Content] Chatbox added to document body');
           
           // Focus the textarea
           const textarea = chatbox.querySelector('#reflection-textarea');
           if (textarea) {
             // Initial focus
             textarea.focus();
-            console.log('[Content] Initial focus set on textarea');
           }
         } else if (document.documentElement) {
           document.documentElement.appendChild(chatbox);
-          console.log('[Content] Chatbox added to document root');
           
           // Focus the textarea
           const textarea = chatbox.querySelector('#reflection-textarea');
           if (textarea) {
             // Initial focus
             textarea.focus();
-            console.log('[Content] Initial focus set on textarea');
           }
         } else {
           throw new Error('Could not find document body or root element');
         }
 
-        // Handle submit button click
-        const submitBtn = chatbox.querySelector('#submit-reflection');
-        const textarea = chatbox.querySelector('#reflection-textarea');
-        
+        // Add event listeners for submit and skip buttons
+        const submitBtn = document.getElementById('submit-reflection');
+        const skipBtn = document.getElementById('skip-reflection');
+        const textarea = document.getElementById('reflection-textarea');
+
         if (submitBtn && textarea) {
+          // Add Enter key handler for textarea
+          textarea.addEventListener('keydown', (e) => {
+            // Submit on Enter without Shift key
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault(); // Prevent newline
+              submitBtn.click(); // Trigger submit button click
+            }
+          });
+
           submitBtn.addEventListener('click', async () => {
             const userResponse = textarea.value.trim();
             if (userResponse) {
@@ -240,72 +235,54 @@ if (!window.timerExtensionInitialized) {
                 `;
                 submitBtn.parentElement.insertBefore(successMsg, submitBtn);
                 
-                // Remove chatbox after a short delay
+                // Update global chatbox state and remove chatbox after a short delay
+                chrome.runtime.sendMessage({ action: 'updateChatboxState', isVisible: false });
                 setTimeout(() => {
                   chatbox.remove();
                 }, 1500);
               } catch (error) {
-                console.error('[Content] Error sending to Google Sheets:', error);
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Submit';
-                
-                // Show error message
-                const errorMsg = document.createElement('div');
-                errorMsg.textContent = error.message.includes('credentials') ? 
-                  'Please check Google Sheets settings in extension options' : 
-                  'Error saving message. Please try again.';
-                errorMsg.style.cssText = `
-                  color: #f44336;
-                  margin-bottom: 10px;
-                  text-align: center;
-                  font-weight: bold;
-                `;
-                submitBtn.parentElement.insertBefore(errorMsg, submitBtn);
-                
-                // Remove error message after 3 seconds
-                setTimeout(() => {
-                  errorMsg.remove();
-                }, 3000);
+                alert('Failed to save reflection: ' + error.message);
               }
             }
           });
         }
 
-        // Handle skip button click
-        const skipBtn = chatbox.querySelector('#skip-reflection');
         if (skipBtn) {
           skipBtn.addEventListener('click', () => {
+            // Update global chatbox state and remove chatbox
+            chrome.runtime.sendMessage({ action: 'updateChatboxState', isVisible: false });
             chatbox.remove();
-            console.log('[Content] Chatbox skipped and removed');
           });
         }
 
-        // Handle Enter key in textarea
-        if (textarea) {
-          textarea.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submitBtn.click();
-              console.log('[Content] Reflection submitted via Enter key');
-            }
-          });
-        }
-
-        // Handle Escape key to close
-        const escapeHandler = function(e) {
+        // Add escape key handler
+        const escapeHandler = (e) => {
           if (e.key === 'Escape') {
+            // Update global chatbox state and remove chatbox
+            chrome.runtime.sendMessage({ action: 'updateChatboxState', isVisible: false });
             chatbox.remove();
             document.removeEventListener('keydown', escapeHandler);
-            console.log('[Content] Chatbox closed via Escape key');
           }
         };
         document.addEventListener('keydown', escapeHandler);
+
+        // Listen for chatbox state changes from other tabs
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+          if (message.action === 'chatboxStateChanged') {
+            const chatbox = document.getElementById('reflection-chatbox');
+            if (!message.isVisible && chatbox) {
+              chatbox.remove();
+            }
+            sendResponse({ success: true });
+            return true;
+          }
+        });
       });
 
-      console.log('[Content] Chatbox setup completed successfully');
       return true;
     } catch (error) {
-      console.error('[Content] Error showing reflection chatbox:', error);
       return false;
     }
   }
@@ -343,7 +320,7 @@ if (!window.timerExtensionInitialized) {
 
   // Function to test if the content script is working
   function testContentScript() {
-    console.log('[Content] Content script test function called');
+    
     // Create a test element to verify script is running
     const testElement = document.createElement('div');
     testElement.style.cssText = `
@@ -359,7 +336,6 @@ if (!window.timerExtensionInitialized) {
     testElement.textContent = 'Content Script Test - Click to show chatbox';
     testElement.addEventListener('click', () => showReflectionChatBox(0.5));
     document.body.appendChild(testElement);
-    console.log('[Content] Test element added to page');
     
     // Also try to show the chatbox directly
     showReflectionChatBox(0.5);
@@ -367,37 +343,30 @@ if (!window.timerExtensionInitialized) {
 
   // Listen for messages from the popup
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('[Content] Received message:', request);
     try {
       if (request.action === 'showReflectionChatBox') {
         const success = showReflectionChatBox(request.minutes);
-        console.log('[Content] Showing chatbox result:', success);
         sendResponse({ success: success });
         return true;
       } else if (request.action === 'testContentScript') {
         testContentScript();
-        console.log('[Content] Test function executed');
         sendResponse({ success: true });
         return true;
       } else if (request.action === 'updateVolume') {
         sfxVolume = request.volume;
-        console.log('[Content] Volume updated to:', sfxVolume);
         sendResponse({ success: true });
         return true;
       } else if (request.action === 'testSound') {
         sfxVolume = request.volume;
-        console.log('[Content] Testing sound with volume:', sfxVolume);
         playNotificationSound();
         sendResponse({ success: true });
         return true;
       } else if (request.action === 'themeChanged') {
-        console.log('[Content] Theme changed, isDark:', request.isDark);
         updateChatboxTheme(request.isDark);
         sendResponse({ success: true });
         return true;
       }
     } catch (error) {
-      console.error('[Content] Error handling message:', error);
       sendResponse({ success: false, error: error.message });
       return true;
     }
@@ -422,14 +391,12 @@ if (!window.timerExtensionInitialized) {
         if (textarea) {
           e.preventDefault(); // Prevent default Alt+Enter behavior
           textarea.focus();
-          console.log('[Content] Focused chatbox textarea via Alt+Enter hotkey');
         }
       }
     }
   });
 
   // Log that content script has finished loading
-  console.log('[Content] Timer extension content script initialization complete');
 }
 
 function handleSubmit(event) {
@@ -440,15 +407,12 @@ function handleSubmit(event) {
   const message = textArea.value.trim();
   if (!message) return;
 
-  console.log('Submitting reflection:', message);
-
   // Send message to background script to update Google Sheet
   chrome.runtime.sendMessage({
     action: 'updateGoogleSheet',
     message: message
   }, (response) => {
     if (response && response.success) {
-      console.log('Successfully wrote reflection to Google Sheet:', response);
       // Clear and close the chatbox
       textArea.value = '';
       const chatbox = document.querySelector('.reflection-chatbox');
@@ -456,7 +420,6 @@ function handleSubmit(event) {
         chatbox.remove();
       }
     } else {
-      console.error('Failed to write to Google Sheet:', response?.error || 'Unknown error');
       alert('Failed to save your reflection. Please try again.');
     }
   });
@@ -665,7 +628,6 @@ async function signJWT(input, privateKey) {
         .replace(/=+$/, '');
     } catch (decodeError) {
       console.error('Base64 decode error:', decodeError);
-      console.log('Attempted to decode key:', base64Key);
       throw new Error('Invalid private key format: ' + decodeError.message);
     }
   } catch (error) {
@@ -806,7 +768,6 @@ async function updateGoogleSheet(credentials, message) {
 
     // Find first empty cell position
     const targetCell = await findFirstEmptyCell(token, spreadsheetId);
-    console.log('Inserting at position:', targetCell);
     
     // Update cells in the target position
     const range = `${targetCell.timestampColumn}${targetCell.row}:${targetCell.messageColumn}${targetCell.row}`;
@@ -830,7 +791,6 @@ async function updateGoogleSheet(credentials, message) {
     }
 
     const data = await response.json();
-    console.log(`Cells ${range} updated successfully:`, data);
     return data;
   } catch (error) {
     console.error('Error updating Google Sheet:', error);

@@ -1,6 +1,5 @@
 // Listen for installation
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[Background] Extension installed');
   chrome.storage.local.get(['backgroundTimerState'], (result) => {
     if (result.backgroundTimerState) {
       const state = result.backgroundTimerState;
@@ -19,35 +18,29 @@ chrome.runtime.onInstalled.addListener(() => {
 // Function to inject content script
 async function injectContentScript(tabId) {
   try {
-    console.log('[Background] Attempting to inject content script into tab:', tabId);
     
     // Check if we can access the tab
     const tab = await chrome.tabs.get(tabId);
     if (!tab.url) {
-      console.log('[Background] Tab URL is undefined, skipping injection');
       return false;
     }
     
     if (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
-      console.log('[Background] Cannot inject into browser page:', tab.url);
       return false;
     }
 
     // Inject CSS
-    console.log('[Background] Injecting CSS...');
     await chrome.scripting.insertCSS({
       target: { tabId: tabId },
       files: ['styles.css']
     });
     
     // Inject JS
-    console.log('[Background] Injecting JS...');
     await chrome.scripting.executeScript({
       target: { tabId: tabId },
       files: ['content.js']
     });
     
-    console.log('[Background] Content script injected successfully');
     return true;
   } catch (error) {
     console.error('[Background] Error injecting content script:', error);
@@ -59,7 +52,6 @@ async function injectContentScript(tabId) {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // Only inject once the tab is complete and has a valid URL
   if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome://')) {
-    console.log('[Background] Tab updated, injecting content script:', tabId);
     injectContentScript(tabId).catch(console.error);
   }
 });
@@ -204,7 +196,6 @@ async function updateGoogleSheet(credentials, message) {
     }
 
     const data = await response.json();
-    console.log('Cell A1 updated successfully:', data);
     return data;
   } catch (error) {
     console.error('Error updating Google Sheet:', error);
@@ -219,6 +210,7 @@ let isRunning = false;
 let originalTime = null;
 let autoRestartEnabled = false;
 let chatboxShown = false; // Track if chatbox has been shown for current countdown
+let globalChatboxVisible = false; // Track if chatbox is currently visible in any tab
 
 // Function to update timer state
 function updateTimerState() {
@@ -227,7 +219,8 @@ function updateTimerState() {
       timeLeft,
       isRunning,
       originalTime,
-      autoRestartEnabled
+      autoRestartEnabled,
+      globalChatboxVisible
     }
   });
   
@@ -235,7 +228,8 @@ function updateTimerState() {
   chrome.runtime.sendMessage({
     action: 'timerUpdate',
     timeLeft,
-    isRunning
+    isRunning,
+    globalChatboxVisible
   });
 }
 
@@ -251,6 +245,7 @@ function startBackgroundTimer(initialTime, autoRestart = false) {
   originalTime = timeLeft;
   autoRestartEnabled = autoRestart;
   chatboxShown = false; // Reset chatbox flag when timer starts
+  globalChatboxVisible = false; // Reset global chatbox visibility
   
   if (!isRunning) {
     updateTimerState();
@@ -261,9 +256,10 @@ function startBackgroundTimer(initialTime, autoRestart = false) {
     if (timeLeft > 0) {
       timeLeft--;
       
-      // Show chatbox at 30 seconds if not already shown
-      if (timeLeft === 30 && !chatboxShown) {
+      // Show chatbox at 1 second if not already shown
+      if (timeLeft === 1 && !chatboxShown && !globalChatboxVisible) {
         chatboxShown = true;
+        globalChatboxVisible = true;
         // Send message to all tabs to show chatbox
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach(tab => {
@@ -288,10 +284,10 @@ function startBackgroundTimer(initialTime, autoRestart = false) {
       // Clear the current interval
       clearInterval(timer);
       timer = null;
+      globalChatboxVisible = false; // Reset global chatbox visibility
       
       if (autoRestartEnabled) {
         // If auto-restart is enabled, restart the timer with original time
-        console.log('[Background] Timer completed, auto-restarting with original time:', originalTime);
         
         // Play notification sound if available
         chrome.tabs.query({}, (tabs) => {
@@ -433,13 +429,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     updateAutoRestart(message.autoRestart);
     sendResponse({ success: true });
     return true;
+  } else if (message.action === 'updateChatboxState') {
+    globalChatboxVisible = message.isVisible;
+    // Broadcast the new state to all tabs
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        if (!tab.url.startsWith('chrome://')) {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'chatboxStateChanged',
+            isVisible: globalChatboxVisible
+          }).catch(() => {
+            // Ignore errors for tabs that don't have the content script
+          });
+        }
+      });
+    });
+    updateTimerState();
+    sendResponse({ success: true });
+    return true;
   }
 });
 
 // Handle alarm triggers
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'startTimer') {
-    console.log('[Background] Alarm triggered at:', new Date().toLocaleString());
     
     // Get the stored timer settings
     chrome.storage.local.get(['scheduledTimer', 'autoRestart', 'startAtTimeSettings'], (result) => {
