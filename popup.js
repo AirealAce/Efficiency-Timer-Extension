@@ -3,6 +3,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const EXPECTED_API_VERSION = 2;
   const MESSAGE_TIMEOUT_MS = 3000;
+  const DEFAULT_DURATION_SECONDS = 25 * 60;
   const elements = {
     hours: document.getElementById('hours'),
     minutes: document.getElementById('minutes'),
@@ -27,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let state = null;
   let inputsDirty = false;
+  let durationPresetUntouched = durationFromInputs() === DEFAULT_DURATION_SECONDS;
 
   function sendMessage(message) {
     return new Promise((resolve, reject) => {
@@ -147,11 +149,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function adoptState(nextState) {
+  function adoptState(nextState, { preserveInputs = false } = {}) {
     state = nextState;
-    inputsDirty = false;
-    if (state && state.durationSeconds) {
-      putDurationInInputs(state.durationSeconds);
+    if (!preserveInputs) {
+      inputsDirty = false;
+      if (state && state.durationSeconds) {
+        putDurationInInputs(state.durationSeconds);
+      }
+      durationPresetUntouched = durationFromInputs() === DEFAULT_DURATION_SECONDS;
     }
     elements.autoRestart.checked = Boolean(state && state.autoRestart);
     updateTimerDisplay();
@@ -179,10 +184,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => chrome.runtime.reload(), 250);
         return;
       }
-      adoptState(response.state);
-      if (!response.state.isRunning && response.state.remainingSeconds === response.state.durationSeconds && saved.timerValues) {
-        putDurationInInputs(TimerUtils.durationFromParts(saved.timerValues) || response.state.durationSeconds);
+      const preserveInputs = inputsDirty;
+      adoptState(response.state, { preserveInputs });
+      if (!preserveInputs && !response.state.isRunning && response.state.remainingSeconds === response.state.durationSeconds && saved.timerValues) {
+        const savedDuration = TimerUtils.durationFromParts(saved.timerValues) || response.state.durationSeconds;
+        putDurationInInputs(savedDuration);
         inputsDirty = durationFromInputs() !== response.state.durationSeconds;
+        durationPresetUntouched = savedDuration === DEFAULT_DURATION_SECONDS;
       }
       if (saved.sfxVolume !== undefined) {
         elements.volume.value = String(saved.sfxVolume);
@@ -205,6 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   [elements.hours, elements.minutes, elements.seconds].forEach((input) => {
     input.addEventListener('input', () => {
+      if (input === elements.hours && durationPresetUntouched) {
+        elements.minutes.value = '0';
+      }
+      durationPresetUntouched = false;
       inputsDirty = true;
       updateTimerDisplay();
     });

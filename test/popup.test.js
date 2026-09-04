@@ -108,6 +108,32 @@ test('popup immediately focuses and selects the hours field', async () => {
   assert.equal(harness.element('timerStatus').textContent, 'Ready');
 });
 
+test('typing hours clears the untouched 25-minute preset', async () => {
+  const harness = createHarness({
+    success: true,
+    apiVersion: 2,
+    state: {
+      isRunning: false,
+      durationSeconds: 1500,
+      remainingSeconds: 1500,
+      endTime: null,
+      autoRestart: false,
+      promptActive: false,
+      scheduledTimer: null
+    }
+  });
+
+  harness.element('hours').value = '1';
+  harness.element('hours').listeners.get('input')({});
+
+  assert.equal(harness.element('minutes').value, '0');
+  assert.equal(harness.element('display').textContent, '1:00:00');
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(harness.element('hours').value, '1');
+  assert.equal(harness.element('minutes').value, '0');
+});
+
 test('popup reloads the extension when an old service worker responds', async () => {
   const harness = createHarness({ isRunning: false, timeLeft: 1500 });
   await new Promise((resolve) => setTimeout(resolve, 300));
