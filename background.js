@@ -1,564 +1,539 @@
-// Listen for installation
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(['backgroundTimerState'], (result) => {
-    if (result.backgroundTimerState) {
-      const state = result.backgroundTimerState;
-      timeLeft = state.timeLeft;
-      isRunning = state.isRunning;
-      originalTime = state.originalTime;
-      autoRestartEnabled = state.autoRestartEnabled;
-      
-      if (isRunning) {
-        startBackgroundTimer(timeLeft, autoRestartEnabled);
-      }
+'use strict';
+
+importScripts('timer-utils.js');
+
+const TIMER_ALARM = 'reflectionTimerComplete';
+const SCHEDULE_ALARM = 'reflectionTimerScheduledStart';
+const TIMER_STATE_KEY = 'timerStateV2';
+const SCHEDULE_STATE_KEY = 'scheduledTimerV2';
+const DEFAULT_DURATION_SECONDS = 25 * 60;
+const MAX_REFLECTION_LENGTH = 5000;
+const REQUEST_TIMEOUT_MS = 20_000;
+const LEGACY_SECRET_KEYS = [
+  'GOOGLE_SHEETS_CLIENT_EMAIL',
+  'GOOGLE_SHEETS_PRIVATE_KEY',
+  'SPREADSHEET_ID'
+];
+
+let timerState = createDefaultTimerState();
+let scheduledTimer = null;
+const ready = initialize();
+
+function createDefaultTimerState() {
+  return {
+    isRunning: false,
+    durationSeconds: DEFAULT_DURATION_SECONDS,
+    remainingSeconds: DEFAULT_DURATION_SECONDS,
+    endTime: null,
+    autoRestart: false,
+    promptActive: false,
+    completedAt: null
+  };
+}
+
+function normalizeTimerState(value) {
+  const fallback = createDefaultTimerState();
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+
+  const durationSeconds = clampDuration(value.durationSeconds) || DEFAULT_DURATION_SECONDS;
+  const remainingSeconds = Math.min(
+    durationSeconds,
+    clampDuration(value.remainingSeconds ?? durationSeconds)
+  );
+  const endTime = Number(value.endTime);
+  const hasDeadline = Number.isFinite(endTime) && endTime > 0;
+
+  return {
+    isRunning: Boolean(value.isRunning && hasDeadline),
+    durationSeconds,
+    remainingSeconds,
+    endTime: value.isRunning && hasDeadline ? endTime : null,
+    autoRestart: Boolean(value.autoRestart),
+    promptActive: Boolean(value.promptActive),
+    completedAt: typeof value.completedAt === 'string' ? value.completedAt : null
+  };
+}
+
+function migrateLegacyTimerState(value, autoRestart) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const durationSeconds = clampDuration(value.originalTime ?? value.timeLeft) || DEFAULT_DURATION_SECONDS;
+  const remainingSeconds = Math.min(durationSeconds, clampDuration(value.timeLeft ?? durationSeconds));
+  return {
+    isRunning: Boolean(value.isRunning && remainingSeconds > 0),
+    durationSeconds,
+    remainingSeconds,
+    endTime: value.isRunning && remainingSeconds > 0 ? Date.now() + (remainingSeconds * 1000) : null,
+    autoRestart: Boolean(value.autoRestartEnabled ?? autoRestart),
+    promptActive: Boolean(value.globalChatboxVisible),
+    completedAt: null
+  };
+}
+
+function migrateLegacySchedule(value, scheduleState, autoRestart) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const targetTime = new Date(value.targetTime || (scheduleState && scheduleState.targetTime)).getTime();
+  const durationSeconds = typeof value.originalTime === 'object'
+    ? TimerUtils.durationFromParts(value.originalTime)
+    : clampDuration(value.durationSeconds);
+  if (!Number.isFinite(targetTime) || durationSeconds <= 0) {
+    return null;
+  }
+  return { targetTime, durationSeconds, autoRestart: Boolean(autoRestart) };
+}
+
+function clampDuration(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.min(parsed, TimerUtils.MAX_DURATION_SECONDS);
+}
+
+async function initialize() {
+  const stored = await chrome.storage.local.get([
+    TIMER_STATE_KEY,
+    SCHEDULE_STATE_KEY,
+    'backgroundTimerState',
+    'scheduledTimer',
+    'scheduledState',
+    'autoRestart',
+    'sheetUrl',
+    'sheetsLink'
+  ]);
+
+  timerState = stored[TIMER_STATE_KEY]
+    ? normalizeTimerState(stored[TIMER_STATE_KEY])
+    : (migrateLegacyTimerState(stored.backgroundTimerState, stored.autoRestart) || createDefaultTimerState());
+
+  scheduledTimer = stored[SCHEDULE_STATE_KEY]
+    || migrateLegacySchedule(stored.scheduledTimer, stored.scheduledState, stored.autoRestart);
+
+  if (!stored.sheetUrl && TimerUtils.extractSpreadsheetId(stored.sheetsLink)) {
+    await chrome.storage.local.set({ sheetUrl: stored.sheetsLink });
+  }
+
+  await chrome.storage.local.remove([
+    ...LEGACY_SECRET_KEYS,
+    'backgroundTimerState',
+    'scheduledTimer',
+    'scheduledState',
+    'sheetsLink'
+  ]);
+  await persistTimerState(false);
+
+  if (timerState.isRunning) {
+    if (TimerUtils.getRemainingSeconds(timerState) === 0) {
+      await completeTimer();
+    } else {
+      await chrome.alarms.create(TIMER_ALARM, { when: timerState.endTime });
     }
+  }
+
+  if (scheduledTimer) {
+    if (Number(scheduledTimer.targetTime) > Date.now()) {
+      await chrome.alarms.create(SCHEDULE_ALARM, { when: Number(scheduledTimer.targetTime) });
+      await chrome.storage.local.set({ [SCHEDULE_STATE_KEY]: scheduledTimer });
+    } else {
+      await startScheduledTimer();
+    }
+  }
+}
+
+function publicState() {
+  return {
+    ...timerState,
+    remainingSeconds: TimerUtils.getRemainingSeconds(timerState),
+    scheduledTimer
+  };
+}
+
+async function persistTimerState(shouldBroadcast = true) {
+  await chrome.storage.local.set({ [TIMER_STATE_KEY]: timerState });
+  if (shouldBroadcast) {
+    broadcastRuntimeMessage({ action: 'timerStateChanged', state: publicState() });
+  }
+}
+
+function broadcastRuntimeMessage(message) {
+  chrome.runtime.sendMessage(message, () => {
+    void chrome.runtime.lastError;
   });
-});
+}
 
-// Function to inject content script
-async function injectContentScript(tabId) {
-  try {
-    
-    // Check if we can access the tab
-    const tab = await chrome.tabs.get(tabId);
-    if (!tab.url) {
-      return false;
-    }
-    
-    if (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
-      return false;
-    }
+async function startTimer(durationSeconds, autoRestart, options = {}) {
+  const safeDuration = clampDuration(durationSeconds);
+  if (safeDuration <= 0) {
+    throw new Error('Choose a timer duration greater than zero.');
+  }
 
-    // Inject CSS
-    await chrome.scripting.insertCSS({
-      target: { tabId: tabId },
-      files: ['styles.css']
+  const fullDuration = clampDuration(options.fullDuration) || safeDuration;
+  const shouldDismissPrompt = timerState.promptActive && options.keepPrompt !== true;
+  timerState = {
+    ...timerState,
+    isRunning: true,
+    durationSeconds: fullDuration,
+    remainingSeconds: safeDuration,
+    endTime: Date.now() + (safeDuration * 1000),
+    autoRestart: Boolean(autoRestart),
+    promptActive: options.keepPrompt === true && timerState.promptActive,
+    completedAt: options.keepPrompt === true ? timerState.completedAt : null
+  };
+
+  await chrome.alarms.clear(TIMER_ALARM);
+  await chrome.alarms.create(TIMER_ALARM, { when: timerState.endTime });
+  await persistTimerState();
+  if (shouldDismissPrompt) {
+    await dismissPromptInAllTabs();
+  }
+  return publicState();
+}
+
+async function pauseTimer() {
+  if (timerState.isRunning) {
+    timerState.remainingSeconds = TimerUtils.getRemainingSeconds(timerState);
+  }
+  timerState.isRunning = false;
+  timerState.endTime = null;
+  await chrome.alarms.clear(TIMER_ALARM);
+  await persistTimerState();
+  return publicState();
+}
+
+async function resumeTimer(autoRestart) {
+  const remaining = TimerUtils.getRemainingSeconds(timerState);
+  if (remaining <= 0) {
+    throw new Error('There is no paused timer to resume.');
+  }
+  return startTimer(remaining, autoRestart, { fullDuration: timerState.durationSeconds });
+}
+
+async function resetTimer(durationSeconds) {
+  const replacementDuration = clampDuration(durationSeconds);
+  const duration = replacementDuration || timerState.durationSeconds || DEFAULT_DURATION_SECONDS;
+  timerState = {
+    ...timerState,
+    isRunning: false,
+    durationSeconds: duration,
+    remainingSeconds: duration,
+    endTime: null,
+    promptActive: false,
+    completedAt: null
+  };
+  await chrome.alarms.clear(TIMER_ALARM);
+  await persistTimerState();
+  await dismissPromptInAllTabs();
+  return publicState();
+}
+
+async function completeTimer() {
+  if (!timerState.isRunning) {
+    return publicState();
+  }
+
+  const durationSeconds = timerState.durationSeconds;
+  const autoRestart = timerState.autoRestart;
+  const completedAt = new Date().toISOString();
+
+  timerState = {
+    ...timerState,
+    isRunning: false,
+    remainingSeconds: 0,
+    endTime: null,
+    promptActive: true,
+    completedAt
+  };
+  await persistTimerState();
+
+  chrome.notifications.create(`reflection-${Date.now()}`, {
+    type: 'basic',
+    iconUrl: 'extension_icon_128.png',
+    title: 'Time is up',
+    message: 'How did you spend this session? Open a regular webpage if the reflection box is not visible.',
+    priority: 2
+  });
+  await showPromptInActiveTab();
+
+  if (autoRestart) {
+    await startTimer(durationSeconds, true, {
+      fullDuration: durationSeconds,
+      keepPrompt: true
     });
-    
-    // Inject JS
-    await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      files: ['content.js']
-    });
-    
-    return true;
-  } catch (error) {
-    console.error('[Background] Error injecting content script:', error);
-    return false;
   }
+  return publicState();
 }
 
-// Ensure content script is injected when needed
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // Only inject once the tab is complete and has a valid URL
-  if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome://')) {
-    injectContentScript(tabId).catch(console.error);
+async function scheduleTimer(targetTimeValue, durationSeconds, autoRestart) {
+  const targetTime = new Date(targetTimeValue).getTime();
+  const duration = clampDuration(durationSeconds);
+  if (!Number.isFinite(targetTime) || targetTime <= Date.now()) {
+    throw new Error('Choose a future start time.');
   }
-});
+  if (duration <= 0) {
+    throw new Error('Choose a timer duration greater than zero.');
+  }
 
-// Function to base64 encode string
-function base64UrlEncode(str) {
-  const base64 = btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
-    function toChar(match, p1) {
-      return String.fromCharCode('0x' + p1);
-    }));
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  scheduledTimer = { targetTime, durationSeconds: duration, autoRestart: Boolean(autoRestart) };
+  await chrome.storage.local.set({ [SCHEDULE_STATE_KEY]: scheduledTimer });
+  await chrome.alarms.clear(SCHEDULE_ALARM);
+  await chrome.alarms.create(SCHEDULE_ALARM, { when: targetTime });
+  broadcastRuntimeMessage({ action: 'timerStateChanged', state: publicState() });
+  return publicState();
 }
 
-// Function to get access token
-async function getAccessToken(clientEmail, privateKey) {
-  try {
-    const now = Math.floor(Date.now() / 1000);
-    const expiry = now + 3600; // Token valid for 1 hour
-
-    const header = {
-      alg: 'RS256',
-      typ: 'JWT'
-    };
-
-    const claim = {
-      iss: clientEmail,
-      scope: 'https://www.googleapis.com/auth/spreadsheets',
-      aud: 'https://oauth2.googleapis.com/token',
-      exp: expiry,
-      iat: now
-    };
-
-    // Create JWT
-    const headerBase64 = base64UrlEncode(JSON.stringify(header));
-    const claimBase64 = base64UrlEncode(JSON.stringify(claim));
-    const signatureInput = `${headerBase64}.${claimBase64}`;
-    
-    // Sign the JWT using the private key
-    const signature = await signJWT(signatureInput, privateKey);
-    const jwt = `${signatureInput}.${signature}`;
-
-    // Exchange JWT for access token
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion: jwt
-      })
-    });
-
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      throw new Error(`Token error! status: ${tokenResponse.status}, body: ${errorText}`);
-    }
-
-    const tokenData = await tokenResponse.json();
-    return tokenData.access_token;
-  } catch (error) {
-    console.error('Error getting access token:', error);
-    throw error;
-  }
+async function clearScheduledTimer() {
+  scheduledTimer = null;
+  await chrome.alarms.clear(SCHEDULE_ALARM);
+  await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
+  broadcastRuntimeMessage({ action: 'timerStateChanged', state: publicState() });
+  return publicState();
 }
 
-// Function to sign JWT
-async function signJWT(input, privateKey) {
-  try {
-    // Convert PEM private key to CryptoKey
-    const pemHeader = '-----BEGIN PRIVATE KEY-----';
-    const pemFooter = '-----END PRIVATE KEY-----';
-    const pemContents = privateKey
-      .replace(pemHeader, '')
-      .replace(pemFooter, '')
-      .replace(/\\n/g, '')
-      .trim();
-    
-    // Decode the base64 key properly
-    const binaryDer = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
-    
-    const cryptoKey = await crypto.subtle.importKey(
-      'pkcs8',
-      binaryDer,
-      {
-        name: 'RSASSA-PKCS1-v1_5',
-        hash: 'SHA-256'
-      },
-      false,
-      ['sign']
-    );
-
-    // Sign the input
-    const encoder = new TextEncoder();
-    const signatureBuffer = await crypto.subtle.sign(
-      'RSASSA-PKCS1-v1_5',
-      cryptoKey,
-      encoder.encode(input)
-    );
-
-    // Convert signature to base64url
-    return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-  } catch (error) {
-    console.error('Error signing JWT:', error);
-    throw error;
+async function startScheduledTimer() {
+  if (!scheduledTimer) {
+    return publicState();
   }
+  const pending = scheduledTimer;
+  await clearScheduledTimer();
+  const state = await startTimer(pending.durationSeconds, pending.autoRestart);
+  chrome.notifications.create(`scheduled-${Date.now()}`, {
+    type: 'basic',
+    iconUrl: 'extension_icon_128.png',
+    title: 'Timer started',
+    message: 'Your scheduled focus timer is now running.'
+  });
+  return state;
 }
 
-// Function to update Google Sheet
-async function updateGoogleSheet(credentials, message) {
-  try {
-    const { clientEmail, privateKey, spreadsheetId } = credentials;
-    
-    if (!clientEmail || !privateKey || !spreadsheetId) {
-      throw new Error('Missing required credentials');
-    }
-    
-    // Get access token
-    const token = await getAccessToken(clientEmail, privateKey);
-    
-    // Update cell A1 with the message
-    const response = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/A1?valueInputOption=RAW`,
-      {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          values: [[message]]
-        })
+async function getCurrentState() {
+  if (timerState.isRunning && TimerUtils.getRemainingSeconds(timerState) === 0) {
+    await completeTimer();
+  }
+  return publicState();
+}
+
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message });
+      } else {
+        resolve(response || { success: true });
       }
-    );
+    });
+  });
+}
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+async function findActiveSupportedTab() {
+  const focusedTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const focused = focusedTabs.find((tab) => tab.id && TimerUtils.isSupportedPageUrl(tab.url));
+  if (focused) {
+    return focused;
+  }
+  const activeTabs = await chrome.tabs.query({ active: true });
+  return activeTabs.find((tab) => tab.id && TimerUtils.isSupportedPageUrl(tab.url)) || null;
+}
+
+async function showPromptInActiveTab(isTest = false) {
+  const tab = await findActiveSupportedTab();
+  if (!tab) {
+    return { success: false, error: 'Open a normal webpage, then try again.' };
+  }
+  return sendTabMessage(tab.id, {
+    action: 'showReflectionPrompt',
+    isTest,
+    durationSeconds: timerState.durationSeconds,
+    completedAt: timerState.completedAt || new Date().toISOString()
+  });
+}
+
+async function dismissPromptInAllTabs() {
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(tabs
+    .filter((tab) => tab.id && TimerUtils.isSupportedPageUrl(tab.url))
+    .map((tab) => sendTabMessage(tab.id, { action: 'dismissReflectionPrompt' })));
+}
+
+async function dismissReflection() {
+  timerState.promptActive = false;
+  timerState.completedAt = null;
+  await persistTimerState();
+  await dismissPromptInAllTabs();
+  return { success: true };
+}
+
+async function callSheetsWebApp(action, extra = {}) {
+  const config = await chrome.storage.local.get(['sheetUrl', 'webAppUrl', 'apiToken', 'sheetName']);
+  const sheetUrl = String(config.sheetUrl || '').trim();
+  const webAppUrl = String(config.webAppUrl || '').trim();
+  const apiToken = String(config.apiToken || '').trim();
+  const sheetName = String(config.sheetName || 'Template').trim();
+
+  if (!TimerUtils.extractSpreadsheetId(sheetUrl)) {
+    throw new Error('Set a valid Google Sheets URL in the extension settings.');
+  }
+  if (!TimerUtils.isValidWebAppUrl(webAppUrl)) {
+    throw new Error('Set a deployed Google Apps Script /exec URL in the extension settings.');
+  }
+  if (!apiToken) {
+    throw new Error('Set the API token in the extension settings.');
+  }
+  if (!sheetName) {
+    throw new Error('Set a target sheet tab name.');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(webAppUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action,
+        token: apiToken,
+        sheetUrl,
+        sheetName,
+        ...extra
+      }),
+      cache: 'no-store',
+      redirect: 'follow',
+      signal: controller.signal
+    });
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error('The Apps Script returned an invalid response. Redeploy the latest script version.');
     }
-
-    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || `Google Apps Script request failed (${response.status}).`);
+    }
     return data;
   } catch (error) {
-    console.error('Error updating Google Sheet:', error);
+    if (error && error.name === 'AbortError') {
+      throw new Error('The Google Sheets request timed out.');
+    }
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
-// Timer state
-let timer = null;
-let timeLeft = 0;
-let isRunning = false;
-let originalTime = null;
-let autoRestartEnabled = false;
-let chatboxShown = false; // Track if chatbox has been shown for current countdown
-let globalChatboxVisible = false; // Track if chatbox is currently visible in any tab
+async function saveReflection(message) {
+  const cleanMessage = String(message || '').trim();
+  if (!cleanMessage) {
+    throw new Error('Write a reflection before submitting.');
+  }
+  if (cleanMessage.length > MAX_REFLECTION_LENGTH) {
+    throw new Error(`Keep the reflection under ${MAX_REFLECTION_LENGTH.toLocaleString()} characters.`);
+  }
 
-// Function to update timer state
-function updateTimerState() {
-  chrome.storage.local.set({
-    backgroundTimerState: {
-      timeLeft,
-      isRunning,
-      originalTime,
-      autoRestartEnabled,
-      globalChatboxVisible
-    }
+  const result = await callSheetsWebApp('appendReflection', {
+    message: cleanMessage,
+    submittedAt: new Date().toISOString(),
+    durationSeconds: timerState.durationSeconds,
+    timezoneOffsetMinutes: new Date().getTimezoneOffset()
   });
-  
-  // Broadcast timer update to any open popups
-  chrome.runtime.sendMessage({
-    action: 'timerUpdate',
-    timeLeft,
-    isRunning,
-    globalChatboxVisible
-  });
+  await dismissReflection();
+  return result;
 }
 
-// Function to start timer
-function startBackgroundTimer(initialTime, autoRestart = false) {
-  if (timer) {
-    clearInterval(timer);
-  }
-  
-  // Ensure initialTime is a number and greater than 0
-  timeLeft = Math.max(0, parseInt(initialTime) || 0);
-  isRunning = timeLeft > 0;
-  originalTime = timeLeft;
-  autoRestartEnabled = autoRestart;
-  chatboxShown = false; // Reset chatbox flag when timer starts
-  globalChatboxVisible = false; // Reset global chatbox visibility
-  
-  if (!isRunning) {
-    updateTimerState();
-    return;
-  }
-  
-  timer = setInterval(() => {
-    if (timeLeft > 0) {
-      timeLeft--;
-      
-      // Show chatbox at 1 second if not already shown
-      if (timeLeft === 1 && !chatboxShown && !globalChatboxVisible) {
-        chatboxShown = true;
-        globalChatboxVisible = true;
-        // Send message to all tabs to show chatbox
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach(tab => {
-            if (!tab.url.startsWith('chrome://')) {
-              chrome.tabs.sendMessage(tab.id, {
-                action: 'showReflectionChatBox',
-                minutes: 0.5,
-                timeLeft: timeLeft
-              }).catch(() => {
-                // Ignore errors for tabs that don't have the content script
-              });
-            }
-          });
-        });
-      }
-      
-      updateTimerState();
-    }
-    
-    // When timer reaches 0
-    if (timeLeft === 0) {
-      // Clear the current interval
-      clearInterval(timer);
-      timer = null;
-      globalChatboxVisible = false; // Reset global chatbox visibility
-      
-      if (autoRestartEnabled) {
-        // If auto-restart is enabled, restart the timer with original time
-        
-        // Play notification sound if available
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach(tab => {
-            if (!tab.url.startsWith('chrome://')) {
-              chrome.tabs.sendMessage(tab.id, {
-                action: 'playTimerComplete'
-              }).catch(() => {
-                // Ignore errors for tabs that don't have the content script
-              });
-            }
-          });
-        });
-        
-        // Start a new timer with the original time
-        startBackgroundTimer(originalTime, autoRestartEnabled);
-      } else {
-        // If auto-restart is disabled, stop the timer
-        stopBackgroundTimer();
-        timeLeft = originalTime;
-        updateTimerState();
-      }
-    }
-  }, 1000);
-  
-  updateTimerState();
-}
-
-// Function to update auto-restart setting without restarting timer
-function updateAutoRestart(enabled) {
-  autoRestartEnabled = enabled;
-  updateTimerState();
-}
-
-// Function to stop timer
-function stopBackgroundTimer() {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-  isRunning = false;
-  updateTimerState();
-}
-
-// Function to reset timer
-function resetBackgroundTimer() {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-  timeLeft = originalTime || 0;
-  isRunning = false;
-  updateTimerState();
-}
-
-// Listen for messages from content script or popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'updateGoogleSheet') {
-    // Get credentials from storage
-    chrome.storage.local.get([
-      'GOOGLE_SHEETS_CLIENT_EMAIL',
-      'GOOGLE_SHEETS_PRIVATE_KEY',
-      'SPREADSHEET_ID'
-    ], async (result) => {
-      try {
-        // Check if credentials exist
-        if (!result.GOOGLE_SHEETS_CLIENT_EMAIL || !result.GOOGLE_SHEETS_PRIVATE_KEY || !result.SPREADSHEET_ID) {
-          throw new Error('Missing Google Sheets credentials. Please check the extension settings.');
-        }
-
-        const data = await updateGoogleSheet({
-          clientEmail: result.GOOGLE_SHEETS_CLIENT_EMAIL,
-          privateKey: result.GOOGLE_SHEETS_PRIVATE_KEY,
-          spreadsheetId: result.SPREADSHEET_ID
-        }, message.message);
-
-        sendResponse({ success: true, data: data });
-      } catch (error) {
-        console.error('Error updating Google Sheet:', error);
-        sendResponse({ success: false, error: error.message });
-      }
-    });
-    return true; // Keep the message channel open for async response
-  } else if (message.action === 'injectContentScript') {
-    // Handle the injection
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (tabs[0] && !tabs[0].url.startsWith('chrome://')) {
-        try {
-          await injectContentScript(tabs[0].id);
-          sendResponse({ success: true });
-        } catch (error) {
-          console.error('[Background] Error during injection:', error);
-          sendResponse({ success: false, error: error.message });
-        }
-      } else {
-        console.error('[Background] No valid active tab found');
-        sendResponse({ success: false, error: 'No valid active tab found' });
-      }
-    });
-    return true; // Keep the message channel open for async response
-  } else if (message.action === 'scheduleTimer') {
-    // Handle timer scheduling
-    const targetTime = new Date(message.targetTime);
-    chrome.alarms.create('startTimer', { when: targetTime.getTime() });
-    chrome.storage.local.set({
-      scheduledTimer: {
-        targetTime: targetTime.toISOString(),
-        originalTime: message.originalTime
-      }
-    });
-    sendResponse({ success: true });
-    return true;
-  } else if (message.action === 'clearScheduledTimer') {
-    chrome.alarms.clearAll();
-    chrome.storage.local.remove('scheduledTimer');
-    sendResponse({ success: true });
-    return true;
-  } else if (message.action === 'startTimer') {
-    startBackgroundTimer(message.timeLeft, message.autoRestart);
-    sendResponse({ success: true });
-    return true;
-  } else if (message.action === 'stopTimer') {
-    stopBackgroundTimer();
-    sendResponse({ success: true });
-    return true;
-  } else if (message.action === 'resetTimer') {
-    resetBackgroundTimer();
-    sendResponse({ success: true });
-    return true;
-  } else if (message.action === 'getTimerState') {
-    sendResponse({
-      timeLeft,
-      isRunning,
-      originalTime,
-      autoRestartEnabled
-    });
-    return true;
-  } else if (message.action === 'updateAutoRestart') {
-    updateAutoRestart(message.autoRestart);
-    sendResponse({ success: true });
-    return true;
-  } else if (message.action === 'updateChatboxState') {
-    globalChatboxVisible = message.isVisible;
-    // Broadcast the new state to all tabs
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach(tab => {
-        if (!tab.url.startsWith('chrome://')) {
-          chrome.tabs.sendMessage(tab.id, {
-            action: 'chatboxStateChanged',
-            isVisible: globalChatboxVisible
-          }).catch(() => {
-            // Ignore errors for tabs that don't have the content script
+  (async () => {
+    await ready;
+    switch (message && message.action) {
+      case 'getTimerState':
+        return { success: true, state: await getCurrentState() };
+      case 'startTimer':
+        return { success: true, state: await startTimer(message.durationSeconds, message.autoRestart) };
+      case 'pauseTimer':
+      case 'stopTimer':
+        return { success: true, state: await pauseTimer() };
+      case 'resumeTimer':
+        return { success: true, state: await resumeTimer(message.autoRestart) };
+      case 'resetTimer':
+        return { success: true, state: await resetTimer(message.durationSeconds) };
+      case 'updateAutoRestart':
+        timerState.autoRestart = Boolean(message.autoRestart);
+        await persistTimerState();
+        return { success: true, state: publicState() };
+      case 'scheduleTimer':
+        return {
+          success: true,
+          state: await scheduleTimer(message.targetTime, message.durationSeconds, message.autoRestart)
+        };
+      case 'clearScheduledTimer':
+        return { success: true, state: await clearScheduledTimer() };
+      case 'showTestPrompt':
+        return showPromptInActiveTab(true);
+      case 'contentReady':
+        if (timerState.promptActive && sender.tab && sender.tab.active && sender.tab.id) {
+          return sendTabMessage(sender.tab.id, {
+            action: 'showReflectionPrompt',
+            isTest: false,
+            durationSeconds: timerState.durationSeconds,
+            completedAt: timerState.completedAt
           });
         }
-      });
-    });
-    updateTimerState();
-    sendResponse({ success: true });
-    return true;
-  }
+        return { success: true };
+      case 'dismissReflection':
+      case 'updateChatboxState':
+        return dismissReflection();
+      case 'saveReflection':
+      case 'updateGoogleSheet':
+        return { success: true, data: await saveReflection(message.message) };
+      case 'testSheetsConnection':
+        return { success: true, data: await callSheetsWebApp('ping') };
+      default:
+        throw new Error('Unknown extension action.');
+    }
+  })().then(sendResponse).catch((error) => {
+    console.error('[Reflection Timer]', error);
+    sendResponse({ success: false, error: error.message || 'Unexpected extension error.' });
+  });
+  return true;
 });
 
-// Handle alarm triggers
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'startTimer') {
-    
-    // Get the stored timer settings
-    chrome.storage.local.get(['scheduledTimer', 'autoRestart', 'startAtTimeSettings'], (result) => {
-      if (result.scheduledTimer) {
-        const { originalTime } = result.scheduledTimer;
-        
-        // Calculate total seconds from original time
-        const totalSeconds = 
-          (parseInt(originalTime.hours) || 0) * 3600 + 
-          (parseInt(originalTime.minutes) || 0) * 60 + 
-          (parseInt(originalTime.seconds) || 0);
-        
-        // Start the timer directly in the background with auto-restart setting
-        startBackgroundTimer(totalSeconds, result.autoRestart || false);
-        
-        // Update storage to reflect that the scheduled timer has started and uncheck the checkbox
-        chrome.storage.local.remove(['scheduledTimer', 'scheduledState']);
-        
-        // Uncheck the "Start at This Time" checkbox by updating its settings
-        if (result.startAtTimeSettings) {
-          const updatedSettings = {
-            ...result.startAtTimeSettings,
-            enabled: false
-          };
-          chrome.storage.local.set({ startAtTimeSettings: updatedSettings });
-        }
-        
-        // Show a notification that the timer has started
-        chrome.notifications.create('timerStarted', {
-          type: 'basic',
-          iconUrl: 'icon48.png',
-          title: 'Timer Started',
-          message: `Your scheduled timer has started!`
-        });
-        
-        // Update any open popups
-        chrome.runtime.sendMessage({
-          action: 'startScheduledTimer',
-          originalTime: originalTime
-        });
+  ready.then(async () => {
+    if (alarm.name === TIMER_ALARM) {
+      await completeTimer();
+    } else if (alarm.name === SCHEDULE_ALARM) {
+      await startScheduledTimer();
+    }
+  }).catch((error) => console.error('[Reflection Timer] Alarm failed:', error));
+});
+
+chrome.tabs.onActivated.addListener(() => {
+  ready.then(() => {
+    if (timerState.promptActive) {
+      return showPromptInActiveTab();
+    }
+    return null;
+  }).catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.active) {
+    ready.then(() => {
+      if (timerState.promptActive) {
+        return showPromptInActiveTab();
       }
-    });
+      return null;
+    }).catch(() => {});
   }
 });
 
-// Initialize timer state when extension loads
-chrome.runtime.onStartup.addListener(() => {
-  // Check for both background timer state and scheduled timer
-  chrome.storage.local.get(['backgroundTimerState', 'scheduledTimer', 'scheduledState'], (result) => {
-    // First check for scheduled timer
-    if (result.scheduledTimer && result.scheduledState) {
-      const targetTime = new Date(result.scheduledState.targetTime);
-      const now = new Date();
-      
-      if (targetTime > now) {
-        // Re-create the alarm if the scheduled time hasn't passed
-        chrome.alarms.create('startTimer', { when: targetTime.getTime() });
-      } else {
-        // Clean up if the scheduled time has passed
-        chrome.storage.local.remove(['scheduledTimer', 'scheduledState']);
-      }
-    }
-    
-    // Then check for running timer state
-    if (result.backgroundTimerState) {
-      const state = result.backgroundTimerState;
-      timeLeft = state.timeLeft;
-      isRunning = state.isRunning;
-      originalTime = state.originalTime;
-      autoRestartEnabled = state.autoRestartEnabled;
-      
-      if (isRunning) {
-        startBackgroundTimer(timeLeft, autoRestartEnabled);
-      }
-    }
-  });
+chrome.notifications.onClicked.addListener(() => {
+  ready.then(() => showPromptInActiveTab()).catch(() => {});
 });
 
-// Also check timer state when installed
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(['backgroundTimerState', 'scheduledTimer', 'scheduledState'], (result) => {
-    // First check for scheduled timer
-    if (result.scheduledTimer && result.scheduledState) {
-      const targetTime = new Date(result.scheduledState.targetTime);
-      const now = new Date();
-      
-      if (targetTime > now) {
-        // Re-create the alarm if the scheduled time hasn't passed
-        chrome.alarms.create('startTimer', { when: targetTime.getTime() });
-      } else {
-        // Clean up if the scheduled time has passed
-        chrome.storage.local.remove(['scheduledTimer', 'scheduledState']);
-      }
-    }
-    
-    // Then check for running timer state
-    if (result.backgroundTimerState) {
-      const state = result.backgroundTimerState;
-      timeLeft = state.timeLeft;
-      isRunning = state.isRunning;
-      originalTime = state.originalTime;
-      autoRestartEnabled = state.autoRestartEnabled;
-      
-      if (isRunning) {
-        startBackgroundTimer(timeLeft, autoRestartEnabled);
-      }
-    }
-  });
-}); 
+  chrome.storage.local.remove(LEGACY_SECRET_KEYS);
+});

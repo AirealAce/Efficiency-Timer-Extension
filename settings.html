@@ -1,90 +1,64 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>Timer Extension Settings</title>
-  <style>
-    body {
-      width: 500px;
-      padding: 20px;
-      font-family: Arial, sans-serif;
-    }
-    
-    .container {
-      display: flex;
-      flex-direction: column;
-      gap: 15px;
-    }
-    
-    .input-group {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    
-    label {
-      font-weight: bold;
-    }
-    
-    input {
-      padding: 8px;
-      border-radius: 4px;
-      border: 1px solid #ddd;
-    }
-    
-    button {
-      padding: 10px;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    
-    button:hover {
-      opacity: 0.9;
-    }
-    
-    .status {
-      padding: 10px;
-      border-radius: 4px;
-      display: none;
-    }
-    
-    .success {
-      background-color: #dff0d8;
-      color: #3c763d;
-    }
-    
-    .error {
-      background-color: #f2dede;
-      color: #a94442;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reflection Timer Settings</title>
+  <link rel="stylesheet" href="settings.css">
 </head>
 <body>
-  <div class="container">
-    <h2>Google Sheets Settings</h2>
-    
-    <div class="input-group">
-      <label for="clientEmail">Service Account Email:</label>
-      <input type="text" id="clientEmail" placeholder="Enter your service account email">
-    </div>
-    
-    <div class="input-group">
-      <label for="privateKey">Private Key:</label>
-      <textarea id="privateKey" rows="5" placeholder="Enter your private key"></textarea>
-    </div>
-    
-    <div class="input-group">
-      <label for="spreadsheetId">Spreadsheet ID:</label>
-      <input type="text" id="spreadsheetId" placeholder="Enter your spreadsheet ID">
-    </div>
-    
-    <button id="saveSettings">Save Settings</button>
-    
-    <div id="status" class="status"></div>
-  </div>
-  
+  <main class="page">
+    <header>
+      <p class="eyebrow">Reflection Timer</p>
+      <h1>Google Sheets connection</h1>
+      <p class="lede">Responses go through your Google Apps Script web app. The extension never stores a Google service-account private key.</p>
+    </header>
+
+    <section class="card" aria-labelledby="connection-heading">
+      <h2 id="connection-heading">Connection</h2>
+      <form id="settingsForm">
+        <label for="sheetUrl">Google Sheet URL</label>
+        <input id="sheetUrl" name="sheetUrl" type="url" autocomplete="off" required>
+        <p class="hint">The configured Apps Script will only accept this spreadsheet ID.</p>
+
+        <label for="sheetName">Target tab</label>
+        <input id="sheetName" name="sheetName" type="text" maxlength="100" value="Template" required>
+        <p class="hint">Entries fill 16 rows in each timestamp/activity pair, matching the existing sheet layout.</p>
+
+        <label for="webAppUrl">Apps Script deployment URL</label>
+        <input id="webAppUrl" name="webAppUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" required>
+        <p class="hint">Use the deployed <code>/exec</code> URL, not the editor or <code>/dev</code> URL.</p>
+
+        <label for="apiToken">Reflection API token</label>
+        <div class="input-actions">
+          <input id="apiToken" name="apiToken" type="password" autocomplete="new-password" required>
+          <button id="toggleToken" class="small-button" type="button">Show</button>
+          <button id="generateToken" class="small-button" type="button">Generate</button>
+        </div>
+        <p class="hint">Use the same value for the Apps Script property <code>REFLECTION_API_TOKEN</code>.</p>
+
+        <div class="actions">
+          <button id="save" class="primary" type="submit">Save settings</button>
+          <button id="test" class="secondary" type="button">Save &amp; test</button>
+        </div>
+      </form>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card setup" aria-labelledby="setup-heading">
+      <h2 id="setup-heading">One-time Apps Script setup</h2>
+      <ol>
+        <li>Open the Sheet and select <strong>Extensions → Apps Script</strong>.</li>
+        <li>Replace the editor contents with <code>google-sheets-script.gs</code> from this extension folder.</li>
+        <li>In Apps Script <strong>Project Settings → Script properties</strong>, add <code>SPREADSHEET_ID</code> and <code>REFLECTION_API_TOKEN</code>.</li>
+        <li>Deploy as a web app that executes as you and allows anyone to access it. The token protects writes.</li>
+        <li>Paste the resulting <code>/exec</code> URL above, save, and test.</li>
+      </ol>
+      <p class="hint">After changing the Apps Script code, create a new deployment version for the changes to take effect.</p>
+    </section>
+  </main>
+
+  <script src="timer-utils.js"></script>
   <script src="settings.js"></script>
 </body>
-</html> 
+</html>

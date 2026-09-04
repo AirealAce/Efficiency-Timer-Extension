@@ -1,602 +1,324 @@
-let timer;
-let timeLeft;
-let isRunning = false;
+'use strict';
 
-// Initialize all UI elements
-const startStopBtn = document.getElementById('startStop');
-const resetBtn = document.getElementById('reset');
-const hoursInput = document.getElementById('hours');
-const minutesInput = document.getElementById('minutes');
-const secondsInput = document.getElementById('seconds');
-const display = document.getElementById('display');
-const autoRestartCheck = document.getElementById('autoRestart');
-const darkModeToggle = document.getElementById('darkModeToggle');
-const volumeSlider = document.getElementById('volumeSlider');
-const sunIcon = darkModeToggle.querySelector('.sun-icon');
-const moonIcon = darkModeToggle.querySelector('.moon-icon');
-const startAtTimeCheck = document.getElementById('startAtTime');
-const startTimeInput = document.getElementById('startTime');
-const currentTimeDisplay = document.getElementById('currentTime');
-const sheetsLinkInput = document.getElementById('sheetsLink');
-const webAppUrlInput = document.getElementById('webAppUrl');
-const openSettingsBtn = document.getElementById('openSettings');
-const testChatboxBtn = document.getElementById('testChatbox');
-
-// Set icon URLs
-moonIcon.src = chrome.runtime.getURL('half_moon.webp');
-sunIcon.src = chrome.runtime.getURL('sun-emoji-2048x2048-1je5hwoj.png');
-
-// Function to update current time display
-function updateCurrentTime() {
-  const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  currentTimeDisplay.textContent = `${hours}:${minutes}:${seconds}`;
-}
-
-// Update current time immediately and then every second
-updateCurrentTime();
-setInterval(updateCurrentTime, 1000);
-
-// Initialize timeLeft
-timeLeft = calculateTotalSeconds();
-
-// Load saved values
-chrome.storage.local.get(['timerValues', 'sfxVolume', 'startAtTimeSettings', 'sheetsLink', 'webAppUrl', 'autoRestart'], (result) => {
-  // Restore volume
-  const volume = result.sfxVolume ?? 50;
-  volumeSlider.value = volume;
-  
-  // Restore auto-restart setting
-  if (result.autoRestart !== undefined) {
-    autoRestartCheck.checked = result.autoRestart;
-  }
-  
-  // Add volume slider change handler
-  volumeSlider.addEventListener('input', () => {
-    const volume = volumeSlider.value;
-    chrome.storage.local.set({ sfxVolume: volume });
-    
-    // Send volume update to all tabs
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, {
-          action: 'updateVolume',
-          volume: volume / 100
-        }).catch(() => {
-          // Ignore errors for tabs that don't have the content script
-        });
-      });
-    });
-  });
-
-  // Add volume slider release handler for test sound
-  volumeSlider.addEventListener('change', () => {
-    // Get the current active tab
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'testSound',
-          volume: volumeSlider.value / 100
-        }).catch(() => {
-          // Ignore errors if content script is not loaded
-        });
-      }
-    });
-  });
-  
-  // Restore timer values
-  if (result.timerValues) {
-    hoursInput.value = result.timerValues.hours || '';
-    minutesInput.value = result.timerValues.minutes || '';
-    secondsInput.value = result.timerValues.seconds || '';
-    timeLeft = calculateTotalSeconds();
-    updateDisplay();
-  } else {
-    // Set default values if no saved values
-    minutesInput.value = '25';
-    timeLeft = 25 * 60;
-    updateDisplay();
-  }
-
-  // Restore start at time settings
-  if (result.startAtTimeSettings) {
-    startAtTimeCheck.checked = result.startAtTimeSettings.enabled;
-    startTimeInput.value = result.startAtTimeSettings.time;
-    startTimeInput.disabled = !result.startAtTimeSettings.enabled;
-  }
-
-  // Restore sheets link
-  if (result.sheetsLink) {
-    sheetsLinkInput.value = result.sheetsLink;
-  }
-
-  // Restore web app URL
-  if (result.webAppUrl) {
-    webAppUrlInput.value = result.webAppUrl;
-  }
-});
-
-// Save timer values when changed
-function saveTimerValues() {
-  const values = {
-    hours: hoursInput.value || 0,
-    minutes: minutesInput.value || 0,
-    seconds: secondsInput.value || 0
+document.addEventListener('DOMContentLoaded', () => {
+  const elements = {
+    hours: document.getElementById('hours'),
+    minutes: document.getElementById('minutes'),
+    seconds: document.getElementById('seconds'),
+    display: document.getElementById('display'),
+    timerStatus: document.getElementById('timerStatus'),
+    startPause: document.getElementById('startPause'),
+    reset: document.getElementById('reset'),
+    autoRestart: document.getElementById('autoRestart'),
+    volume: document.getElementById('volume'),
+    volumeValue: document.getElementById('volumeValue'),
+    startTime: document.getElementById('startTime'),
+    schedule: document.getElementById('schedule'),
+    cancelSchedule: document.getElementById('cancelSchedule'),
+    scheduleStatus: document.getElementById('scheduleStatus'),
+    schedulePanel: document.getElementById('schedulePanel'),
+    openSettings: document.getElementById('openSettings'),
+    testPrompt: document.getElementById('testPrompt'),
+    currentTime: document.getElementById('currentTime'),
+    status: document.getElementById('status')
   };
-  chrome.storage.local.set({ timerValues: values });
-}
 
-// Save sheets link when changed
-if (sheetsLinkInput) {
-  sheetsLinkInput.addEventListener('change', () => {
-    const link = sheetsLinkInput.value.trim();
-    chrome.storage.local.set({ sheetsLink: link }, () => {
-    });
-  });
+  let state = null;
+  let inputsDirty = false;
 
-  // Also save on input to handle paste events
-  sheetsLinkInput.addEventListener('input', () => {
-    const link = sheetsLinkInput.value.trim();
-    chrome.storage.local.set({ sheetsLink: link }, () => {
-    });
-  });
-}
-
-// Save web app URL when changed
-if (webAppUrlInput) {
-  webAppUrlInput.addEventListener('change', () => {
-    const url = webAppUrlInput.value.trim();
-    chrome.storage.local.set({ webAppUrl: url }, () => {
-    });
-  });
-
-  // Also save on input to handle paste events
-  webAppUrlInput.addEventListener('input', () => {
-    const url = webAppUrlInput.value.trim();
-    chrome.storage.local.set({ webAppUrl: url }, () => {
-    });
-  });
-}
-
-// Timer controls
-startStopBtn.addEventListener('click', () => {
-  if (startAtTimeCheck.checked) {
-    if (startStopBtn.textContent === 'Set') {
-      checkStartTime();
-      return;
-    } else if (startStopBtn.textContent === 'Change') {
-      // Allow changing the scheduled time
-      startStopBtn.textContent = 'Set';
-      startStopBtn.disabled = false;
-      return;
-    } else if (startStopBtn.textContent === 'Scheduled') {
-      // Clear the scheduled timer if user wants to change it
-      chrome.runtime.sendMessage({ action: 'clearScheduledTimer' });
-      chrome.storage.local.remove('scheduledState');
-      startStopBtn.textContent = 'Set';
-      startStopBtn.disabled = false;
-      return;
-    }
-  }
-  
-  if (isRunning) {
-    stopTimer();
-  } else {
-    startTimer();
-  }
-});
-
-resetBtn.addEventListener('click', resetTimer);
-
-// Update display when time inputs change
-[hoursInput, minutesInput, secondsInput].forEach((input, index) => {
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (e.ctrlKey) {
-        // If Ctrl+Enter is pressed, start/stop timer immediately
-        input.blur();
-        if (isRunning) {
-          stopTimer();
-        } else {
-          startTimer();
-        }
-      } else if (index < 2) {
-        // If not on the last input, move to next input
-        [hoursInput, minutesInput, secondsInput][index + 1].focus();
-      } else {
-        // On the last input (seconds), start the timer
-        input.blur();
-        if (!isRunning) {
-          startTimer();
-        }
-      }
-    }
-  });
-  
-  input.addEventListener('change', () => {
-    if (input.value < 0) input.value = 0;
-    timeLeft = calculateTotalSeconds();
-    updateDisplay();
-    saveTimerValues();
-  });
-  
-  // Add input event listener to update display in real-time
-  input.addEventListener('input', () => {
-    timeLeft = calculateTotalSeconds();
-    updateDisplay();
-  });
-});
-
-function calculateTotalSeconds() {
-  const hours = parseInt(hoursInput.value) || 0;
-  const minutes = parseInt(minutesInput.value) || 0;
-  const seconds = parseInt(secondsInput.value) || 0;
-  return (hours * 3600) + (minutes * 60) + seconds;
-}
-
-function startTimer() {
-  // Recalculate timeLeft from current input values
-  timeLeft = calculateTotalSeconds();
-  
-  if (timeLeft <= 0) return;
-  
-  // Check if we should wait for start time
-  if (startAtTimeCheck.checked && startTimeInput.value) {
-    checkStartTime();
-    return;
-  }
-  
-  // Save current timer values before starting
-  saveTimerValues();
-  
-  chrome.runtime.sendMessage({
-    action: 'startTimer',
-    timeLeft: timeLeft,
-    autoRestart: autoRestartCheck.checked
-  }, (response) => {
-    if (response && response.success) {
-      isRunning = true;
-      startStopBtn.textContent = 'Stop';
-    }
-  });
-}
-
-// Function to show chatbox in active tab
-async function showChatboxInActiveTab() {
-  try {
-    const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-    if (!tabs || !tabs[0]) {
-      return false;
-    }
-    
-    // Single attempt with promise
-    return new Promise((resolve) => {
-      chrome.tabs.sendMessage(tabs[0].id, {
-        action: 'showReflectionChatBox',
-        minutes: 0.5, // 30 seconds = 0.5 minutes
-        timeLeft: timeLeft,
-        sheetsLink: sheetsLinkInput.value // Add sheets link to the message
-      }, (response) => {
+  function sendMessage(message) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
-          resolve(false);
-        } else if (!response || !response.success) {
-          resolve(false);
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (!response || response.success === false) {
+          reject(new Error((response && response.error) || 'The extension did not respond.'));
         } else {
-          resolve(true);
+          resolve(response);
         }
       });
     });
-  } catch (error) {
-    return false;
   }
-}
 
-function stopTimer() {
-  chrome.runtime.sendMessage({ action: 'stopTimer' }, (response) => {
-    if (response && response.success) {
-      isRunning = false;
-      startStopBtn.textContent = startAtTimeCheck.checked ? 'Set' : 'Start';
-    }
-  });
-  
-  // Clear any scheduled timer in the background
-  chrome.runtime.sendMessage({ action: 'clearScheduledTimer' });
-  startStopBtn.disabled = false;
-}
-
-function resetTimer() {
-  chrome.runtime.sendMessage({ action: 'resetTimer' }, (response) => {
-    if (response && response.success) {
-      timeLeft = calculateTotalSeconds();
-      isRunning = false;
-      updateDisplay();
-      startStopBtn.textContent = startAtTimeCheck.checked ? 'Set' : 'Start';
-    }
-  });
-}
-
-function updateDisplay() {
-  const hours = Math.floor(timeLeft / 3600);
-  const minutes = Math.floor((timeLeft % 3600) / 60);
-  const seconds = timeLeft % 60;
-  
-  const displayStr = [
-    hours > 0 ? hours.toString() : '',
-    minutes.toString().padStart(2, '0'),
-    seconds.toString().padStart(2, '0')
-  ].filter(Boolean).join(':');
-  
-  display.textContent = displayStr;
-}
-
-function timerComplete() {
-  stopTimer();
-  
-  if (autoRestartCheck.checked) {
-    resetTimer();
-    startTimer();
-  } else {
-    resetTimer();
+  function setStatus(message, type = '') {
+    elements.status.textContent = message;
+    elements.status.className = `status ${type}`.trim();
   }
-}
 
-// Dark mode toggle click handler
-darkModeToggle.addEventListener('click', () => {
-  const isDark = document.body.classList.contains('dark-mode');
-  if (isDark) {
-    document.body.classList.remove('dark-mode');
-    document.body.classList.add('light-mode');
-    chrome.storage.local.set({ darkMode: 'disabled' });
-  } else {
-    document.body.classList.remove('light-mode');
-    document.body.classList.add('dark-mode');
-    chrome.storage.local.set({ darkMode: 'enabled' });
-  }
-  updateDarkModeIcons(!isDark);
-  
-  // Notify all tabs about the theme change
-  chrome.tabs.query({}, function(tabs) {
-    tabs.forEach(tab => {
-      chrome.tabs.sendMessage(tab.id, {
-        action: 'themeChanged',
-        isDark: !isDark
-      }).catch(() => {
-        // Ignore errors for tabs that don't have the content script
-      });
+  function durationFromInputs() {
+    return TimerUtils.durationFromParts({
+      hours: elements.hours.value,
+      minutes: elements.minutes.value,
+      seconds: elements.seconds.value
     });
-  });
-});
-
-// Listen for messages from background script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'startScheduledTimer') {
-    // Restore the original timer values
-    if (message.originalTime) {
-      hoursInput.value = message.originalTime.hours || '';
-      minutesInput.value = message.originalTime.minutes || '';
-      secondsInput.value = message.originalTime.seconds || '';
-      timeLeft = calculateTotalSeconds();
-    }
-    startTimer();
-    startAtTimeCheck.checked = false;
-    startTimeInput.disabled = true;
-    startStopBtn.textContent = 'Stop';
-    startStopBtn.disabled = false;
-    saveStartAtTimeSettings();
-  }
-  if (message.action === 'timerUpdate') {
-    timeLeft = message.timeLeft;
-    isRunning = message.isRunning;
-    updateDisplay();
-    startStopBtn.textContent = isRunning ? 'Stop' : (startAtTimeCheck.checked ? 'Set' : 'Start');
-  }
-});
-
-function checkStartTime() {
-  if (!startAtTimeCheck.checked || !startTimeInput.value) return;
-
-  // Parse the time input value (format: HH:mm)
-  const [inputHours, inputMinutes] = startTimeInput.value.split(':').map(Number);
-  
-  // Get current time in local timezone
-  const now = new Date();
-  
-  // Create target time for today
-  const targetTime = new Date();
-  targetTime.setHours(inputHours, inputMinutes, 0, 0);
-  
-  // If time has passed for today, schedule for tomorrow
-  if (targetTime <= now) {
-    targetTime.setDate(targetTime.getDate() + 1);
   }
 
-  // Save current timer values
-  const originalTime = {
-    hours: hoursInput.value || '',
-    minutes: minutesInput.value || '',
-    seconds: secondsInput.value || ''
-  };
-
-  // Schedule the timer using chrome.alarms
-  chrome.runtime.sendMessage({
-    action: 'scheduleTimer',
-    targetTime: targetTime.toISOString(),
-    originalTime: originalTime
-  }, (response) => {
-    if (response && response.success) {
-      startStopBtn.textContent = 'Scheduled';
-      startStopBtn.disabled = true;
-      
-      // Store the scheduled state
-      chrome.storage.local.set({
-        scheduledState: {
-          isScheduled: true,
-          targetTime: targetTime.toISOString()
-        },
-        scheduledTimer: {
-          originalTime: originalTime
-        }
-      });
-
-      // Show a notification that the timer has been scheduled
-      const timeStr = targetTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const dateStr = targetTime.toLocaleDateString();
-      chrome.notifications.create('timerScheduled', {
-        type: 'basic',
-        iconUrl: 'icon48.png',
-        title: 'Timer Scheduled',
-        message: `Timer will start at ${timeStr} on ${dateStr}`
-      });
-    }
-  });
-}
-
-// When popup opens, check if there's a scheduled timer
-document.addEventListener('DOMContentLoaded', () => {
-  // First load saved timer values and settings
-  chrome.storage.local.get(['timerValues', 'scheduledState', 'autoRestart'], (result) => {
-    // Restore timer values if they exist
-    if (result.timerValues) {
-      hoursInput.value = result.timerValues.hours || '';
-      minutesInput.value = result.timerValues.minutes || '';
-      secondsInput.value = result.timerValues.seconds || '';
-      timeLeft = calculateTotalSeconds();
-      updateDisplay();
-    }
-
-    // Restore auto-restart setting
-    if (result.autoRestart !== undefined) {
-      autoRestartCheck.checked = result.autoRestart;
-    }
-
-    // Then check if there's an active timer or scheduled timer
-    chrome.runtime.sendMessage({ action: 'getTimerState' }, (response) => {
-      if (response && response.isRunning) {
-        // If timer is running, use the background timer state
-        timeLeft = response.timeLeft;
-        isRunning = response.isRunning;
-        updateDisplay();
-        startStopBtn.textContent = 'Stop';
-      } else {
-        // If no timer is running, keep the saved/default values
-        startStopBtn.textContent = 'Start';
-      }
-    });
-    
-    // Check for scheduled timer state
-    if (result.scheduledState && result.scheduledState.isScheduled) {
-      const targetTime = new Date(result.scheduledState.targetTime);
-      const now = new Date();
-      
-      if (targetTime > now) {
-        startStopBtn.textContent = 'Scheduled';
-        startStopBtn.disabled = true;
-      } else {
-        // Clear the scheduled state if the time has passed
-        chrome.storage.local.remove('scheduledState');
-      }
-    }
-  });
-});
-
-// Handle start at time checkbox
-startAtTimeCheck.addEventListener('change', () => {
-  startTimeInput.disabled = !startAtTimeCheck.checked;
-  if (startAtTimeCheck.checked) {
-    if (!startTimeInput.value) {
-      const now = new Date();
-      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      startTimeInput.value = timeStr;
-    }
-    startStopBtn.textContent = 'Set';
-  } else {
-    // Clear any scheduled timer
-    chrome.runtime.sendMessage({ action: 'clearScheduledTimer' });
-    chrome.storage.local.remove('scheduledState');
-    startStopBtn.disabled = false;
-    startStopBtn.textContent = isRunning ? 'Stop' : 'Start';
+  function putDurationInInputs(totalSeconds) {
+    const parts = TimerUtils.splitDuration(totalSeconds);
+    elements.hours.value = String(parts.hours);
+    elements.minutes.value = String(parts.minutes);
+    elements.seconds.value = String(parts.seconds);
   }
-  saveStartAtTimeSettings();
-});
 
-// Handle start time input changes
-startTimeInput.addEventListener('change', () => {
-  if (startAtTimeCheck.checked) {
-    // Clear any scheduled timer
-    chrome.runtime.sendMessage({ action: 'clearScheduledTimer' });
-    chrome.storage.local.remove('scheduledState');
-    startStopBtn.textContent = 'Set';
-    startStopBtn.disabled = false;
+  function formatClock(totalSeconds) {
+    const seconds = Math.max(0, Number.parseInt(totalSeconds, 10) || 0);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    return hours > 0
+      ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+      : `${minutes}:${String(remainder).padStart(2, '0')}`;
   }
-  saveStartAtTimeSettings();
-});
 
-function saveStartAtTimeSettings() {
-  const settings = {
-    enabled: startAtTimeCheck.checked,
-    time: startTimeInput.value
-  };
-  chrome.storage.local.set({ startAtTimeSettings: settings });
-}
+  function getDisplayedRemaining() {
+    if (!state || inputsDirty) {
+      return durationFromInputs();
+    }
+    return TimerUtils.getRemainingSeconds(state);
+  }
 
-// Dark mode toggle
-function updateDarkModeIcons(isDark) {
-  // Check if images are loaded
-  moonIcon.onload = () => {};
-  moonIcon.onerror = (e) => {};
-  sunIcon.onload = () => {};
-  sunIcon.onerror = (e) => {};
-  
-  sunIcon.style.display = isDark ? 'block' : 'none';
-  moonIcon.style.display = isDark ? 'none' : 'block';
-  
-  // Log the current src attributes
-}
+  function updateTimerDisplay() {
+    const remaining = getDisplayedRemaining();
+    elements.display.textContent = formatClock(remaining);
 
-// Initialize dark mode on load
-document.addEventListener('DOMContentLoaded', () => {
-  chrome.storage.local.get(['darkMode'], (result) => {
-    const isDark = result.darkMode === 'enabled';
-    if (isDark) {
-      document.body.classList.add('dark-mode');
-      document.body.classList.remove('light-mode');
+    if (!state) {
+      elements.timerStatus.textContent = 'Loading…';
+      return;
+    }
+    if (state.isRunning) {
+      const endTime = new Date(state.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      elements.timerStatus.textContent = `Running · ends ${endTime}`;
+      elements.startPause.textContent = 'Pause';
+    } else if (remaining > 0 && remaining < state.durationSeconds && !inputsDirty) {
+      elements.timerStatus.textContent = 'Paused';
+      elements.startPause.textContent = 'Resume';
+    } else if (state.promptActive) {
+      elements.timerStatus.textContent = 'Session complete · reflection waiting';
+      elements.startPause.textContent = 'Start';
     } else {
-      document.body.classList.add('light-mode');
-      document.body.classList.remove('dark-mode');
+      elements.timerStatus.textContent = 'Ready';
+      elements.startPause.textContent = 'Start';
     }
-    updateDarkModeIcons(isDark);
-  });
-});
 
-// Add settings button click handler
-openSettingsBtn.addEventListener('click', () => {
-  chrome.runtime.openOptionsPage();
-});
+    const inputDisabled = Boolean(state.isRunning);
+    [elements.hours, elements.minutes, elements.seconds].forEach((input) => {
+      input.disabled = inputDisabled;
+    });
+  }
 
-// Add auto-restart checkbox change handler
-autoRestartCheck.addEventListener('change', () => {
-  // Only update the setting, don't restart the timer
-  chrome.storage.local.set({ autoRestart: autoRestartCheck.checked });
-  
-  // Send the updated auto-restart setting to the background script
-  chrome.runtime.sendMessage({
-    action: 'updateAutoRestart',
-    autoRestart: autoRestartCheck.checked
-  });
-});
-
-// Add test chatbox button click handler
-testChatboxBtn.addEventListener('click', () => {
-  // Get the active tab and inject the chatbox
-  chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-    if (tabs[0]) {
-      chrome.tabs.sendMessage(tabs[0].id, {
-        action: 'showTestChatbox',
-        minutes: 25  // Default test duration
+  function updateScheduleDisplay() {
+    const scheduled = state && state.scheduledTimer;
+    elements.cancelSchedule.hidden = !scheduled;
+    if (scheduled) {
+      const when = new Date(scheduled.targetTime).toLocaleString([], {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
       });
+      elements.scheduleStatus.textContent = `Scheduled for ${when}.`;
+      elements.schedulePanel.open = true;
+      elements.schedule.textContent = 'Reschedule';
+    } else {
+      elements.scheduleStatus.textContent = '';
+      elements.schedule.textContent = 'Schedule';
+    }
+  }
+
+  function adoptState(nextState) {
+    state = nextState;
+    inputsDirty = false;
+    if (state && state.durationSeconds) {
+      putDurationInInputs(state.durationSeconds);
+    }
+    elements.autoRestart.checked = Boolean(state && state.autoRestart);
+    updateTimerDisplay();
+    updateScheduleDisplay();
+  }
+
+  async function saveTimerInputs() {
+    const values = {
+      hours: Number(elements.hours.value) || 0,
+      minutes: Number(elements.minutes.value) || 0,
+      seconds: Number(elements.seconds.value) || 0
+    };
+    await chrome.storage.local.set({ timerValues: values });
+  }
+
+  async function load() {
+    try {
+      const [saved, response] = await Promise.all([
+        chrome.storage.local.get(['timerValues', 'sfxVolume', 'autoRestart']),
+        sendMessage({ action: 'getTimerState' })
+      ]);
+      adoptState(response.state);
+      if (!response.state.isRunning && response.state.remainingSeconds === response.state.durationSeconds && saved.timerValues) {
+        putDurationInInputs(TimerUtils.durationFromParts(saved.timerValues) || response.state.durationSeconds);
+        inputsDirty = durationFromInputs() !== response.state.durationSeconds;
+      }
+      if (saved.sfxVolume !== undefined) {
+        elements.volume.value = String(saved.sfxVolume);
+      }
+      elements.volumeValue.textContent = `${elements.volume.value}%`;
+      if (saved.autoRestart !== undefined && !response.state.isRunning) {
+        elements.autoRestart.checked = Boolean(saved.autoRestart);
+      }
+      updateTimerDisplay();
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  }
+
+  [elements.hours, elements.minutes, elements.seconds].forEach((input) => {
+    input.addEventListener('input', () => {
+      inputsDirty = true;
+      updateTimerDisplay();
+    });
+    input.addEventListener('change', async () => {
+      const max = Number(input.max);
+      const value = Math.max(0, Number.parseInt(input.value, 10) || 0);
+      input.value = String(Number.isFinite(max) ? Math.min(max, value) : value);
+      inputsDirty = true;
+      await saveTimerInputs();
+      updateTimerDisplay();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        elements.startPause.click();
+      }
+    });
+  });
+
+  elements.startPause.addEventListener('click', async () => {
+    elements.startPause.disabled = true;
+    setStatus('');
+    try {
+      let response;
+      if (state && state.isRunning) {
+        response = await sendMessage({ action: 'pauseTimer' });
+      } else if (state && !inputsDirty && state.remainingSeconds > 0 && state.remainingSeconds < state.durationSeconds) {
+        response = await sendMessage({ action: 'resumeTimer', autoRestart: elements.autoRestart.checked });
+      } else {
+        const durationSeconds = durationFromInputs();
+        if (durationSeconds <= 0) {
+          throw new Error('Choose a duration greater than zero.');
+        }
+        await saveTimerInputs();
+        response = await sendMessage({
+          action: 'startTimer',
+          durationSeconds,
+          autoRestart: elements.autoRestart.checked
+        });
+      }
+      adoptState(response.state);
+    } catch (error) {
+      setStatus(error.message, 'error');
+    } finally {
+      elements.startPause.disabled = false;
     }
   });
-}); 
+
+  elements.reset.addEventListener('click', async () => {
+    try {
+      const response = await sendMessage({
+        action: 'resetTimer',
+        durationSeconds: inputsDirty ? durationFromInputs() : undefined
+      });
+      adoptState(response.state);
+      setStatus('Timer reset.', 'success');
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  });
+
+  elements.autoRestart.addEventListener('change', async () => {
+    const autoRestart = elements.autoRestart.checked;
+    await chrome.storage.local.set({ autoRestart });
+    try {
+      const response = await sendMessage({ action: 'updateAutoRestart', autoRestart });
+      state = response.state;
+      updateTimerDisplay();
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  });
+
+  elements.volume.addEventListener('input', () => {
+    elements.volumeValue.textContent = `${elements.volume.value}%`;
+  });
+  elements.volume.addEventListener('change', async () => {
+    await chrome.storage.local.set({ sfxVolume: Number(elements.volume.value) });
+  });
+
+  elements.schedule.addEventListener('click', async () => {
+    try {
+      const targetTime = new Date(elements.startTime.value);
+      if (!elements.startTime.value || !Number.isFinite(targetTime.getTime())) {
+        throw new Error('Choose a start date and time.');
+      }
+      const durationSeconds = durationFromInputs();
+      const response = await sendMessage({
+        action: 'scheduleTimer',
+        targetTime: targetTime.toISOString(),
+        durationSeconds,
+        autoRestart: elements.autoRestart.checked
+      });
+      adoptState(response.state);
+      setStatus('Start time scheduled.', 'success');
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  });
+
+  elements.cancelSchedule.addEventListener('click', async () => {
+    try {
+      const response = await sendMessage({ action: 'clearScheduledTimer' });
+      state = response.state;
+      updateScheduleDisplay();
+      setStatus('Scheduled start cancelled.', 'success');
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  });
+
+  elements.testPrompt.addEventListener('click', async () => {
+    try {
+      const response = await sendMessage({ action: 'showTestPrompt' });
+      if (response.success === false) {
+        throw new Error(response.error);
+      }
+      window.close();
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  });
+
+  elements.openSettings.addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === 'timerStateChanged' && message.state) {
+      state = message.state;
+      updateTimerDisplay();
+      updateScheduleDisplay();
+    }
+  });
+
+  function updateCurrentTime() {
+    elements.currentTime.textContent = new Date().toLocaleTimeString([], {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    updateTimerDisplay();
+  }
+
+  const defaultStart = new Date(Date.now() + (60 * 60 * 1000));
+  defaultStart.setSeconds(0, 0);
+  const localDefault = new Date(defaultStart.getTime() - (defaultStart.getTimezoneOffset() * 60_000));
+  elements.startTime.value = localDefault.toISOString().slice(0, 16);
+
+  load();
+  updateCurrentTime();
+  setInterval(updateCurrentTime, 1000);
+});

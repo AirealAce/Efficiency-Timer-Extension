@@ -1,314 +1,69 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>Timer Extension</title>
-  <style>
-    body {
-      width: 300px;
-      padding: 15px;
-      font-family: Arial, sans-serif;
-      transition: all 0.3s ease;
-      background-color: white;
-      color: #333;
-    }
-    
-    body.light-mode {
-      background-color: white;
-      color: #333;
-    }
-    
-    body.dark-mode {
-      background-color: #1a1a1a;
-      color: #ffffff;
-    }
-
-    .container {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .time-input {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .time-input-group {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-    }
-
-    .time-input input {
-      padding: 5px;
-      border-radius: 4px;
-      border: 1px solid #ddd;
-      background: white;
-      width: 60px;
-      text-align: center;
-    }
-
-    .time-input input::-webkit-inner-spin-button,
-    .time-input input::-webkit-outer-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
-    }
-
-    body.dark-mode .time-input input {
-      background: #333;
-      color: white;
-      border-color: #444;
-    }
-
-    .timer-display {
-      font-size: 24px;
-      text-align: center;
-      margin: 10px 0;
-      font-weight: bold;
-    }
-
-    button {
-      padding: 8px;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    button:hover {
-      opacity: 0.9;
-      transform: translateY(-1px);
-    }
-
-    #startStop {
-      background-color: #4CAF50;
-    }
-
-    #reset {
-      background-color: #980E0E;
-    }
-
-    #testChatbox {
-      background-color: #DAA520;
-      margin-top: 10px;
-    }
-
-    .auto-restart {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-
-    .start-at-time {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .start-at-time input[type="time"] {
-      padding: 4px;
-      border-radius: 4px;
-      border: 1px solid #ddd;
-      background: white;
-    }
-
-    body.dark-mode .start-at-time input[type="time"] {
-      background: #333;
-      color: white;
-      border-color: #444;
-    }
-
-    .current-time {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.9em;
-      color: #666;
-      justify-content: center;
-      margin-top: 4px;
-    }
-
-    body.dark-mode .current-time {
-      color: #aaa;
-    }
-
-    .current-time span {
-      font-family: monospace;
-      font-size: 1.1em;
-    }
-
-    .volume-control {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-      padding: 4px 0;
-    }
-
-    .volume-control label {
-      font-size: 12px;
-      color: #666;
-      min-width: 70px;
-    }
-
-    body.dark-mode .volume-control label {
-      color: #aaa;
-    }
-
-    .volume-control input[type="range"] {
-      flex: 1;
-      height: 4px;
-      border-radius: 2px;
-      background: #ddd;
-      outline: none;
-      -webkit-appearance: none;
-    }
-
-    .volume-control input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: #4CAF50;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .volume-control input[type="range"]::-webkit-slider-thumb:hover {
-      background: #45a049;
-    }
-
-    body.dark-mode .volume-control input[type="range"] {
-      background: #444;
-    }
-
-    .dark-mode-toggle {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      padding: 5px;
-      font-size: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      transition: all 0.3s ease;
-    }
-
-    .dark-mode-toggle:hover {
-      background: rgba(0, 0, 0, 0.1);
-    }
-
-    body.dark-mode .dark-mode-toggle:hover {
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    .dark-mode-toggle img {
-      width: 24px;
-      height: 24px;
-      object-fit: contain;
-      transition: transform 0.2s ease;
-    }
-
-    .dark-mode-toggle:hover img {
-      transform: scale(1.1);
-    }
-
-    .time-input-label {
-      font-size: 12px;
-      color: #666;
-    }
-
-    body.dark-mode .time-input-label {
-      color: #aaa;
-    }
-
-    .sheets-link,
-    .web-app-url {
-      margin-top: 10px;
-    }
-    
-    .sheets-link input,
-    .web-app-url input {
-      width: 100%;
-      padding: 8px;
-      border-radius: 4px;
-      border: 1px solid #ddd;
-      background: white;
-    }
-
-    body.dark-mode .sheets-link input,
-    body.dark-mode .web-app-url input {
-      background: #333;
-      color: white;
-      border-color: #444;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reflection Timer</title>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <button class="dark-mode-toggle" id="darkModeToggle">
-    <img src="sun-emoji-2048x2048-1je5hwoj.png" class="sun-icon" style="width: 24px; height: 24px; display: none;">
-    <img src="half_moon.webp" class="moon-icon" style="width: 24px; height: 24px;">
-  </button>
-  <div class="container">
-    <div class="time-input">
-      <div class="time-input-group">
-        <input type="number" id="hours" min="0" placeholder="0">
-        <label class="time-input-label">hours</label>
+  <main class="app">
+    <header class="header">
+      <div>
+        <p class="eyebrow">Focus with a receipt</p>
+        <h1>Reflection Timer</h1>
       </div>
-      <div class="time-input-group">
-        <input type="number" id="minutes" min="0" placeholder="25">
-        <label class="time-input-label">minutes</label>
+      <button id="openSettings" class="icon-button" type="button" aria-label="Open settings" title="Settings">⚙</button>
+    </header>
+
+    <output id="display" class="timer" aria-live="off">25:00</output>
+    <p id="timerStatus" class="timer-status">Ready</p>
+
+    <fieldset id="durationFields" class="duration-fields">
+      <legend class="sr-only">Timer duration</legend>
+      <label><span>Hours</span><input id="hours" type="number" min="0" max="8760" inputmode="numeric" value="0"></label>
+      <span class="colon" aria-hidden="true">:</span>
+      <label><span>Minutes</span><input id="minutes" type="number" min="0" max="59" inputmode="numeric" value="25"></label>
+      <span class="colon" aria-hidden="true">:</span>
+      <label><span>Seconds</span><input id="seconds" type="number" min="0" max="59" inputmode="numeric" value="0"></label>
+    </fieldset>
+
+    <div class="primary-actions">
+      <button id="startPause" class="primary" type="button">Start</button>
+      <button id="reset" class="secondary" type="button">Reset</button>
+    </div>
+
+    <section class="preferences" aria-label="Timer preferences">
+      <label class="check-row">
+        <input id="autoRestart" type="checkbox">
+        <span>Automatically start the next session</span>
+      </label>
+      <label class="range-row">
+        <span>Sound</span>
+        <input id="volume" type="range" min="0" max="100" value="50">
+        <output id="volumeValue">50%</output>
+      </label>
+    </section>
+
+    <details id="schedulePanel" class="schedule-panel">
+      <summary>Schedule a start time</summary>
+      <div class="schedule-controls">
+        <label for="startTime">Start at</label>
+        <input id="startTime" type="datetime-local">
+        <button id="schedule" class="secondary" type="button">Schedule</button>
+        <button id="cancelSchedule" class="text-button" type="button" hidden>Cancel scheduled start</button>
       </div>
-      <div class="time-input-group">
-        <input type="number" id="seconds" min="0" placeholder="0">
-        <label class="time-input-label">seconds</label>
-      </div>
-    </div>
-    
-    <div class="volume-control">
-      <label>SFX Volume</label>
-      <input type="range" id="volumeSlider" min="0" max="100" value="50">
-    </div>
+      <p id="scheduleStatus" class="hint"></p>
+    </details>
 
-    <div class="auto-restart">
-      <input type="checkbox" id="autoRestart">
-      <label for="autoRestart">Auto restart timer</label>
+    <div class="footer-actions">
+      <button id="testPrompt" class="text-button" type="button">Test reflection prompt</button>
+      <span id="currentTime" class="clock"></span>
     </div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
 
-    <div class="start-at-time">
-      <input type="checkbox" id="startAtTime">
-      <label for="startAtTime">Start at This time</label>
-      <input type="time" id="startTime" disabled>
-    </div>
-
-    <div class="current-time">
-      <label>Current time:</label>
-      <span id="currentTime"></span>
-    </div>
-
-    <div class="timer-display" id="display">25:00</div>
-    
-    <button id="startStop">Start / Stop</button>
-    <button id="reset">Reset</button>
-    <div class="sheets-link">
-      <input type="text" id="sheetsLink" placeholder="Enter Google Sheets Link">
-    </div>
-    <div class="web-app-url">
-      <input type="text" id="webAppUrl" placeholder="Enter Google Apps Script Web App URL">
-    </div>
-    <button id="openSettings" style="margin-top: 10px; background-color: #2196F3;">Open Google Sheets Settings</button>
-    <button id="testChatbox">Test Chatbox</button>
-  </div>
+  <script src="timer-utils.js"></script>
   <script src="popup.js"></script>
 </body>
-</html> 
+</html>
