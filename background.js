@@ -9,6 +9,7 @@ const SCHEDULE_STATE_KEY = 'scheduledTimerV2';
 const DEFAULT_DURATION_SECONDS = 25 * 60;
 const MAX_REFLECTION_LENGTH = 5000;
 const REQUEST_TIMEOUT_MS = 20_000;
+const API_VERSION = 2;
 const LEGACY_SECRET_KEYS = [
   'GOOGLE_SHEETS_CLIENT_EMAIL',
   'GOOGLE_SHEETS_PRIVATE_KEY',
@@ -17,7 +18,15 @@ const LEGACY_SECRET_KEYS = [
 
 let timerState = createDefaultTimerState();
 let scheduledTimer = null;
-const ready = initialize();
+const ready = initialize().catch(async (error) => {
+  console.error('[Reflection Timer] State initialization failed; restoring safe defaults.', error);
+  timerState = createDefaultTimerState();
+  scheduledTimer = null;
+  await chrome.alarms.clear(TIMER_ALARM);
+  await chrome.alarms.clear(SCHEDULE_ALARM);
+  await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
+  await persistTimerState(false);
+});
 
 function createDefaultTimerState() {
   return {
@@ -87,6 +96,22 @@ function migrateLegacySchedule(value, scheduleState, autoRestart) {
   return { targetTime, durationSeconds, autoRestart: Boolean(autoRestart) };
 }
 
+function normalizeScheduledTimer(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const targetTime = Number(value.targetTime);
+  const durationSeconds = clampDuration(value.durationSeconds);
+  if (!Number.isFinite(targetTime) || targetTime <= 0 || durationSeconds <= 0) {
+    return null;
+  }
+  return {
+    targetTime,
+    durationSeconds,
+    autoRestart: Boolean(value.autoRestart)
+  };
+}
+
 function clampDuration(value) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -111,8 +136,13 @@ async function initialize() {
     ? normalizeTimerState(stored[TIMER_STATE_KEY])
     : (migrateLegacyTimerState(stored.backgroundTimerState, stored.autoRestart) || createDefaultTimerState());
 
-  scheduledTimer = stored[SCHEDULE_STATE_KEY]
+  const normalizedStoredSchedule = normalizeScheduledTimer(stored[SCHEDULE_STATE_KEY]);
+  scheduledTimer = normalizedStoredSchedule
     || migrateLegacySchedule(stored.scheduledTimer, stored.scheduledState, stored.autoRestart);
+
+  if (stored[SCHEDULE_STATE_KEY] && !normalizedStoredSchedule) {
+    await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
+  }
 
   if (!stored.sheetUrl && TimerUtils.extractSpreadsheetId(stored.sheetsLink)) {
     await chrome.storage.local.set({ sheetUrl: stored.sheetsLink });
@@ -189,7 +219,7 @@ async function startTimer(durationSeconds, autoRestart, options = {}) {
   await chrome.alarms.create(TIMER_ALARM, { when: timerState.endTime });
   await persistTimerState();
   if (shouldDismissPrompt) {
-    await dismissPromptInAllTabs();
+    void dismissPromptInAllTabs().catch(() => {});
   }
   return publicState();
 }
@@ -227,7 +257,7 @@ async function resetTimer(durationSeconds) {
   };
   await chrome.alarms.clear(TIMER_ALARM);
   await persistTimerState();
-  await dismissPromptInAllTabs();
+  void dismissPromptInAllTabs().catch(() => {});
   return publicState();
 }
 
@@ -257,7 +287,7 @@ async function completeTimer() {
     message: 'How did you spend this session? Open a regular webpage if the reflection box is not visible.',
     priority: 2
   });
-  await showPromptInActiveTab();
+  void showPromptInActiveTab().catch(() => {});
 
   if (autoRestart) {
     await startTimer(durationSeconds, true, {
@@ -363,7 +393,7 @@ async function dismissReflection() {
   timerState.promptActive = false;
   timerState.completedAt = null;
   await persistTimerState();
-  await dismissPromptInAllTabs();
+  void dismissPromptInAllTabs().catch(() => {});
   return { success: true };
 }
 
@@ -449,7 +479,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     await ready;
     switch (message && message.action) {
       case 'getTimerState':
-        return { success: true, state: await getCurrentState() };
+        return { success: true, apiVersion: API_VERSION, state: await getCurrentState() };
       case 'startTimer':
         return { success: true, state: await startTimer(message.durationSeconds, message.autoRestart) };
       case 'pauseTimer':

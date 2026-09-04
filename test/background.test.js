@@ -98,6 +98,7 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
   });
   const response = await harness.dispatch({ action: 'getTimerState' });
   assert.equal(response.success, true);
+  assert.equal(response.apiVersion, 2);
   assert.equal(response.state.durationSeconds, 1500);
   assert.equal(response.state.remainingSeconds, 1500);
   assert.equal(response.state.isRunning, false);
@@ -141,4 +142,12 @@ test('clearing a scheduled start only clears the extension schedule alarm', asyn
   assert.equal(cleared.state.scheduledTimer, null);
   assert.ok(harness.clearedAlarms.every((name) => typeof name === 'string'));
   assert.ok(harness.clearedAlarms.includes('reflectionTimerScheduledStart'));
+});
+
+test('background discards malformed stored schedule state during startup', async () => {
+  const harness = createHarness({ scheduledTimerV2: { targetTime: 'not-a-time' } });
+  const response = await harness.dispatch({ action: 'getTimerState' });
+  assert.equal(response.success, true);
+  assert.equal(response.state.scheduledTimer, null);
+  assert.equal('scheduledTimerV2' in harness.stored, false);
 });

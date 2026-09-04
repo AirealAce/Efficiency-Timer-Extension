@@ -1,6 +1,8 @@
 'use strict';
 
 document.addEventListener('DOMContentLoaded', () => {
+  const EXPECTED_API_VERSION = 2;
+  const MESSAGE_TIMEOUT_MS = 3000;
   const elements = {
     hours: document.getElementById('hours'),
     minutes: document.getElementById('minutes'),
@@ -28,7 +30,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function sendMessage(message) {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error('The timer service did not respond. Reload the extension once.'));
+        }
+      }, MESSAGE_TIMEOUT_MS);
       chrome.runtime.sendMessage(message, (response) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutId);
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else if (!response || response.success === false) {
@@ -38,6 +52,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
+  }
+
+  function focusAndSelectHours() {
+    if (!elements.hours.disabled) {
+      elements.hours.focus({ preventScroll: true });
+      elements.hours.select();
+    }
   }
 
   function setStatus(message, type = '') {
@@ -152,6 +173,12 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.get(['timerValues', 'sfxVolume', 'autoRestart']),
         sendMessage({ action: 'getTimerState' })
       ]);
+      if (response.apiVersion !== EXPECTED_API_VERSION || !response.state) {
+        elements.timerStatus.textContent = 'Finishing update…';
+        setStatus('Reopen the timer in a moment.', 'success');
+        setTimeout(() => chrome.runtime.reload(), 250);
+        return;
+      }
       adoptState(response.state);
       if (!response.state.isRunning && response.state.remainingSeconds === response.state.durationSeconds && saved.timerValues) {
         putDurationInInputs(TimerUtils.durationFromParts(saved.timerValues) || response.state.durationSeconds);
@@ -165,8 +192,14 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.autoRestart.checked = Boolean(saved.autoRestart);
       }
       updateTimerDisplay();
+      if (document.activeElement === elements.hours) {
+        elements.hours.select();
+      }
     } catch (error) {
-      setStatus(error.message, 'error');
+      elements.timerStatus.textContent = 'Unable to load';
+      elements.startPause.disabled = true;
+      elements.reset.disabled = true;
+      setStatus(`${error.message} Open chrome://extensions and reload Reflection Timer.`, 'error');
     }
   }
 
@@ -319,6 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
   elements.startTime.value = localDefault.toISOString().slice(0, 16);
 
   load();
+  requestAnimationFrame(focusAndSelectHours);
   updateCurrentTime();
   setInterval(updateCurrentTime, 1000);
 });
