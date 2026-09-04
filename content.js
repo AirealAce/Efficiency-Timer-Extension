@@ -23,7 +23,9 @@
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else if (!response || response.success === false) {
-          reject(new Error((response && response.error) || 'The extension did not respond.'));
+          const error = new Error((response && response.error) || 'The extension did not respond.');
+          error.code = response && response.errorCode;
+          reject(error);
         } else {
           resolve(response);
         }
@@ -162,7 +164,9 @@
       }
       button:focus-visible { outline: 3px solid rgba(22,163,74,.28); outline-offset: 2px; }
       button:disabled { cursor: wait; opacity: .65; }
+      button[hidden] { display: none; }
       .skip { color: inherit; background: light-dark(#e2e8f0, #334155); }
+      .settings { color: inherit; background: light-dark(#e2e8f0, #334155); }
       .submit { color: white; background: #16a34a; }
       @media (max-width: 520px) {
         .dialog { right: 16px; bottom: 16px; padding: 20px; }
@@ -196,10 +200,11 @@
     const count = createElement('span', {}, `0 / ${MAX_REFLECTION_LENGTH.toLocaleString()}`);
     const actions = createElement('div', { className: 'actions' });
     const skipButton = createElement('button', { className: 'skip', type: 'button' }, 'Skip');
+    const settingsButton = createElement('button', { className: 'settings', type: 'button', hidden: '' }, 'Finish setup');
     const submitButton = createElement('button', { className: 'submit', type: 'button' }, 'Save reflection');
 
     meta.append(status, count);
-    actions.append(skipButton, submitButton);
+    actions.append(skipButton, settingsButton, submitButton);
     dialog.append(eyebrow, title, context, label, textarea, meta, actions);
     shadow.append(style, backdrop, dialog);
     (document.body || document.documentElement).appendChild(host);
@@ -207,6 +212,7 @@
     const setBusy = (busy) => {
       textarea.disabled = busy;
       skipButton.disabled = busy;
+      settingsButton.disabled = busy;
       submitButton.disabled = busy;
       submitButton.textContent = busy ? 'Saving…' : 'Save reflection';
     };
@@ -242,6 +248,7 @@
         setBusy(false);
         status.textContent = error.message;
         status.classList.add('error');
+        settingsButton.hidden = error.code !== 'SETTINGS_REQUIRED';
         textarea.focus();
       }
     };
@@ -256,6 +263,12 @@
       }
     });
     skipButton.addEventListener('click', dismiss);
+    settingsButton.addEventListener('click', () => {
+      sendMessage({ action: 'openSettings' }).catch((error) => {
+        status.textContent = error.message;
+        status.classList.add('error');
+      });
+    });
     submitButton.addEventListener('click', submit);
     backdrop.addEventListener('click', () => textarea.focus());
     host.addEventListener('keydown', (event) => {

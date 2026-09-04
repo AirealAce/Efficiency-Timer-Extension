@@ -26,6 +26,7 @@ function createHarness(seed = {}, options = {}) {
   let contentScriptInjected = false;
   let tabMessageCount = 0;
   const runtimeOnMessage = createEvent();
+  let optionsPageOpenCount = 0;
   const chrome = {
     storage: {
       local: {
@@ -50,6 +51,7 @@ function createHarness(seed = {}, options = {}) {
       lastError: null,
       onMessage: runtimeOnMessage,
       onInstalled: createEvent(),
+      async openOptionsPage() { optionsPageOpenCount += 1; },
       sendMessage(_message, callback) { if (callback) callback(); }
     },
     tabs: {
@@ -117,6 +119,7 @@ function createHarness(seed = {}, options = {}) {
     injectedScripts,
     removedStorageKeys,
     stored,
+    get optionsPageOpenCount() { return optionsPageOpenCount; },
     get tabMessageCount() { return tabMessageCount; }
   };
 }
@@ -129,7 +132,7 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
   });
   const response = await harness.dispatch({ action: 'getTimerState' });
   assert.equal(response.success, true);
-  assert.equal(response.apiVersion, 3);
+  assert.equal(response.apiVersion, 4);
   assert.equal(response.state.durationSeconds, 1500);
   assert.equal(response.state.remainingSeconds, 1500);
   assert.equal(response.state.isRunning, false);
@@ -137,6 +140,39 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
   assert.equal('GOOGLE_SHEETS_PRIVATE_KEY' in harness.stored, false);
   assert.equal(harness.stored.sheetUrl, oldSheetUrl);
   assert.equal('sheetsLink' in harness.stored, false);
+});
+
+test('background persists the known Sheet and target tab as safe defaults', async () => {
+  const harness = createHarness();
+
+  await harness.dispatch({ action: 'getTimerState' });
+
+  assert.equal(
+    harness.stored.sheetUrl,
+    'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit'
+  );
+  assert.equal(harness.stored.sheetName, 'Template');
+});
+
+test('incomplete Sheets setup returns one actionable configuration error', async () => {
+  const harness = createHarness();
+
+  const response = await harness.dispatch({ action: 'testSheetsConnection' });
+
+  assert.equal(response.success, false);
+  assert.equal(response.errorCode, 'SETTINGS_REQUIRED');
+  assert.match(response.error, /Apps Script deployment URL/i);
+  assert.match(response.error, /Reflection API token/i);
+  assert.doesNotMatch(response.error, /Google Sheet URL/i);
+});
+
+test('the reflection prompt can open extension settings', async () => {
+  const harness = createHarness();
+
+  const response = await harness.dispatch({ action: 'openSettings' });
+
+  assert.equal(response.success, true);
+  assert.equal(harness.optionsPageOpenCount, 1);
 });
 
 test('start, pause, and resume use deadline-backed state', async () => {

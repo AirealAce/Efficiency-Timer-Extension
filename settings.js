@@ -85,6 +85,9 @@ document.addEventListener('DOMContentLoaded', () => {
     sheetName.value = saved.sheetName || 'Template';
     webAppUrl.value = saved.webAppUrl || '';
     apiToken.value = saved.apiToken || '';
+    if (!TimerUtils.isValidWebAppUrl(webAppUrl.value) || apiToken.value.trim().length < 16) {
+      setStatus('Your Sheet is selected. Complete the Apps Script URL and matching token below, then choose Save & test.');
+    }
   }).catch((error) => setStatus(error.message, 'error'));
 
   form.addEventListener('submit', async (event) => {

@@ -7,9 +7,11 @@ const SCHEDULE_ALARM = 'reflectionTimerScheduledStart';
 const TIMER_STATE_KEY = 'timerStateV2';
 const SCHEDULE_STATE_KEY = 'scheduledTimerV2';
 const DEFAULT_DURATION_SECONDS = 25 * 60;
+const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit';
+const DEFAULT_SHEET_NAME = 'Template';
 const MAX_REFLECTION_LENGTH = 5000;
 const REQUEST_TIMEOUT_MS = 20_000;
-const API_VERSION = 3;
+const API_VERSION = 4;
 const LEGACY_SECRET_KEYS = [
   'GOOGLE_SHEETS_CLIENT_EMAIL',
   'GOOGLE_SHEETS_PRIVATE_KEY',
@@ -129,6 +131,7 @@ async function initialize() {
     'scheduledState',
     'autoRestart',
     'sheetUrl',
+    'sheetName',
     'sheetsLink'
   ]);
 
@@ -144,8 +147,15 @@ async function initialize() {
     await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
   }
 
-  if (!stored.sheetUrl && TimerUtils.extractSpreadsheetId(stored.sheetsLink)) {
-    await chrome.storage.local.set({ sheetUrl: stored.sheetsLink });
+  const configuredSheetUrl = TimerUtils.extractSpreadsheetId(stored.sheetUrl)
+    ? stored.sheetUrl
+    : (TimerUtils.extractSpreadsheetId(stored.sheetsLink) ? stored.sheetsLink : DEFAULT_SHEET_URL);
+  const configuredSheetName = String(stored.sheetName || '').trim() || DEFAULT_SHEET_NAME;
+  if (stored.sheetUrl !== configuredSheetUrl || stored.sheetName !== configuredSheetName) {
+    await chrome.storage.local.set({
+      sheetUrl: configuredSheetUrl,
+      sheetName: configuredSheetName
+    });
   }
 
   await chrome.storage.local.remove([
@@ -429,22 +439,28 @@ async function dismissReflection() {
 
 async function callSheetsWebApp(action, extra = {}) {
   const config = await chrome.storage.local.get(['sheetUrl', 'webAppUrl', 'apiToken', 'sheetName']);
-  const sheetUrl = String(config.sheetUrl || '').trim();
+  const sheetUrl = String(config.sheetUrl || DEFAULT_SHEET_URL).trim();
   const webAppUrl = String(config.webAppUrl || '').trim();
   const apiToken = String(config.apiToken || '').trim();
-  const sheetName = String(config.sheetName || 'Template').trim();
+  const sheetName = String(config.sheetName || DEFAULT_SHEET_NAME).trim();
+  const missingSettings = [];
 
   if (!TimerUtils.extractSpreadsheetId(sheetUrl)) {
-    throw new Error('Set a valid Google Sheets URL in the extension settings.');
+    missingSettings.push('Google Sheet URL');
   }
   if (!TimerUtils.isValidWebAppUrl(webAppUrl)) {
-    throw new Error('Set a deployed Google Apps Script /exec URL in the extension settings.');
+    missingSettings.push('Apps Script deployment URL');
   }
-  if (!apiToken) {
-    throw new Error('Set the API token in the extension settings.');
+  if (apiToken.length < 16) {
+    missingSettings.push('Reflection API token');
   }
   if (!sheetName) {
-    throw new Error('Set a target sheet tab name.');
+    missingSettings.push('target tab');
+  }
+  if (missingSettings.length > 0) {
+    const error = new Error(`Finish Google Sheets setup in extension settings: ${missingSettings.join(' and ')}.`);
+    error.code = 'SETTINGS_REQUIRED';
+    throw error;
   }
 
   const controller = new AbortController();
@@ -550,12 +566,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { success: true, data: await saveReflection(message.message) };
       case 'testSheetsConnection':
         return { success: true, data: await callSheetsWebApp('ping') };
+      case 'openSettings':
+        await chrome.runtime.openOptionsPage();
+        return { success: true };
       default:
         throw new Error('Unknown extension action.');
     }
   })().then(sendResponse).catch((error) => {
     console.error('[Reflection Timer]', error);
-    sendResponse({ success: false, error: error.message || 'Unexpected extension error.' });
+    sendResponse({
+      success: false,
+      error: error.message || 'Unexpected extension error.',
+      errorCode: error.code || null
+    });
   });
   return true;
 });
