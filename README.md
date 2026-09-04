@@ -17,7 +17,7 @@ A Manifest V3 Chrome extension for running focus sessions, prompting for a short
 3. Select **Load unpacked** and choose this folder.
 4. Open the extension settings to configure Google Sheets.
 
-Chrome blocks content scripts on its own internal pages. Keep a normal `http://` or `https://` tab open when a timer finishes or when testing the reflection prompt.
+Chrome blocks content scripts on its own internal pages. Keep a normal `http://` or `https://` tab open when a timer finishes or when testing the reflection prompt. The test button automatically reconnects the prompt to an older tab after an extension reload.
 
 ## Configure Google Sheets
 

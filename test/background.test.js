@@ -17,11 +17,14 @@ function createEvent() {
   };
 }
 
-function createHarness(seed = {}) {
+function createHarness(seed = {}, options = {}) {
   const stored = { ...seed };
   const clearedAlarms = [];
   const createdAlarms = [];
+  const injectedScripts = [];
   const removedStorageKeys = [];
+  let contentScriptInjected = false;
+  let tabMessageCount = 0;
   const runtimeOnMessage = createEvent();
   const chrome = {
     storage: {
@@ -50,10 +53,29 @@ function createHarness(seed = {}) {
       sendMessage(_message, callback) { if (callback) callback(); }
     },
     tabs: {
-      async query() { return []; },
-      sendMessage(_tabId, _message, callback) { if (callback) callback({ success: true }); },
+      async query() { return options.tabs || []; },
+      sendMessage(_tabId, _message, callback) {
+        tabMessageCount += 1;
+        if (options.missingReceiverUntilInjected && !contentScriptInjected) {
+          chrome.runtime.lastError = { message: 'Could not establish connection. Receiving end does not exist.' };
+          if (callback) callback();
+          chrome.runtime.lastError = null;
+          return;
+        }
+        if (callback) callback({ success: true });
+      },
       onActivated: createEvent(),
       onUpdated: createEvent()
+    },
+    scripting: {
+      async executeScript(details) {
+        injectedScripts.push(details);
+        if (options.injectionFails) {
+          throw new Error('Cannot access this page');
+        }
+        contentScriptInjected = true;
+        return [];
+      }
     },
     notifications: {
       create() {},
@@ -87,7 +109,16 @@ function createHarness(seed = {}) {
     });
   }
 
-  return { chrome, createdAlarms, clearedAlarms, dispatch, removedStorageKeys, stored };
+  return {
+    chrome,
+    createdAlarms,
+    clearedAlarms,
+    dispatch,
+    injectedScripts,
+    removedStorageKeys,
+    stored,
+    get tabMessageCount() { return tabMessageCount; }
+  };
 }
 
 test('background initializes a 25-minute timer and removes legacy secrets', async () => {
@@ -98,7 +129,7 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
   });
   const response = await harness.dispatch({ action: 'getTimerState' });
   assert.equal(response.success, true);
-  assert.equal(response.apiVersion, 2);
+  assert.equal(response.apiVersion, 3);
   assert.equal(response.state.durationSeconds, 1500);
   assert.equal(response.state.remainingSeconds, 1500);
   assert.equal(response.state.isRunning, false);
@@ -150,4 +181,47 @@ test('background discards malformed stored schedule state during startup', async
   assert.equal(response.success, true);
   assert.equal(response.state.scheduledTimer, null);
   assert.equal('scheduledTimerV2' in harness.stored, false);
+});
+
+test('test prompt injects the content script when an older tab has no receiver', async () => {
+  const harness = createHarness({}, {
+    tabs: [{ id: 42, active: true, url: 'https://example.com/' }],
+    missingReceiverUntilInjected: true
+  });
+
+  const response = await harness.dispatch({ action: 'showTestPrompt' });
+
+  assert.equal(response.success, true);
+  assert.equal(harness.tabMessageCount, 2);
+  assert.equal(harness.injectedScripts.length, 1);
+  assert.equal(harness.injectedScripts[0].target.tabId, 42);
+  assert.equal(harness.injectedScripts[0].files.length, 1);
+  assert.equal(harness.injectedScripts[0].files[0], 'content.js');
+});
+
+test('test prompt returns useful guidance when Chrome blocks the page', async () => {
+  const harness = createHarness({}, {
+    tabs: [{ id: 42, active: true, url: 'https://chromewebstore.google.com/' }],
+    missingReceiverUntilInjected: true,
+    injectionFails: true
+  });
+
+  const response = await harness.dispatch({ action: 'showTestPrompt' });
+
+  assert.equal(response.success, false);
+  assert.match(response.error, /open or refresh a normal website/i);
+  assert.doesNotMatch(response.error, /receiving end does not exist/i);
+});
+
+test('test prompt explains that Chrome internal pages are unsupported', async () => {
+  const harness = createHarness({}, {
+    tabs: [{ id: 42, active: true, url: 'chrome://extensions/' }]
+  });
+
+  const response = await harness.dispatch({ action: 'showTestPrompt' });
+
+  assert.equal(response.success, false);
+  assert.match(response.error, /not a chrome:\/\/ page/i);
+  assert.equal(harness.tabMessageCount, 0);
+  assert.equal(harness.injectedScripts.length, 0);
 });

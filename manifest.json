@@ -1,11 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Reflection Timer",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "A reliable focus timer that asks how you spent the session and logs the response to Google Sheets.",
   "permissions": [
     "alarms",
+    "activeTab",
     "notifications",
+    "scripting",
     "storage",
     "tabs"
   ],

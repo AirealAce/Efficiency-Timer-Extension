@@ -9,7 +9,7 @@ const SCHEDULE_STATE_KEY = 'scheduledTimerV2';
 const DEFAULT_DURATION_SECONDS = 25 * 60;
 const MAX_REFLECTION_LENGTH = 5000;
 const REQUEST_TIMEOUT_MS = 20_000;
-const API_VERSION = 2;
+const API_VERSION = 3;
 const LEGACY_SECRET_KEYS = [
   'GOOGLE_SHEETS_CLIENT_EMAIL',
   'GOOGLE_SHEETS_PRIVATE_KEY',
@@ -351,7 +351,12 @@ function sendTabMessage(tabId, message) {
   return new Promise((resolve) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
       if (chrome.runtime.lastError) {
-        resolve({ success: false, error: chrome.runtime.lastError.message });
+        const error = chrome.runtime.lastError.message;
+        resolve({
+          success: false,
+          error,
+          missingReceiver: /receiving end does not exist|could not establish connection/i.test(error)
+        });
       } else {
         resolve(response || { success: true });
       }
@@ -359,27 +364,52 @@ function sendTabMessage(tabId, message) {
   });
 }
 
+async function injectContentScript(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content.js']
+    });
+    return true;
+  } catch (error) {
+    console.warn('[Reflection Timer] Could not attach the reflection prompt to the active page.', error);
+    return false;
+  }
+}
+
 async function findActiveSupportedTab() {
   const focusedTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  const focused = focusedTabs.find((tab) => tab.id && TimerUtils.isSupportedPageUrl(tab.url));
-  if (focused) {
-    return focused;
-  }
-  const activeTabs = await chrome.tabs.query({ active: true });
-  return activeTabs.find((tab) => tab.id && TimerUtils.isSupportedPageUrl(tab.url)) || null;
+  return focusedTabs.find((tab) => tab.id && TimerUtils.isSupportedPageUrl(tab.url)) || null;
 }
 
 async function showPromptInActiveTab(isTest = false) {
   const tab = await findActiveSupportedTab();
   if (!tab) {
-    return { success: false, error: 'Open a normal webpage, then try again.' };
+    return { success: false, error: 'Open a normal website (not a chrome:// page), then try again.' };
   }
-  return sendTabMessage(tab.id, {
+  const promptMessage = {
     action: 'showReflectionPrompt',
     isTest,
     durationSeconds: timerState.durationSeconds,
     completedAt: timerState.completedAt || new Date().toISOString()
-  });
+  };
+  const firstAttempt = await sendTabMessage(tab.id, promptMessage);
+  if (firstAttempt.success || !firstAttempt.missingReceiver) {
+    return firstAttempt;
+  }
+
+  const injected = await injectContentScript(tab.id);
+  if (injected) {
+    const secondAttempt = await sendTabMessage(tab.id, promptMessage);
+    if (secondAttempt.success) {
+      return secondAttempt;
+    }
+  }
+
+  return {
+    success: false,
+    error: 'Chrome cannot show the prompt on this page. Open or refresh a normal website, then try again.'
+  };
 }
 
 async function dismissPromptInAllTabs() {
