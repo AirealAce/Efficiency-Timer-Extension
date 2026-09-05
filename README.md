@@ -1,6 +1,8 @@
 # Reflection Timer
 
-A Manifest V3 Chrome extension for running focus sessions, prompting for a short reflection, and logging each response to Google Sheets.
+A focus timer with Google Sheets reflection logging. The new [Windows desktop version](desktop/README.md) provides a native tray timer, standalone prompts, independent scheduled sessions, encrypted local saves, and diagnostic exports. The Chrome extension below remains available as a fallback; disable it manually when switching to desktop so only one timer engine runs.
+
+See [desktop setup and migration](desktop/README.md) to install the Windows app. The desktop app reuses the existing Apps Script receiver, so the Sheet formatting and daily-tab behavior below remain unchanged.
 
 ## What it does
 
