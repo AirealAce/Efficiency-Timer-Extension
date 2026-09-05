@@ -91,7 +91,7 @@ function createHarness(getStateResponse) {
 test('popup immediately focuses and selects the hours field', async () => {
   const harness = createHarness({
     success: true,
-    apiVersion: 4,
+    apiVersion: 5,
     state: {
       isRunning: false,
       durationSeconds: 1500,
@@ -111,7 +111,7 @@ test('popup immediately focuses and selects the hours field', async () => {
 test('typing hours clears the untouched 25-minute preset', async () => {
   const harness = createHarness({
     success: true,
-    apiVersion: 4,
+    apiVersion: 5,
     state: {
       isRunning: false,
       durationSeconds: 1500,

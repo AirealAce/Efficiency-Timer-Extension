@@ -91,7 +91,7 @@ function createHarness(seed = {}, options = {}) {
     TimerUtils,
     chrome,
     console,
-    fetch: async () => { throw new Error('Unexpected fetch'); },
+    fetch: options.fetch || (async () => { throw new Error('Unexpected fetch'); }),
     importScripts() {},
     setTimeout,
     clearTimeout
@@ -132,7 +132,7 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
   });
   const response = await harness.dispatch({ action: 'getTimerState' });
   assert.equal(response.success, true);
-  assert.equal(response.apiVersion, 4);
+  assert.equal(response.apiVersion, 5);
   assert.equal(response.state.durationSeconds, 1500);
   assert.equal(response.state.remainingSeconds, 1500);
   assert.equal(response.state.isRunning, false);
@@ -140,6 +140,44 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
   assert.equal('GOOGLE_SHEETS_PRIVATE_KEY' in harness.stored, false);
   assert.equal(harness.stored.sheetUrl, oldSheetUrl);
   assert.equal('sheetsLink' in harness.stored, false);
+});
+
+test('reflection submissions and connection tests default to date mode with local send time', async () => {
+  const requests = [];
+  const harness = createHarness({
+    sheetName: 'Template', apiToken: 'test-token-with-at-least-16-characters',
+    webAppUrl: 'https://script.google.com/macros/s/test-deployment/exec'
+  }, {
+    async fetch(_url, options) {
+      requests.push(JSON.parse(options.body));
+      return { ok: true, text: async () => JSON.stringify({ success: true }) };
+    }
+  });
+  const beforeSend = Date.now();
+  assert.equal((await harness.dispatch({ action: 'saveReflection', message: 'Today' })).success, true);
+  assert.equal((await harness.dispatch({ action: 'testSheetsConnection' })).success, true);
+  assert.equal(requests.length, 2);
+  for (const payload of requests) {
+    assert.equal(payload.sheetMode, 'date');
+    assert.ok(new Date(payload.submittedAt).getTime() >= beforeSend);
+    assert.equal(payload.timezoneOffsetMinutes, new Date(payload.submittedAt).getTimezoneOffset());
+  }
+});
+
+test('explicit fixed-tab mode is preserved in the receiver request', async () => {
+  let payload;
+  const harness = createHarness({
+    sheetMode: 'fixed', sheetName: 'Custom', apiToken: 'test-token-with-at-least-16-characters',
+    webAppUrl: 'https://script.google.com/macros/s/test-deployment/exec'
+  }, {
+    async fetch(_url, options) {
+      payload = JSON.parse(options.body);
+      return { ok: true, text: async () => JSON.stringify({ success: true }) };
+    }
+  });
+  assert.equal((await harness.dispatch({ action: 'testSheetsConnection' })).success, true);
+  assert.equal(payload.sheetMode, 'fixed');
+  assert.equal(payload.sheetName, 'Custom');
 });
 
 test('background persists the known Sheet and target tab as safe defaults', async () => {

@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('settingsForm');
   const sheetUrl = document.getElementById('sheetUrl');
   const sheetName = document.getElementById('sheetName');
+  const sheetMode = document.getElementById('sheetMode');
   const webAppUrl = document.getElementById('webAppUrl');
   const apiToken = document.getElementById('apiToken');
   const saveButton = document.getElementById('save');
@@ -36,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!TimerUtils.extractSpreadsheetId(sheetUrl.value)) {
       throw new Error('Enter a valid Google Sheets URL.');
     }
-    if (!sheetName.value.trim()) {
+    if (sheetMode.value === 'fixed' && !sheetName.value.trim()) {
       throw new Error('Enter the target tab name.');
     }
     if (!TimerUtils.isValidWebAppUrl(webAppUrl.value)) {
@@ -52,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await chrome.storage.local.set({
       sheetUrl: sheetUrl.value.trim(),
       sheetName: sheetName.value.trim(),
+      sheetMode: sheetMode.value,
       webAppUrl: webAppUrl.value.trim(),
       apiToken: apiToken.value.trim()
     });
@@ -71,7 +73,10 @@ document.addEventListener('DOMContentLoaded', () => {
       await saveSettings();
       const response = await sendMessage({ action: 'testSheetsConnection' });
       const target = response.data && response.data.target;
-      setStatus(`Connection works${target ? ` · ${target}` : ''}.`, 'success');
+      const creation = response.data && response.data.willCreate
+        ? ` This tab will be created from ${response.data.template} when you send your first reflection.`
+        : '';
+      setStatus(`Connection works${target ? ` · ${target}` : ''}.${creation}`, 'success');
     } catch (error) {
       setStatus(error.message, 'error');
     } finally {
@@ -80,9 +85,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  chrome.storage.local.get(['sheetUrl', 'sheetsLink', 'sheetName', 'webAppUrl', 'apiToken']).then((saved) => {
+  function updateTargetMode() {
+    sheetName.disabled = sheetMode.value !== 'fixed';
+    sheetName.required = sheetMode.value === 'fixed';
+  }
+
+  sheetMode.addEventListener('change', updateTargetMode);
+
+  chrome.storage.local.get(['sheetUrl', 'sheetsLink', 'sheetName', 'sheetMode', 'webAppUrl', 'apiToken']).then((saved) => {
     sheetUrl.value = saved.sheetUrl || saved.sheetsLink || DEFAULT_SHEET_URL;
     sheetName.value = saved.sheetName || 'Template';
+    sheetMode.value = saved.sheetMode === 'fixed' ? 'fixed' : 'date';
+    updateTargetMode();
     webAppUrl.value = saved.webAppUrl || '';
     apiToken.value = saved.apiToken || '';
     if (!TimerUtils.isValidWebAppUrl(webAppUrl.value) || apiToken.value.trim().length < 16) {

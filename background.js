@@ -11,7 +11,7 @@ const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/synthetic-spre
 const DEFAULT_SHEET_NAME = 'Template';
 const MAX_REFLECTION_LENGTH = 5000;
 const REQUEST_TIMEOUT_MS = 20_000;
-const API_VERSION = 4;
+const API_VERSION = 5;
 const LEGACY_SECRET_KEYS = [
   'GOOGLE_SHEETS_CLIENT_EMAIL',
   'GOOGLE_SHEETS_PRIVATE_KEY',
@@ -438,11 +438,12 @@ async function dismissReflection() {
 }
 
 async function callSheetsWebApp(action, extra = {}) {
-  const config = await chrome.storage.local.get(['sheetUrl', 'webAppUrl', 'apiToken', 'sheetName']);
+  const config = await chrome.storage.local.get(['sheetUrl', 'webAppUrl', 'apiToken', 'sheetName', 'sheetMode']);
   const sheetUrl = String(config.sheetUrl || DEFAULT_SHEET_URL).trim();
   const webAppUrl = String(config.webAppUrl || '').trim();
   const apiToken = String(config.apiToken || '').trim();
   const sheetName = String(config.sheetName || DEFAULT_SHEET_NAME).trim();
+  const sheetMode = config.sheetMode === 'fixed' ? 'fixed' : 'date';
   const missingSettings = [];
 
   if (!TimerUtils.extractSpreadsheetId(sheetUrl)) {
@@ -454,7 +455,7 @@ async function callSheetsWebApp(action, extra = {}) {
   if (apiToken.length < 16) {
     missingSettings.push('Reflection API token');
   }
-  if (!sheetName) {
+  if (sheetMode === 'fixed' && !sheetName) {
     missingSettings.push('target tab');
   }
   if (missingSettings.length > 0) {
@@ -465,6 +466,7 @@ async function callSheetsWebApp(action, extra = {}) {
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const submittedAt = new Date();
   try {
     const response = await fetch(webAppUrl, {
       method: 'POST',
@@ -474,6 +476,9 @@ async function callSheetsWebApp(action, extra = {}) {
         token: apiToken,
         sheetUrl,
         sheetName,
+        sheetMode,
+        submittedAt: submittedAt.toISOString(),
+        timezoneOffsetMinutes: submittedAt.getTimezoneOffset(),
         ...extra
       }),
       cache: 'no-store',
@@ -510,11 +515,12 @@ async function saveReflection(message) {
     throw new Error(`Keep the reflection under ${MAX_REFLECTION_LENGTH.toLocaleString()} characters.`);
   }
 
+  const submittedAt = new Date();
   const result = await callSheetsWebApp('appendReflection', {
     message: cleanMessage,
-    submittedAt: new Date().toISOString(),
+    submittedAt: submittedAt.toISOString(),
     durationSeconds: timerState.durationSeconds,
-    timezoneOffsetMinutes: new Date().getTimezoneOffset()
+    timezoneOffsetMinutes: submittedAt.getTimezoneOffset()
   });
   await dismissReflection();
   return result;

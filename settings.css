@@ -5,7 +5,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; color: light-dark(#172033, #f8fafc); background: light-dark(#f1f5f9, #0f172a); }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 .page { width: min(760px, calc(100% - 32px)); margin: 48px auto; }
 header { margin-bottom: 24px; }
 .eyebrow { margin: 0 0 7px; color: #16a34a; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
@@ -16,8 +16,9 @@ h2 { margin: 0 0 20px; font-size: 20px; }
 form { display: grid; }
 label { margin: 16px 0 7px; font-size: 14px; font-weight: 750; }
 label:first-child { margin-top: 0; }
-input { width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid light-dark(#cbd5e1, #46556c); border-radius: 10px; color: inherit; background: light-dark(#f8fafc, #101a2b); }
-input:focus { border-color: #16a34a; outline: 3px solid rgba(22,163,74,.15); }
+input, select { width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid light-dark(#cbd5e1, #46556c); border-radius: 10px; color: inherit; background: light-dark(#f8fafc, #101a2b); }
+input:focus, select:focus { border-color: #16a34a; outline: 3px solid rgba(22,163,74,.15); }
+input:disabled { opacity: .55; }
 .input-actions { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; }
 .hint { margin: 7px 0 0; color: light-dark(#64748b, #94a3b8); font-size: 13px; }
 code { padding: 2px 5px; border-radius: 5px; background: light-dark(#e2e8f0, #263449); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }

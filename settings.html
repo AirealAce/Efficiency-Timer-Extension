@@ -21,8 +21,15 @@
         <input id="sheetUrl" name="sheetUrl" type="url" autocomplete="off" required>
         <p class="hint">The configured Apps Script will only accept this spreadsheet ID.</p>
 
-        <label for="sheetName">Target tab</label>
-        <input id="sheetName" name="sheetName" type="text" maxlength="100" value="Template" required>
+        <label for="sheetMode">Choose the tab</label>
+        <select id="sheetMode" name="sheetMode">
+          <option value="date">Automatically match the date when I send (default)</option>
+          <option value="fixed">Always use a specific tab</option>
+        </select>
+        <p class="hint">Uses your computer's local date. Accepts MM/DD/YYYY or MM/DD/YY, with or without leading zeros. If both exist, the four-digit year wins. A missing daily tab is copied from your template when you first send, using MM/DD/YYYY.</p>
+
+        <label for="sheetName">Specific tab (only used in fixed mode)</label>
+        <input id="sheetName" name="sheetName" type="text" maxlength="100" value="Template" disabled>
         <p class="hint">Entries fill 16 rows in each timestamp/activity pair, matching the existing sheet layout.</p>
 
         <label for="webAppUrl">Apps Script deployment URL</label>

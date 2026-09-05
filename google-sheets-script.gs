@@ -4,12 +4,14 @@
  * Required Script Properties:
  *   SPREADSHEET_ID       The one spreadsheet this deployment may update.
  *   REFLECTION_API_TOKEN A long random token shared with the extension.
+ * Optional Script Property:
+ *   TEMPLATE_SHEET_NAME  Source for new daily tabs (defaults to Template).
  *
  * Deploy as a web app that executes as you. The extension posts text/plain so
  * the request works cleanly from a Manifest V3 service worker.
  */
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const ROWS_PER_BLOCK = 16;
 const MAX_COLUMN_PAIRS = 100;
 const MAX_REFLECTION_LENGTH = 5000;
@@ -38,22 +40,15 @@ function doPost(event) {
       throw new Error('The requested spreadsheet does not match SPREADSHEET_ID.');
     }
 
-    const sheetName = String(payload.sheetName || 'Template').trim();
-    if (!sheetName || sheetName.length > 100) {
-      throw new Error('The target tab name is invalid.');
-    }
-
     const spreadsheet = SpreadsheetApp.openById(config.spreadsheetId);
-    const sheet = spreadsheet.getSheetByName(sheetName);
-    if (!sheet) {
-      throw new Error(`The sheet tab "${sheetName}" does not exist.`);
-    }
-
     if (payload.action === 'ping') {
+      const target = resolveTargetSheet_(spreadsheet, payload);
       return jsonOutput_({
         success: true,
         version: APP_VERSION,
-        target: `${spreadsheet.getName()} / ${sheet.getName()}`
+        target: `${spreadsheet.getName()} / ${target.sheet ? target.sheet.getName() : target.name}`,
+        willCreate: !target.sheet,
+        template: target.templateName || null
       });
     }
 
@@ -71,6 +66,8 @@ function doPost(event) {
 
     lock = LockService.getScriptLock();
     lock.waitLock(15000);
+    const target = resolveTargetSheet_(spreadsheet, payload);
+    const sheet = target.sheet || createDailySheet_(spreadsheet, target);
     const result = appendReflection_(sheet, message);
     SpreadsheetApp.flush();
 
@@ -78,6 +75,7 @@ function doPost(event) {
       success: true,
       version: APP_VERSION,
       sheet: sheet.getName(),
+      created: !target.sheet,
       range: result.range,
       timestamp: result.timestamp.toISOString()
     });
@@ -92,6 +90,94 @@ function doPost(event) {
       lock.releaseLock();
     }
   }
+}
+
+function resolveTargetSheet_(spreadsheet, payload) {
+  // Requests from older extension versions have no mode: date routing is the default.
+  const mode = payload.sheetMode || 'date';
+  if (mode === 'fixed') {
+    const name = String(payload.sheetName || '').trim();
+    if (!name || name.length > 100) {
+      throw new Error('The target tab name is invalid.');
+    }
+    const sheet = spreadsheet.getSheetByName(name);
+    if (!sheet) {
+      throw new Error(`The sheet tab "${name}" does not exist.`);
+    }
+    return { sheet };
+  }
+  if (mode !== 'date') {
+    throw new Error('The target tab mode is invalid.');
+  }
+
+  const date = submissionDate_(spreadsheet, payload);
+  const matches = spreadsheet.getSheets().map((sheet) => ({
+    sheet,
+    parts: sheet.getName().trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})$/)
+  })).filter(({ parts }) => parts
+    && Number(parts[1]) === date.month
+    && Number(parts[2]) === date.day
+    && Number(parts[3]) === (parts[3].length === 4 ? date.year : date.year % 100));
+
+  // Prefer an explicit four-digit year, then the fully padded name.
+  matches.sort((left, right) => right.parts[3].length - left.parts[3].length
+    || Number(right.sheet.getName() === date.name) - Number(left.sheet.getName() === date.name)
+    || left.sheet.getName().localeCompare(right.sheet.getName()));
+  if (matches.length > 0) {
+    return { sheet: matches[0].sheet };
+  }
+  const templateName = String(PropertiesService.getScriptProperties()
+    .getProperty('TEMPLATE_SHEET_NAME') || 'Template').trim();
+  const template = spreadsheet.getSheetByName(templateName);
+  if (!template) {
+    throw new Error(`No dated tab matches ${date.name}, and the template tab "${templateName}" is missing. Restore it or set TEMPLATE_SHEET_NAME in Apps Script properties. Nothing was saved.`);
+  }
+  return { sheet: null, name: date.name, template, templateName };
+}
+
+function createDailySheet_(spreadsheet, target) {
+  // Called only for a validated reflection while holding the script lock, never by ping.
+  const sheet = spreadsheet.insertSheet(target.name, { template: target.template });
+  try {
+    // Clear copied log contents only: formatting, validation, and the rest of the template stay.
+    const columns = Math.min(MAX_COLUMN_PAIRS * 2, Math.floor(sheet.getMaxColumns() / 2) * 2);
+    if (columns > 0) {
+      sheet.getRange(1, 1, Math.min(ROWS_PER_BLOCK, sheet.getMaxRows()), columns).clearContent();
+    }
+    if (sheet.getMaxRows() < ROWS_PER_BLOCK) {
+      sheet.insertRowsAfter(sheet.getMaxRows(), ROWS_PER_BLOCK - sheet.getMaxRows());
+    }
+    sheet.showSheet();
+    return sheet;
+  } catch (error) {
+    // Roll back only this newly created copy; never remove an existing daily tab or template.
+    spreadsheet.deleteSheet(sheet);
+    throw error;
+  }
+}
+
+function submissionDate_(spreadsheet, payload) {
+  const timestamp = payload.submittedAt === undefined ? new Date() : new Date(payload.submittedAt);
+  if ((payload.submittedAt !== undefined && typeof payload.submittedAt !== 'string')
+      || !Number.isFinite(timestamp.getTime())) {
+    throw new Error('The submission date is invalid.');
+  }
+
+  let parts;
+  if (payload.timezoneOffsetMinutes !== undefined) {
+    const offset = payload.timezoneOffsetMinutes;
+    if (!Number.isInteger(offset) || Math.abs(offset) > 14 * 60) {
+      throw new Error('The submission time zone is invalid.');
+    }
+    // getTimezoneOffset is UTC minus local time; UTC getters avoid the script's zone.
+    const localTime = new Date(timestamp.getTime() - offset * 60000);
+    parts = [localTime.getUTCFullYear(), localTime.getUTCMonth() + 1, localTime.getUTCDate()];
+  } else {
+    parts = Utilities.formatDate(timestamp, spreadsheet.getSpreadsheetTimeZone(), 'yyyy-MM-dd')
+      .split('-').map(Number);
+  }
+  const [year, month, day] = parts;
+  return { year, month, day, name: `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}` };
 }
 
 function getConfig_() {

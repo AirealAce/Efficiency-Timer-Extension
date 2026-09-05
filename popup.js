@@ -1,7 +1,7 @@
 'use strict';
 
 document.addEventListener('DOMContentLoaded', () => {
-  const EXPECTED_API_VERSION = 4;
+  const EXPECTED_API_VERSION = 5;
   const MESSAGE_TIMEOUT_MS = 3000;
   const DEFAULT_DURATION_SECONDS = 25 * 60;
   const elements = {
