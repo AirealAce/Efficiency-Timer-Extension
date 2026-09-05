@@ -168,7 +168,7 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
     },
     SpreadsheetApp: {
       Dimension: { ROWS: 'ROWS' },
-      BorderStyle: { SOLID_MEDIUM: 'SOLID_MEDIUM' },
+      BorderStyle: { SOLID: 'SOLID', SOLID_MEDIUM: 'SOLID_MEDIUM' },
       openById(id) {
         assert.equal(id, SPREADSHEET_ID);
         return spreadsheet;
@@ -291,6 +291,33 @@ test('hour markers follow the example and entry colors alternate across the divi
   assert.deepEqual(format[1][0].borders, { top: true, bottom: true,
     left: false, right: false, vertical: false, horizontal: false,
     color: '#ff4d4d', borderStyle: 'SOLID_MEDIUM' });
+});
+
+test('reused and inserted entry cells have thin white borders without changing hour dividers', () => {
+  const harness = createHarness(['Temp']);
+  for (const time of ['17:58', '17:59', '18:01', '18:02']) {
+    const result = harness.request({ ...datedRequest, isTest: true,
+      submittedAt: `2026-09-05T${time}:00-04:00` });
+    assert.equal(result.success, true, result.error);
+    const format = harness.formats.get('Temp');
+    for (const cell of format[0].slice(0, 2)) {
+      assert.deepEqual(cell.borders, { top: true, left: true, bottom: true,
+        right: true, vertical: true, horizontal: false, color: '#ffffff', borderStyle: 'SOLID' });
+    }
+    const notes = harness.notesBySheet.get('Temp');
+    for (let row = 0; row < notes.length; row += 1) {
+      if (!notes[row]?.[0]?.includes('"kind":"hour"')) continue;
+      for (const cell of format[row].slice(0, 2)) {
+        assert.equal(cell.borders.top, true);
+        assert.equal(cell.borders.bottom, true);
+        assert.equal(cell.borders.left, false);
+        assert.equal(cell.borders.right, false);
+        assert.equal(cell.borders.vertical, false);
+        assert.notEqual(cell.borders.color, '#ffffff');
+        assert.equal(cell.borders.borderStyle, 'SOLID_MEDIUM');
+      }
+    }
+  }
 });
 
 test('empty top pairs are reused, while partial pairs and empty-result formulas are preserved', () => {

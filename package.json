@@ -1,6 +1,6 @@
 {
   "name": "reflection-timer-extension",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": true,
   "description": "Chrome extension for reliable focus timing and Google Sheets reflection logging.",
   "scripts": {

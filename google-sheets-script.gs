@@ -11,7 +11,7 @@
  * the request works cleanly from a Manifest V3 service worker.
  */
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.2.1';
 const ROWS_PER_BLOCK = 16;
 const MAX_COLUMN_PAIRS = 100;
 const MAX_REFLECTION_LENGTH = 5000;
@@ -268,7 +268,8 @@ function appendReflection_(sheet, message, moment, spreadsheet) {
   const clockLabel = `${moment.hour % 12 || 12}:${String(moment.minute).padStart(2, '0')}`;
   entry.setValues([[clockLabel, message.startsWith('=') ? "'" + message : message]])
     .setFontWeight('normal').setVerticalAlignment('top')
-    .setBorder(false, false, false, false, false, false).clearNote();
+    .setBorder(true, true, true, true, true, false, '#ffffff', SpreadsheetApp.BorderStyle.SOLID)
+    .clearNote();
   entry.getCell(1, 1).setBackground(background)
     .setFontColor(textColor_(background)).setNote(NOTE_PREFIX + JSON.stringify({
       kind: 'entry', timestamp: moment.timestamp.toISOString(), hourStart: moment.hourStart

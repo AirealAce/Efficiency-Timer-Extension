@@ -9,6 +9,7 @@ A Manifest V3 Chrome extension for running focus sessions, prompting for a short
 - Shows an accessible reflection dialog on the active webpage when time expires.
 - Automatically selects the dated tab using the computer's local date when you send, not when the timer started or finished.
 - Writes newest-first timestamp/activity pairs in `A:B`. Empty top cells are reused; otherwise only A:B shifts down. Existing entries are preserved, and other columns stay in place.
+- Gives new entry cells thin white top, bottom, and side borders, including the divider between A and B. Hour dividers keep their colored top/bottom-only borders.
 - Alternates timestamp backgrounds between white (black text) and `#595959` (white text), ignoring hour dividers when choosing the next color. Entry times are displayed as plain-text 12-hour labels (`6:21`); the cell note retains the full ISO timestamp and hour boundary.
 - Inserts an hour divider beneath the first entry of each new hour, including the day's first entry. Each of the 24 hours has a distinct background/border theme; 6 PM is red. Dividers have top/bottom borders only, with automatically selected black/white text for contrast. Hours with no entries do not generate extra dividers.
 - Routes **Test reflection prompt** submissions to `Temp`, never a dated or fixed live tab. The dialog labels test mode and shows the saved destination. A missing Temp tab is an error, not a fallback. **Save & test** remains a read-only connection check for the normal destination.
