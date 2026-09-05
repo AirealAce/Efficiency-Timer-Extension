@@ -10,6 +10,13 @@
   const MAX_REFLECTION_LENGTH = 5000;
   let sfxVolume = 0.5;
   let activePromptIsTest = false;
+  const log = (event, details = {}) => globalThis.TimerDiagnosticClient?.event(event, {
+    hasPrompt: Boolean(document.getElementById(HOST_ID)), isTest: activePromptIsTest,
+    visibility: document.hidden ? 'hidden' : 'visible', ...details
+  });
+  document.addEventListener?.('visibilitychange', () => log('page.visibility'));
+  globalThis.addEventListener?.('pageshow', (event) => log('page.shown', { persisted: event.persisted }));
+  globalThis.addEventListener?.('pagehide', (event) => log('page.hidden', { persisted: event.persisted }));
 
   chrome.storage.local.get(['sfxVolume']).then((result) => {
     const saved = Number(result.sfxVolume);
@@ -19,30 +26,42 @@
   }).catch(() => {});
 
   function sendMessage(message) {
+    const startedAt = Date.now();
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (!response || response.success === false) {
-          const error = new Error((response && response.error) || 'The extension did not respond.');
-          error.code = response && response.errorCode;
-          reject(error);
-        } else {
-          resolve(response);
-        }
-      });
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const lastError = chrome.runtime.lastError;
+          if (lastError) {
+            log('client.failure', { action: message.action, errorKind: globalThis.TimerDiagnosticClient?.errorKind(lastError) || 'unknown', elapsedMs: Date.now() - startedAt });
+            reject(new Error(lastError.message));
+          } else if (!response || response.success === false) {
+            log('client.failure', { action: message.action, errorKind: 'rejected', elapsedMs: Date.now() - startedAt });
+            const error = new Error((response && response.error) || 'The extension did not respond.');
+            error.code = response && response.errorCode;
+            reject(error);
+          } else {
+            resolve(response);
+          }
+        });
+      } catch (error) {
+        log('client.failure', { action: message.action, errorKind: globalThis.TimerDiagnosticClient?.errorKind(error) || 'unknown', elapsedMs: Date.now() - startedAt });
+        reject(error);
+      }
     });
   }
 
   async function playNotificationSound() {
     if (document.hidden || sfxVolume <= 0) {
+      log('sound.result', { outcome: document.hidden ? 'hidden' : 'muted' });
       return;
     }
     try {
       const audio = new Audio(chrome.runtime.getURL('popup.mp3'));
       audio.volume = sfxVolume;
       await audio.play();
+      log('sound.result', { outcome: 'success' });
     } catch (_error) {
+      log('sound.result', { outcome: 'blocked' });
       // Browsers may block autoplay; the visual prompt still appears.
     }
   }
@@ -211,6 +230,7 @@
     dialog.append(eyebrow, title, context, label, textarea, meta, actions);
     shadow.append(style, backdrop, dialog);
     (document.body || document.documentElement).appendChild(host);
+    log('prompt.shown');
 
     const setBusy = (busy) => {
       textarea.disabled = busy;
@@ -221,6 +241,7 @@
     };
 
     const dismiss = async () => {
+      log('prompt.skipped');
       dismissLocalPrompt();
       if (!options.isTest) {
         try {
@@ -241,13 +262,16 @@
         return;
       }
       setBusy(true);
+      log('prompt.submit');
       status.textContent = '';
       try {
         const response = await sendMessage({ action: 'saveReflection', message, isTest: options.isTest });
+        log('prompt.saved');
         status.textContent = `Saved${response.data && response.data.sheet ? ` to ${response.data.sheet}` : ''}.`;
         status.classList.add('success');
         setTimeout(dismissLocalPrompt, 450);
       } catch (error) {
+        log('prompt.failed', { errorKind: error.code === 'SETTINGS_REQUIRED' ? 'settings_required' : 'unknown' });
         setBusy(false);
         status.textContent = error.message;
         status.classList.add('error');

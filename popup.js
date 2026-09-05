@@ -1,6 +1,9 @@
 'use strict';
 
 document.addEventListener('DOMContentLoaded', () => {
+  const log = (event, details) => globalThis.TimerDiagnosticClient?.event(event, details);
+  log('popup.opened');
+  window.addEventListener?.('pagehide', () => log('popup.closed'));
   const EXPECTED_API_VERSION = 6;
   const MESSAGE_TIMEOUT_MS = 3000;
   const DEFAULT_DURATION_SECONDS = 25 * 60;
@@ -31,28 +34,41 @@ document.addEventListener('DOMContentLoaded', () => {
   let durationPresetUntouched = durationFromInputs() === DEFAULT_DURATION_SECONDS;
 
   function sendMessage(message) {
+    const startedAt = Date.now();
+    log('client.request', { action: message.action, requestedDurationSeconds: message.durationSeconds,
+      autoRestart: message.autoRestart });
     return new Promise((resolve, reject) => {
       let settled = false;
       const timeoutId = setTimeout(() => {
         if (!settled) {
           settled = true;
+          log('client.failure', { action: message.action, errorKind: 'timeout', elapsedMs: Date.now() - startedAt });
           reject(new Error('The timer service did not respond. Reload the extension once.'));
         }
       }, MESSAGE_TIMEOUT_MS);
-      chrome.runtime.sendMessage(message, (response) => {
-        if (settled) {
-          return;
-        }
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const lastError = chrome.runtime.lastError;
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          if (lastError) {
+            log('client.failure', { action: message.action, errorKind: globalThis.TimerDiagnosticClient?.errorKind(lastError) || 'unknown', elapsedMs: Date.now() - startedAt });
+            reject(new Error(lastError.message));
+          } else if (!response || response.success === false) {
+            log('client.failure', { action: message.action, errorKind: 'rejected', elapsedMs: Date.now() - startedAt });
+            reject(new Error((response && response.error) || 'The extension did not respond.'));
+          } else {
+            log('client.response', { action: message.action, success: true, elapsedMs: Date.now() - startedAt });
+            resolve(response);
+          }
+        });
+      } catch (error) {
         settled = true;
         clearTimeout(timeoutId);
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (!response || response.success === false) {
-          reject(new Error((response && response.error) || 'The extension did not respond.'));
-        } else {
-          resolve(response);
-        }
-      });
+        log('client.failure', { action: message.action, errorKind: globalThis.TimerDiagnosticClient?.errorKind(error) || 'unknown', elapsedMs: Date.now() - startedAt });
+        reject(error);
+      }
     });
   }
 
@@ -179,6 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sendMessage({ action: 'getTimerState' })
       ]);
       if (response.apiVersion !== EXPECTED_API_VERSION || !response.state) {
+        log('popup.versionMismatch');
         elements.timerStatus.textContent = 'Finishing update…';
         setStatus('Reopen the timer in a moment.', 'success');
         setTimeout(() => chrome.runtime.reload(), 250);
@@ -200,10 +217,13 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.autoRestart.checked = Boolean(saved.autoRestart);
       }
       updateTimerDisplay();
+      log('popup.loaded', { observedRunning: state.isRunning, observedRemainingSeconds: getDisplayedRemaining(),
+        observedEndTime: state.endTime, observedPromptActive: state.promptActive, inputsDirty });
       if (document.activeElement === elements.hours) {
         elements.hours.select();
       }
     } catch (error) {
+      log('popup.failed');
       elements.timerStatus.textContent = 'Unable to load';
       elements.startPause.disabled = true;
       elements.reset.disabled = true;
@@ -225,6 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const value = Math.max(0, Number.parseInt(input.value, 10) || 0);
       input.value = String(Number.isFinite(max) ? Math.min(max, value) : value);
       inputsDirty = true;
+      log('popup.durationChanged', { requestedDurationSeconds: durationFromInputs() });
       await saveTimerInputs();
       updateTimerDisplay();
     });
@@ -343,6 +364,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === 'timerStateChanged' && message.state) {
+      log('popup.stateReceived', { observedRunning: message.state.isRunning,
+        observedRemainingSeconds: message.state.remainingSeconds, observedEndTime: message.state.endTime,
+        observedPromptActive: message.state.promptActive });
       state = message.state;
       updateTimerDisplay();
       updateScheduleDisplay();

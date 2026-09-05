@@ -33,6 +33,12 @@ button:disabled { cursor: wait; opacity: .6; }
 .status.success { color: #16a34a; }
 .setup ol { margin: 0; padding-left: 24px; }
 .setup li { margin: 10px 0; line-height: 1.55; }
+.diagnostics-toggle { display: flex; align-items: center; gap: 10px; }
+.diagnostics-toggle input { width: 18px; min-height: 18px; margin: 0; accent-color: #16a34a; }
+.diagnostics-actions { flex-wrap: wrap; }
+.diagnostics-preview { margin-top: 14px; }
+.diagnostics-preview summary { cursor: pointer; }
+.diagnostics-preview pre { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
 
 @media (max-width: 600px) {
   .page { margin-block: 24px; }

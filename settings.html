@@ -10,7 +10,7 @@
   <main class="page">
     <header>
       <p class="eyebrow">Reflection Timer</p>
-      <h1>Google Sheets connection</h1>
+      <h1>Extension settings</h1>
       <p class="lede">Responses go through your Google Apps Script web app. The extension never stores a Google service-account private key.</p>
     </header>
 
@@ -52,6 +52,26 @@
       <p id="status" class="status" role="status" aria-live="polite"></p>
     </section>
 
+    <section class="card" aria-labelledby="diagnostics-heading">
+      <h2 id="diagnostics-heading">Debugging &amp; activity log</h2>
+      <label class="diagnostics-toggle"><input id="diagnosticsEnabled" type="checkbox"> Record local diagnostic events</label>
+      <p class="hint">On by default. Records timer actions, tab IDs and visibility, worker starts, alarm timing, prompt delivery, and error categories. No browsing URLs, page titles or contents, reflection text, tokens, or connection settings. Nothing is sent to a server.</p>
+      <p class="hint">Keeps up to 1,200 events from the last 7 days, whichever is less. Pausing stops new records; clearing removes the saved log. Activity timestamps can still be personal—review reports before sharing.</p>
+      <p id="diagnosticsSummary" class="hint">Loading diagnostics…</p>
+      <div class="actions diagnostics-actions">
+        <button id="markDiagnosticIssue" class="secondary" type="button">Mark issue</button>
+        <button id="exportDiagnostics" class="primary" type="button">Export diagnostic report</button>
+        <button id="refreshDiagnostics" class="secondary" type="button">Refresh</button>
+        <button id="clearDiagnostics" class="secondary" type="button">Clear log</button>
+      </div>
+      <p id="diagnosticsStatus" class="status" role="status" aria-live="polite"></p>
+      <details class="diagnostics-preview">
+        <summary>Recent events (latest 20)</summary>
+        <pre id="diagnosticsRecent"></pre>
+      </details>
+      <p class="hint">When something feels wrong, click “Mark issue” in the timer popup, then export here and share the JSON file for debugging. Marking and exporting do not start or stop the timer. Logs are best effort, not a recording of every click; refresh existing webpages after reloading the extension to enable page-side events.</p>
+    </section>
+
     <section class="card setup" aria-labelledby="setup-heading">
       <h2 id="setup-heading">One-time Apps Script setup</h2>
       <ol>
@@ -66,6 +86,8 @@
   </main>
 
   <script src="timer-utils.js"></script>
+  <script src="diagnostic-client.js"></script>
+  <script src="diagnostics-ui.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reflection Timer",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "description": "A reliable focus timer that asks how you spent the session and logs the response to Google Sheets.",
   "permissions": [
     "alarms",
@@ -26,7 +26,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["diagnostic-client.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

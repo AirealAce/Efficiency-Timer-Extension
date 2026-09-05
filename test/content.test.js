@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8');
+const diagnosticClientSource = fs.readFileSync(path.join(__dirname, '..', 'diagnostic-client.js'), 'utf8');
 
 function createHarness() {
   const elements = [];
@@ -25,7 +26,10 @@ function createHarness() {
     return value;
   }
   const body = element('body');
+  const documentEvents = {};
+  const pageEvents = {};
   const document = { hidden: true, body, createElement: element,
+    addEventListener(name, callback) { documentEvents[name] = callback; },
     getElementById: (id) => elements.find((e) => e.id === id && !e.removed) };
   const chrome = {
     storage: { local: { async get() { return {}; } } },
@@ -37,9 +41,11 @@ function createHarness() {
       }
     }
   };
-  vm.runInNewContext(source, { chrome, document, setTimeout() {} });
+  const context = vm.createContext({ chrome, document, setTimeout() {}, addEventListener(name, callback) { pageEvents[name] = callback; } });
+  vm.runInContext(diagnosticClientSource, context);
+  vm.runInContext(source, context);
   return {
-    elements, messages,
+    elements, messages, document, documentEvents, pageEvents,
     show(isTest) { let result; listener({ action: 'showReflectionPrompt', isTest }, {}, (r) => { result = r; }); return result; }
   };
 }
@@ -64,4 +70,26 @@ test('normal prompts keep normal routing and are never silently relabeled as tes
   harness.elements.find((e) => e.tag === 'textarea').value = 'Real message';
   await harness.elements.find((e) => e.className === 'submit').listeners.click();
   assert.equal(harness.messages.find((m) => m.action === 'saveReflection').isTest, false);
+});
+
+test('prompt and visibility diagnostics never capture reflection text or typing', async () => {
+  const harness = createHarness();
+  harness.show(true);
+  const textarea = harness.elements.find((e) => e.tag === 'textarea');
+  textarea.value = 'PRIVATE REFLECTION TO EXCLUDE';
+  const countBeforeTyping = harness.messages.filter((m) => m.action === 'recordDiagnostic').length;
+  textarea.listeners.input();
+  assert.equal(harness.messages.filter((m) => m.action === 'recordDiagnostic').length, countBeforeTyping);
+  harness.documentEvents.visibilitychange();
+  harness.pageEvents.pageshow({ persisted: true });
+  harness.pageEvents.pagehide({ persisted: false });
+  await harness.elements.find((e) => e.className === 'submit').listeners.click();
+  const events = harness.messages.filter((m) => m.action === 'recordDiagnostic');
+  for (const event of ['prompt.shown', 'sound.result', 'page.visibility', 'page.shown', 'page.hidden', 'prompt.submit', 'prompt.saved']) {
+    assert.ok(events.some((m) => m.event === event), event);
+  }
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE REFLECTION/);
+  const visibility = events.find((m) => m.event === 'page.visibility');
+  assert.equal(visibility.details.hasPrompt, true);
+  assert.equal(visibility.details.visibility, 'hidden');
 });

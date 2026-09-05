@@ -60,10 +60,14 @@
       <button id="testPrompt" class="text-button" type="button">Test reflection prompt</button>
       <span id="currentTime" class="clock"></span>
     </div>
+    <button id="markDiagnosticIssue" class="text-button" type="button">Mark issue for debugging</button>
+    <p id="diagnosticsStatus" class="status" role="status" aria-live="polite"></p>
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </main>
 
   <script src="timer-utils.js"></script>
+  <script src="diagnostic-client.js"></script>
+  <script src="diagnostics-ui.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

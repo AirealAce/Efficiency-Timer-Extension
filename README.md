@@ -46,6 +46,18 @@ After upgrading, reload the extension and refresh webpages to update the test-di
 
 When the Apps Script changes, use **Deploy → Manage deployments**, edit the deployment, and select a new version. Saving code alone does not update an existing deployment.
 
+## Debugging intermittent timer behavior (2.4+)
+
+1. Reload Reflection Timer at `chrome://extensions`, then refresh existing webpages once. No Apps Script redeployment is needed for this update.
+2. Use the timer normally. If something feels wrong, click **Mark issue for debugging** in the popup as soon as possible. This captures the current timer/deadline, actual Chrome alarms, and active tab ID without changing the timer.
+3. Open **Settings → Debugging & activity log → Export diagnostic report** and share the downloaded JSON with the person debugging (or attach it in your Codex conversation). Export soon after an issue, before older events roll out. Logs are not sent anywhere automatically, and the assistant cannot see them until you share the report.
+
+Logging is enabled by default for this diagnostic feature. It records timer commands and resulting state, popup load/message failures, schedules, worker restarts/restoration, alarm lateness, tab activation/loading/discard/freeze events, window focus, page visibility, reflection prompt delivery/injection, save outcomes, and sound failures. The issue marker and report also compare expected deadlines with the actual alarm inventory. A new worker session does not by itself indicate a bug: Chrome normally suspends idle extension workers ([Chrome lifecycle documentation](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)).
+
+The persistent local rolling log keeps at most **1,200 events from the past 7 days**. It is pruned on recording and reporting, not by a background heartbeat; old data on disk is removed on the next successful log write or clear. Switch logging off in settings to pause collection, or use **Clear log** to remove it. Disabling does not erase existing events. Export still includes a read-only current-state snapshot while logging is off. No new permissions, polling, timer keep-alive, or server upload are added.
+
+Only allowlisted event names, numeric values, booleans, and fixed categories are saved. Reports never include browsing URLs, titles, page contents, reflection text, raw error messages/stacks, Sheet names, API tokens, or connection settings. Tab/window IDs and activity timestamps are included and may still be personal; review before sharing. Logs are best effort: they cannot reconstruct activity before installation/reload, and abrupt browser shutdown, storage failure, or an invalidated page context can leave gaps. Page-hide events are not guaranteed. This adds evidence for diagnosis; it does not claim to fix the intermittent behavior yet.
+
 ## Security migration
 
 Version 1 stored a service-account email and private key in `chrome.storage.local`. Version 2 removes those values automatically and no longer requests access to the Google Sheets or OAuth APIs.

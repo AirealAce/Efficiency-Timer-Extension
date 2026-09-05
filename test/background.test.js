@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const TimerUtils = require('../timer-utils.js');
+const TimerDiagnostics = require('../diagnostics.js');
 
 const backgroundSource = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
 
@@ -21,6 +22,7 @@ function createHarness(seed = {}, options = {}) {
   const stored = { ...seed };
   const clearedAlarms = [];
   const createdAlarms = [];
+  const activeAlarms = new Map();
   const injectedScripts = [];
   const removedStorageKeys = [];
   let contentScriptInjected = false;
@@ -33,7 +35,10 @@ function createHarness(seed = {}, options = {}) {
         async get(keys) {
           return Object.fromEntries(keys.filter((key) => key in stored).map((key) => [key, stored[key]]));
         },
-        async set(values) { Object.assign(stored, values); },
+        async set(values) {
+          if (options.diagnosticStorageFails && TimerDiagnostics.STORAGE_KEY in values) throw new Error('Storage quota exceeded');
+          Object.assign(stored, structuredClone(values));
+        },
         async remove(keys) {
           for (const key of Array.isArray(keys) ? keys : [keys]) {
             removedStorageKeys.push(key);
@@ -43,11 +48,15 @@ function createHarness(seed = {}, options = {}) {
       }
     },
     alarms: {
-      async create(name, options) { createdAlarms.push({ name, options }); },
-      async clear(name) { clearedAlarms.push(name); return true; },
+      async create(name, options) { createdAlarms.push({ name, options }); activeAlarms.set(name, { name, scheduledTime: options.when }); },
+      async clear(name) { clearedAlarms.push(name); activeAlarms.delete(name); return true; },
+      async getAll() { return [...activeAlarms.values()]; },
       onAlarm: createEvent()
     },
     runtime: {
+      id: 'test-extension',
+      getURL(file) { return `chrome-extension://test-extension/${file}`; },
+      getManifest() { return { version: '2.4.0' }; },
       lastError: null,
       onMessage: runtimeOnMessage,
       onInstalled: createEvent(),
@@ -67,8 +76,10 @@ function createHarness(seed = {}, options = {}) {
         if (callback) callback({ success: true });
       },
       onActivated: createEvent(),
-      onUpdated: createEvent()
+      onUpdated: createEvent(),
+      onRemoved: createEvent()
     },
+    windows: { onFocusChanged: createEvent() },
     scripting: {
       async executeScript(details) {
         injectedScripts.push(details);
@@ -89,6 +100,7 @@ function createHarness(seed = {}, options = {}) {
     AbortController,
     URL,
     TimerUtils,
+    TimerDiagnostics,
     chrome,
     console,
     fetch: options.fetch || (async () => { throw new Error('Unexpected fetch'); }),
@@ -98,12 +110,12 @@ function createHarness(seed = {}, options = {}) {
   };
   vm.runInNewContext(backgroundSource, context, { filename: 'background.js' });
 
-  async function dispatch(message) {
+  async function dispatch(message, sender = { id: 'test-extension', url: 'chrome-extension://test-extension/popup.html' }) {
     const listener = runtimeOnMessage.listeners[0];
     assert.ok(listener, 'background registered a message listener');
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Message response timed out')), 1000);
-      const keepAlive = listener(message, {}, (response) => {
+      const keepAlive = listener(message, sender, (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
@@ -113,6 +125,7 @@ function createHarness(seed = {}, options = {}) {
 
   return {
     chrome,
+    activeAlarms,
     createdAlarms,
     clearedAlarms,
     dispatch,
@@ -287,8 +300,7 @@ test('test prompt injects the content script when an older tab has no receiver',
   assert.equal(harness.tabMessageCount, 2);
   assert.equal(harness.injectedScripts.length, 1);
   assert.equal(harness.injectedScripts[0].target.tabId, 42);
-  assert.equal(harness.injectedScripts[0].files.length, 1);
-  assert.equal(harness.injectedScripts[0].files[0], 'content.js');
+  assert.equal(harness.injectedScripts[0].files.join(','), 'diagnostic-client.js,content.js');
 });
 
 test('test prompt returns useful guidance when Chrome blocks the page', async () => {
@@ -316,4 +328,119 @@ test('test prompt explains that Chrome internal pages are unsupported', async ()
   assert.match(response.error, /not a chrome:\/\/ page/i);
   assert.equal(harness.tabMessageCount, 0);
   assert.equal(harness.injectedScripts.length, 0);
+});
+
+test('diagnostic issue markers include actual alarms and tab-switch evidence without changing timer state', async () => {
+  const harness = createHarness({}, { tabs: [{ id: 7, windowId: 3, active: true, url: 'https://private.example/path?secret=123', title: 'PRIVATE TITLE' }] });
+  const started = await harness.dispatch({ action: 'startTimer', durationSeconds: 600, autoRestart: false });
+  harness.chrome.tabs.onActivated.listeners[0]({ tabId: 7, windowId: 3 });
+  harness.chrome.tabs.onUpdated.listeners[0](7, { status: 'complete', url: 'https://private.example/path' }, {
+    id: 7, active: true, windowId: 3, discarded: false, frozen: false, url: 'https://private.example/path'
+  });
+  harness.chrome.windows.onFocusChanged.listeners[0](3);
+  const before = JSON.stringify(harness.stored.timerStateV2);
+  const createdBefore = harness.createdAlarms.length;
+  const marked = await harness.dispatch({ action: 'markDiagnosticIssue' });
+  assert.equal(marked.marked, true);
+  assert.equal(JSON.stringify(harness.stored.timerStateV2), before);
+  assert.equal(harness.createdAlarms.length, createdBefore);
+  assert.equal(marked.report.snapshot.checks.completionAlarmMissing, false);
+  assert.equal(marked.report.snapshot.checks.completionAlarmAt, started.state.endTime);
+  assert.equal(marked.report.snapshot.checks.activeTabId, 7);
+  for (const name of ['worker.started', 'worker.restored', 'command.received', 'command.finished', 'tab.activated', 'tab.updated', 'window.focused', 'issue.marked']) {
+    assert.ok(marked.report.events.some((event) => event.event === name), name);
+  }
+  assert.doesNotMatch(JSON.stringify(marked.report), /private\.example|PRIVATE TITLE|secret=123/);
+  harness.activeAlarms.clear();
+  const missing = await harness.dispatch({ action: 'getDiagnostics' });
+  assert.equal(missing.report.snapshot.checks.completionAlarmMissing, true);
+  assert.equal(harness.createdAlarms.length, createdBefore, 'export must not silently repair missing alarms');
+});
+
+test('export cannot include configuration, reflection contents, or server errors', async () => {
+  const secret = 'PRIVATE_TOKEN_1234567890';
+  const harness = createHarness({ apiToken: secret, webAppUrl: 'https://script.google.com/macros/s/PRIVATE_DEPLOYMENT/exec', sheetName: 'PRIVATE_SHEET' }, {
+    async fetch() { return { ok: false, status: 403, async text() { return JSON.stringify({ success: false, error: 'PRIVATE_SERVER_RESPONSE' }); } }; }
+  });
+  await harness.dispatch({ action: 'saveReflection', message: 'PRIVATE_REFLECTION', isTest: true });
+  const { report } = await harness.dispatch({ action: 'getDiagnostics' });
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_|script\.google|spreadsheets\/d/);
+  const failed = report.events.find((event) => event.event === 'sheets.failed');
+  assert.equal(failed.details.errorKind, 'rejected');
+  assert.equal(failed.details.httpStatus, 403);
+  assert.equal(failed.details.isTest, true);
+});
+
+test('missing content receiver and successful reinjection are visible in the diagnostic timeline', async () => {
+  const harness = createHarness({}, { tabs: [{ id: 42, url: 'https://example.com', active: true }], missingReceiverUntilInjected: true });
+  await harness.dispatch({ action: 'showTestPrompt' });
+  const { report } = await harness.dispatch({ action: 'getDiagnostics' });
+  assert.ok(report.events.some((event) => event.event === 'prompt.delivery' && event.details.errorKind === 'missing_receiver'));
+  assert.ok(report.events.some((event) => event.event === 'prompt.injected' && event.details.success));
+  assert.ok(report.events.some((event) => event.event === 'prompt.delivery' && event.details.success));
+});
+
+test('content scripts can log sanitized events but cannot read, erase, or change diagnostics', async () => {
+  const harness = createHarness();
+  await harness.dispatch({ action: 'getTimerState' });
+  const sender = { id: 'test-extension', url: 'https://example.com', tab: { id: 42, windowId: 8 }, frameId: 0 };
+  const accepted = await harness.dispatch({ action: 'recordDiagnostic', event: 'page.visibility', details: {
+    visibility: 'hidden', hasPrompt: true, token: 'PRIVATE', source: 'settings', tabId: 123
+  } }, sender);
+  assert.equal(accepted.success, true);
+  for (const action of ['getDiagnostics', 'markDiagnosticIssue', 'clearDiagnostics', 'setDiagnosticsEnabled']) {
+    const denied = await harness.dispatch({ action, enabled: false }, sender);
+    assert.equal(denied.success, false);
+    assert.equal(denied.report, undefined);
+  }
+  const unknown = await harness.dispatch({ action: 'recordDiagnostic', event: 'issue.marked' }, sender);
+  assert.equal(unknown.success, false);
+  const external = await harness.dispatch({ action: 'getDiagnostics' }, { id: 'other-extension', url: 'chrome-extension://test-extension/popup.html' });
+  assert.equal(external.success, false);
+  const { report } = await harness.dispatch({ action: 'getDiagnostics' });
+  const event = report.events.find((entry) => entry.event === 'page.visibility');
+  assert.equal(event.details.source, 'content');
+  assert.equal(event.details.tabId, 42);
+  assert.equal(event.details.visibility, 'hidden');
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE/);
+});
+
+test('logging storage failure does not prevent timer actions and is reported honestly', async () => {
+  const harness = createHarness({}, { diagnosticStorageFails: true });
+  const started = await harness.dispatch({ action: 'startTimer', durationSeconds: 120 });
+  assert.equal(started.success, true);
+  assert.equal(started.state.isRunning, true);
+  const result = await harness.dispatch({ action: 'markDiagnosticIssue' });
+  assert.equal(result.marked, false);
+  assert.equal(result.report.storageAvailable, false);
+  assert.equal((await harness.dispatch({ action: 'pauseTimer' })).state.isRunning, false);
+});
+
+test('disabled logs stay disabled after worker restarts and clearing does not erase timer/settings', async () => {
+  const harness = createHarness({ apiToken: 'PRIVATE_TOKEN' });
+  await harness.dispatch({ action: 'startTimer', durationSeconds: 120 });
+  await harness.dispatch({ action: 'setDiagnosticsEnabled', enabled: false });
+  await harness.dispatch({ action: 'clearDiagnostics' });
+  const restored = createHarness(harness.stored);
+  await restored.dispatch({ action: 'getTimerState' });
+  const result = await restored.dispatch({ action: 'markDiagnosticIssue' });
+  assert.equal(result.report.enabled, false);
+  assert.equal(result.report.count, 0);
+  assert.equal(result.marked, false);
+  assert.equal(result.report.snapshot.timer.isRunning, true);
+  assert.equal(restored.stored.apiToken, 'PRIVATE_TOKEN');
+});
+
+test('alarm lateness and completion are recorded without changing the normal completion workflow', async () => {
+  const harness = createHarness({}, { tabs: [{ id: 9, url: 'https://example.com', active: true }] });
+  await harness.dispatch({ action: 'startTimer', durationSeconds: 120 });
+  harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerComplete', scheduledTime: Date.now() - 4000 });
+  await new Promise((resolve) => setImmediate(resolve));
+  const { report } = await harness.dispatch({ action: 'getDiagnostics' });
+  const event = report.events.find((entry) => entry.event === 'alarm.fired');
+  assert.ok(event.details.lateByMs >= 4000);
+  assert.equal(event.details.alarm, 'completion');
+  assert.ok(report.events.some((entry) => entry.event === 'timer.completed'));
+  assert.equal(report.snapshot.timer.isRunning, false);
+  assert.equal(report.snapshot.timer.promptActive, true);
 });

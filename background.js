@@ -1,6 +1,6 @@
 'use strict';
 
-importScripts('timer-utils.js');
+importScripts('timer-utils.js', 'diagnostics.js');
 
 const TIMER_ALARM = 'reflectionTimerComplete';
 const SCHEDULE_ALARM = 'reflectionTimerScheduledStart';
@@ -20,7 +20,17 @@ const LEGACY_SECRET_KEYS = [
 
 let timerState = createDefaultTimerState();
 let scheduledTimer = null;
-const ready = initialize().catch(async (error) => {
+let stateInitialized = false;
+const diagnostics = TimerDiagnostics.createRecorder(chrome.storage.local);
+function diagnose(event, details = {}, observedState = publicState()) {
+  return diagnostics.record(event, { source: 'background', stateInitialized, ...details }, observedState);
+}
+void diagnose('worker.started');
+const ready = initialize().then(() => {
+  stateInitialized = true;
+  void diagnose('worker.restored');
+}).catch(async (error) => {
+  void diagnose('worker.failed', { errorKind: TimerDiagnostics.classifyError(error) });
   console.error('[Reflection Timer] State initialization failed; restoring safe defaults.', error);
   timerState = createDefaultTimerState();
   scheduledTimer = null;
@@ -29,6 +39,102 @@ const ready = initialize().catch(async (error) => {
   await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
   await persistTimerState(false);
 });
+
+function diagnosticSource(sender) {
+  if (sender.id !== chrome.runtime.id) return 'unknown';
+  if (sender.url === chrome.runtime.getURL('popup.html')) return 'popup';
+  if (sender.url === chrome.runtime.getURL('settings.html')) return 'settings';
+  if (sender.tab) return 'content';
+  return 'unknown';
+}
+
+function senderDetails(sender) {
+  return {
+    source: diagnosticSource(sender), tabId: sender.tab && sender.tab.id,
+    windowId: sender.tab && sender.tab.windowId, frameId: sender.frameId
+  };
+}
+
+async function diagnosticSnapshot() {
+  const snapshot = { timer: TimerDiagnostics.sanitizeState(publicState()), stateInitialized };
+  const current = snapshot.timer;
+  const expectedSchedule = current.scheduledTimer;
+  const checks = { expectedCompletionAt: current.endTime, expectedScheduleAt: expectedSchedule && expectedSchedule.targetTime };
+  try {
+    const alarms = await chrome.alarms.getAll();
+    snapshot.alarms = alarms.filter((alarm) => [TIMER_ALARM, SCHEDULE_ALARM].includes(alarm.name))
+      .map((alarm) => ({ alarm: alarm.name === TIMER_ALARM ? 'completion' : 'scheduled_start', scheduledTime: alarm.scheduledTime }));
+    const completion = alarms.find((alarm) => alarm.name === TIMER_ALARM);
+    const scheduled = alarms.find((alarm) => alarm.name === SCHEDULE_ALARM);
+    Object.assign(checks, {
+      alarmsAvailable: true, alarmCount: snapshot.alarms.length,
+      completionAlarmAt: completion && completion.scheduledTime,
+      scheduleAlarmAt: scheduled && scheduled.scheduledTime,
+      completionAlarmMissing: Boolean(current.isRunning && !completion),
+      scheduleAlarmMissing: Boolean(expectedSchedule && !scheduled),
+      completionAlarmMismatch: Boolean(completion && (!current.isRunning || completion.scheduledTime !== current.endTime)),
+      scheduleAlarmMismatch: Boolean(scheduled && (!expectedSchedule || scheduled.scheduledTime !== expectedSchedule.targetTime))
+    });
+  } catch (_error) { checks.alarmsAvailable = false; }
+  try {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    snapshot.activeTabs = tabs.map((tab) => TimerDiagnostics.sanitizeDetails({
+      tabId: tab.id, windowId: tab.windowId, active: tab.active, discarded: tab.discarded,
+      frozen: tab.frozen, status: tab.status, pageKind: TimerDiagnostics.pageKind(tab.url)
+    }));
+    Object.assign(checks, {
+      tabsAvailable: true, activeTabId: tabs[0] && tabs[0].id,
+      windowId: tabs[0] && tabs[0].windowId,
+      pageKind: TimerDiagnostics.pageKind(tabs[0] && tabs[0].url)
+    });
+  } catch (_error) { checks.tabsAvailable = false; }
+  snapshot.checks = TimerDiagnostics.sanitizeDetails(checks);
+  return snapshot;
+}
+
+async function handleDiagnostics(message, sender) {
+  const source = diagnosticSource(sender);
+  if (message.action === 'recordDiagnostic') {
+    if (source === 'unknown' || !TimerDiagnostics.CLIENT_EVENTS.has(message.event)) return { success: false };
+    await diagnose(message.event, { ...TimerDiagnostics.sanitizeDetails(message.details), ...senderDetails(sender) });
+    return { success: true };
+  }
+  if (!['popup', 'settings'].includes(source)) return { success: false, error: 'Open extension settings to manage diagnostics.' };
+  if (message.action === 'setDiagnosticsEnabled') {
+    await diagnostics.setEnabled(message.enabled);
+    if (message.enabled === true) await diagnose('logging.enabled', { source });
+  } else if (message.action === 'clearDiagnostics') {
+    await diagnostics.clear();
+  }
+  let marked;
+  const snapshot = await diagnosticSnapshot(); // Read only: never complete, reset, or restart a timer here.
+  if (message.action === 'markDiagnosticIssue') {
+    marked = await diagnose('issue.marked', { source, stateInitialized: snapshot.stateInitialized, ...snapshot.checks }, snapshot.timer);
+  }
+  const log = await diagnostics.report();
+  const version = chrome.runtime.getManifest().version;
+  return {
+    success: true, marked: marked === true,
+    report: {
+      formatVersion: 1, extensionVersion: /^\d+(\.\d+){1,3}$/.test(version) ? version : 'unknown',
+      exportedAt: new Date().toISOString(), timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+      privacy: 'Local diagnostics only. No URLs, page titles, page contents, reflection text, tokens, or connection settings.',
+      ...log, snapshot
+    }
+  };
+}
+
+function createNotification(id, options) {
+  try {
+    Promise.resolve(chrome.notifications.create(id, options)).then(() => {
+      void diagnose('notification.result', { success: true });
+    }).catch((error) => {
+      void diagnose('notification.result', { success: false, errorKind: TimerDiagnostics.classifyError(error) });
+    });
+  } catch (error) {
+    void diagnose('notification.result', { success: false, errorKind: TimerDiagnostics.classifyError(error) });
+  }
+}
 
 function createDefaultTimerState() {
   return {
@@ -195,6 +301,7 @@ function publicState() {
 
 async function persistTimerState(shouldBroadcast = true) {
   await chrome.storage.local.set({ [TIMER_STATE_KEY]: timerState });
+  void diagnose('timer.persisted');
   if (shouldBroadcast) {
     broadcastRuntimeMessage({ action: 'timerStateChanged', state: publicState() });
   }
@@ -273,8 +380,11 @@ async function resetTimer(durationSeconds) {
 
 async function completeTimer() {
   if (!timerState.isRunning) {
+    void diagnose('timer.completionSkipped');
     return publicState();
   }
+
+  void diagnose('timer.completed', { lateByMs: Math.max(0, Date.now() - timerState.endTime) });
 
   const durationSeconds = timerState.durationSeconds;
   const autoRestart = timerState.autoRestart;
@@ -290,14 +400,14 @@ async function completeTimer() {
   };
   await persistTimerState();
 
-  chrome.notifications.create(`reflection-${Date.now()}`, {
+  createNotification(`reflection-${Date.now()}`, {
     type: 'basic',
     iconUrl: 'extension_icon_128.png',
     title: 'Time is up',
     message: 'How did you spend this session? Open a regular webpage if the reflection box is not visible.',
     priority: 2
   });
-  void showPromptInActiveTab().catch(() => {});
+  void showPromptInActiveTab().catch((error) => diagnose('event.failed', { errorKind: TimerDiagnostics.classifyError(error) }));
 
   if (autoRestart) {
     await startTimer(durationSeconds, true, {
@@ -339,9 +449,10 @@ async function startScheduledTimer() {
     return publicState();
   }
   const pending = scheduledTimer;
+  void diagnose('schedule.started', { lateByMs: Math.max(0, Date.now() - pending.targetTime) });
   await clearScheduledTimer();
   const state = await startTimer(pending.durationSeconds, pending.autoRestart);
-  chrome.notifications.create(`scheduled-${Date.now()}`, {
+  createNotification(`scheduled-${Date.now()}`, {
     type: 'basic',
     iconUrl: 'extension_icon_128.png',
     title: 'Timer started',
@@ -362,12 +473,16 @@ function sendTabMessage(tabId, message) {
     chrome.tabs.sendMessage(tabId, message, (response) => {
       if (chrome.runtime.lastError) {
         const error = chrome.runtime.lastError.message;
+        void diagnose('prompt.delivery', { tabId, action: message.action, isTest: message.isTest === true,
+          success: false, errorKind: TimerDiagnostics.classifyError(error) });
         resolve({
           success: false,
           error,
           missingReceiver: /receiving end does not exist|could not establish connection/i.test(error)
         });
       } else {
+        void diagnose('prompt.delivery', { tabId, action: message.action, isTest: message.isTest === true,
+          success: !response || response.success !== false, alreadyVisible: Boolean(response && response.alreadyVisible) });
         resolve(response || { success: true });
       }
     });
@@ -378,10 +493,12 @@ async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content.js']
+      files: ['diagnostic-client.js', 'content.js']
     });
+    void diagnose('prompt.injected', { tabId, success: true });
     return true;
   } catch (error) {
+    void diagnose('prompt.injected', { tabId, success: false, errorKind: TimerDiagnostics.classifyError(error) });
     console.warn('[Reflection Timer] Could not attach the reflection prompt to the active page.', error);
     return false;
   }
@@ -395,6 +512,7 @@ async function findActiveSupportedTab() {
 async function showPromptInActiveTab(isTest = false) {
   const tab = await findActiveSupportedTab();
   if (!tab) {
+    void diagnose('prompt.unavailable', { isTest });
     return { success: false, error: 'Open a normal website (not a chrome:// page), then try again.' };
   }
   const promptMessage = {
@@ -438,6 +556,8 @@ async function dismissReflection() {
 }
 
 async function callSheetsWebApp(action, extra = {}) {
+  const startedAt = Date.now();
+  void diagnose('sheets.started', { action, isTest: extra.isTest === true });
   const config = await chrome.storage.local.get(['sheetUrl', 'webAppUrl', 'apiToken', 'sheetName', 'sheetMode']);
   const sheetUrl = String(config.sheetUrl || DEFAULT_SHEET_URL).trim();
   const webAppUrl = String(config.webAppUrl || '').trim();
@@ -459,6 +579,7 @@ async function callSheetsWebApp(action, extra = {}) {
     missingSettings.push('target tab');
   }
   if (missingSettings.length > 0) {
+    void diagnose('sheets.failed', { action, isTest: extra.isTest === true, errorKind: 'settings_required' });
     const error = new Error(`Finish Google Sheets setup in extension settings: ${missingSettings.join(' and ')}.`);
     error.code = 'SETTINGS_REQUIRED';
     throw error;
@@ -467,6 +588,8 @@ async function callSheetsWebApp(action, extra = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const submittedAt = new Date();
+  let httpStatus;
+  let failureKind;
   try {
     const response = await fetch(webAppUrl, {
       method: 'POST',
@@ -485,18 +608,24 @@ async function callSheetsWebApp(action, extra = {}) {
       redirect: 'follow',
       signal: controller.signal
     });
+    httpStatus = response.status;
     const responseText = await response.text();
     let data;
     try {
       data = JSON.parse(responseText);
     } catch (_error) {
+      failureKind = 'invalid_response';
       throw new Error('The Apps Script returned an invalid response. Redeploy the latest script version.');
     }
     if (!response.ok || !data.success) {
+      failureKind = 'rejected';
       throw new Error(data.error || `Google Apps Script request failed (${response.status}).`);
     }
+    void diagnose('sheets.finished', { action, isTest: extra.isTest === true, httpStatus, elapsedMs: Date.now() - startedAt });
     return data;
   } catch (error) {
+    void diagnose('sheets.failed', { action, isTest: extra.isTest === true, httpStatus,
+      elapsedMs: Date.now() - startedAt, errorKind: failureKind || TimerDiagnostics.classifyError(error) });
     if (error && error.name === 'AbortError') {
       throw new Error('The Google Sheets request timed out.');
     }
@@ -528,7 +657,15 @@ async function saveReflection(message, isTest = false) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const diagnosticAction = ['recordDiagnostic', 'getDiagnostics', 'markDiagnosticIssue', 'setDiagnosticsEnabled', 'clearDiagnostics'].includes(message && message.action);
+  const trackCommand = !diagnosticAction && !['getTimerState', 'contentReady'].includes(message && message.action);
+  const startedAt = Date.now();
+  const details = { ...senderDetails(sender), action: message && message.action,
+    isTest: Boolean(message && message.isTest), requestedDurationSeconds: message && message.durationSeconds,
+    autoRestart: message && message.autoRestart };
+  if (trackCommand) void diagnose('command.received', details);
   (async () => {
+    if (diagnosticAction) return handleDiagnostics(message, sender);
     await ready;
     switch (message && message.action) {
       case 'getTimerState':
@@ -556,6 +693,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'showTestPrompt':
         return showPromptInActiveTab(true);
       case 'contentReady':
+        void diagnose('content.ready', { ...senderDetails(sender), active: Boolean(sender.tab && sender.tab.active) });
         if (timerState.promptActive && sender.tab && sender.tab.active && sender.tab.id) {
           return sendTabMessage(sender.tab.id, {
             action: 'showReflectionPrompt',
@@ -579,7 +717,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       default:
         throw new Error('Unknown extension action.');
     }
-  })().then(sendResponse).catch((error) => {
+  })().then((response) => {
+    if (trackCommand) void diagnose('command.finished', { ...details, success: response.success !== false, elapsedMs: Date.now() - startedAt });
+    sendResponse(response);
+  }).catch((error) => {
+    if (!diagnosticAction) void diagnose('command.failed', { ...details, elapsedMs: Date.now() - startedAt, errorKind: TimerDiagnostics.classifyError(error) });
     console.error('[Reflection Timer]', error);
     sendResponse({
       success: false,
@@ -591,39 +733,67 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  void diagnose('alarm.fired', { alarm: alarm.name === TIMER_ALARM ? 'completion' : alarm.name === SCHEDULE_ALARM ? 'scheduled_start' : 'other',
+    scheduledTime: alarm.scheduledTime, lateByMs: Math.max(0, Date.now() - alarm.scheduledTime) });
   ready.then(async () => {
     if (alarm.name === TIMER_ALARM) {
       await completeTimer();
     } else if (alarm.name === SCHEDULE_ALARM) {
       await startScheduledTimer();
     }
-  }).catch((error) => console.error('[Reflection Timer] Alarm failed:', error));
+  }).catch((error) => {
+    void diagnose('event.failed', { trigger: 'alarm', errorKind: TimerDiagnostics.classifyError(error) });
+    console.error('[Reflection Timer] Alarm failed:', error);
+  });
 });
 
-chrome.tabs.onActivated.addListener(() => {
+chrome.tabs.onActivated.addListener((info) => {
+  void diagnose('tab.activated', { tabId: info.tabId, windowId: info.windowId });
   ready.then(() => {
     if (timerState.promptActive) {
       return showPromptInActiveTab();
     }
     return null;
-  }).catch(() => {});
+  }).catch((error) => diagnose('event.failed', { trigger: 'activation', errorKind: TimerDiagnostics.classifyError(error) }));
 });
 
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status || typeof changeInfo.discarded === 'boolean' || typeof changeInfo.frozen === 'boolean') {
+    void diagnose('tab.updated', { tabId, windowId: tab.windowId, active: tab.active,
+      status: changeInfo.status, discarded: tab.discarded, frozen: tab.frozen,
+      pageKind: TimerDiagnostics.pageKind(tab.url) });
+  }
   if (changeInfo.status === 'complete' && tab.active) {
     ready.then(() => {
       if (timerState.promptActive) {
         return showPromptInActiveTab();
       }
       return null;
-    }).catch(() => {});
+    }).catch((error) => diagnose('event.failed', { trigger: 'navigation', errorKind: TimerDiagnostics.classifyError(error) }));
   }
 });
 
 chrome.notifications.onClicked.addListener(() => {
-  ready.then(() => showPromptInActiveTab()).catch(() => {});
+  void diagnose('notification.clicked');
+  ready.then(() => showPromptInActiveTab()).catch((error) => diagnose('event.failed', { trigger: 'notification', errorKind: TimerDiagnostics.classifyError(error) }));
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.tabs.onRemoved.addListener((tabId, info) => {
+  void diagnose('tab.removed', { tabId, windowId: info.windowId });
+});
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  void diagnose('window.focused', { windowId });
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  void diagnose('extension.installed', { reason: details.reason });
   chrome.storage.local.remove(LEGACY_SECRET_KEYS);
+});
+
+globalThis.addEventListener?.('unhandledrejection', (event) => {
+  void diagnose('event.failed', { errorKind: TimerDiagnostics.classifyError(event.reason) });
+});
+globalThis.addEventListener?.('error', (event) => {
+  void diagnose('event.failed', { errorKind: TimerDiagnostics.classifyError(event.error) });
 });

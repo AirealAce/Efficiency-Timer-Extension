@@ -1,11 +1,11 @@
 {
   "name": "reflection-timer-extension",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "private": true,
   "description": "Chrome extension for reliable focus timing and Google Sheets reflection logging.",
   "scripts": {
     "test": "node --test",
-    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check settings.js && node --check timer-utils.js"
+    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check settings.js && node --check timer-utils.js && node --check diagnostics.js && node --check diagnostic-client.js && node --check diagnostics-ui.js"
   },
   "license": "MIT"
 }
