@@ -15,7 +15,7 @@ public sealed class ReflectionWindow : Form
         this.app = app; this.prompt = prompt;
         Text = prompt.IsTest ? "Reflection Timer — test prompt" : "Reflection Timer — session complete";
         Size = new(560, 440); MinimumSize = new(480, 360); StartPosition = FormStartPosition.CenterScreen;
-        Font = new("Segoe UI", 11); Padding = new(20); BackColor = Color.White;
+        Font = new("Segoe UI", 11); Padding = new(20); BackColor = DarkTheme.Background;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information;
         var heading = new Label { Text = "How did you spend your time?", Dock = DockStyle.Top, Height = 45, Font = new("Segoe UI", 19, FontStyle.Bold), ForeColor = Widgets.Ink };
         var context = new Label { Text = prompt.IsTest ? "TEST MODE · saves only to the test tab" : $"{MainWindow.Clock(prompt.DurationSeconds)} session · saved locally before sending", Dock = DockStyle.Top, Height = 42, ForeColor = Widgets.Green };
@@ -33,6 +33,7 @@ public sealed class ReflectionWindow : Form
         Shown += (_, _) => { response.Focus(); response.SelectionStart = response.TextLength; };
         FormClosing += (_, e) => { if (!saving && !PersistDraft()) e.Cancel = true; };
         FormClosed += (_, _) => draftDelay.Dispose();
+        DarkTheme.Apply(this);
     }
     public bool PersistDraft()
     {
@@ -44,6 +45,6 @@ public sealed class ReflectionWindow : Form
         if (saving) return;
         try {
             app.Engine.QueueReflection(prompt.Id, response.Text); saving = true; draftDelay.Stop(); Close(); _ = app.Sync();
-        } catch (Exception error) { status.Text = error.Message; status.ForeColor = Color.Firebrick; response.Focus(); }
+        } catch (Exception error) { status.Text = error.Message; status.ForeColor = DarkTheme.Error; response.Focus(); }
     }
 }

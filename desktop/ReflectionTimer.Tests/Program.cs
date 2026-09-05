@@ -12,6 +12,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        DarkTheme.Initialize();
         if (args is ["--seed-ui", var path]) {
             // An isolated, unconnected fixture; never changes the production data or Chrome.
             if (!Path.GetFileName(path).StartsWith("ReflectionTimer-QA-", StringComparison.Ordinal)) throw new ArgumentException("Use a dedicated ReflectionTimer-QA-* directory.");
@@ -58,6 +59,7 @@ internal static class Program
         Test("valid connection and validation failures", () => { Is(SheetsClient.Validate(Connection) is null); Is(SheetsClient.Validate(Connection with { ApiToken = "short" }) is not null); Is(SheetsClient.Validate(Connection with { SheetUrl = "https://evil.test/sheet" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "oops" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "fixed", SheetName = "" }) is not null); });
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
+        TestTheme();
         Console.WriteLine($"\n{passed} passed; {failed} failed.");
         return failed == 0 ? 0 : 1;
     }
@@ -105,6 +107,61 @@ internal static class Program
             if (Path.GetDirectoryName(resolved) == Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)
                 && Path.GetFileName(resolved).StartsWith("ReflectionTimer-tests-", StringComparison.Ordinal)) Directory.Delete(resolved, true);
         }
+    }
+    private static void TestTheme()
+    {
+        Test("dark date/time editor preserves local time and validates input", () => {
+            using var input = new SessionStartInput { Value = new DateTime(2026, 9, 5, 18, 30, 45, DateTimeKind.Local) };
+            Equal("09/05/2026 06:30 PM", input.Text); Equal(18, input.Value.Hour); Equal(30, input.Value.Minute);
+            Equal(DateTimeKind.Local, input.Value.Kind); Equal(0, input.Value.Second);
+            Equal(0, SessionStartInput.Parse("9/5/2026 12:00 AM").Hour);
+            Equal(12, SessionStartInput.Parse("9/5/2026 12:00 PM").Hour);
+            Throws<ArgumentException>(() => SessionStartInput.Parse("02/30/2026 01:00 PM"));
+            Throws<ArgumentException>(() => SessionStartInput.Parse("not a date"));
+            DarkTheme.Apply(input); Equal(DarkTheme.Field, input.BackColor);
+        });
+        Test("dark theme text and semantic colors have readable contrast", () => {
+            if (SystemInformation.HighContrast) return; // The user's accessibility palette takes precedence.
+            foreach (var background in new[] { DarkTheme.Background, DarkTheme.Field, DarkTheme.Raised })
+                foreach (var foreground in new[] { DarkTheme.Text, DarkTheme.Muted, DarkTheme.Warning, DarkTheme.Error, DarkTheme.Accent })
+                    Is(Contrast(background, foreground) >= 4.5);
+            Is(Contrast(DarkTheme.Accent, DarkTheme.AccentText) >= 4.5);
+            Is(Contrast(DarkTheme.Selection, DarkTheme.SelectionText) >= 4.5);
+        });
+        Test("theme styles nested inputs without changing values or masking", () => {
+            using var form = new Form(); var panel = new FlowLayoutPanel(); form.Controls.Add(panel);
+            var input = new TextBox { Text = "unchanged", UseSystemPasswordChar = true };
+            var number = new NumericUpDown { Value = 12 }; var check = new CheckBox { Checked = true };
+            var warning = new Label { Text = "Warning", ForeColor = DarkTheme.Warning };
+            panel.Controls.AddRange([input, number, check, warning]); DarkTheme.Apply(form); DarkTheme.Apply(form);
+            Equal(DarkTheme.Background, form.BackColor); Equal(DarkTheme.Background, panel.BackColor);
+            Equal(DarkTheme.Field, input.BackColor); Equal(DarkTheme.Field, number.BackColor);
+            Equal("unchanged", input.Text); Is(input.UseSystemPasswordChar); Equal(12m, number.Value); Is(check.Checked);
+            Equal(DarkTheme.Warning, warning.ForeColor);
+        });
+        Test("dark table theme covers headers, rows and selected cells", () => {
+            using var grid = Widgets.Grid("Entry", "Status"); grid.Rows.Add("example", "Pending");
+            Equal(DarkTheme.Field, grid.BackgroundColor); Is(!grid.EnableHeadersVisualStyles);
+            Equal(DarkTheme.Raised, grid.ColumnHeadersDefaultCellStyle.BackColor);
+            Equal(DarkTheme.Selection, grid.DefaultCellStyle.SelectionBackColor);
+            Equal(DarkTheme.SelectionText, grid.DefaultCellStyle.SelectionForeColor);
+            Equal("example", grid.Rows[0].Cells[0].Value);
+        });
+        Test("primary and secondary buttons retain their dark-theme roles", () => {
+            using var primary = Widgets.Button("Save & send", (_, _) => { }, true);
+            using var secondary = Widgets.Button("Later", (_, _) => { });
+            using var form = new Form(); form.Controls.AddRange([primary, secondary]);
+            var original = primary.BackColor; DarkTheme.Apply(form);
+            Equal(original, primary.BackColor); Equal(DarkTheme.AccentText, primary.ForeColor);
+            Equal(DarkTheme.Raised, secondary.BackColor); Equal(DarkTheme.Text, secondary.ForeColor);
+            Is(!primary.UseMnemonic); Equal(FlatStyle.Flat, secondary.FlatStyle);
+        });
+    }
+    private static double Contrast(Color a, Color b)
+    {
+        static double Channel(byte value) { var v = value / 255d; return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4); }
+        static double Luminance(Color c) => 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+        var first = Luminance(a); var second = Luminance(b); return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
     }
     private static IEnumerable<Control> Descendants(Control parent) => parent.Controls.Cast<Control>().SelectMany(x => new[] { x }.Concat(Descendants(x)));
     private static HttpResponseMessage Json(string value) => new(HttpStatusCode.OK) { Content = new StringContent(value) };

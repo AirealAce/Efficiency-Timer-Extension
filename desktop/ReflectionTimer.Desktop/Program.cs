@@ -10,6 +10,7 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        DarkTheme.Initialize();
         ApplicationConfiguration.Initialize();
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReflectionTimerDesktop");
         var index = Array.IndexOf(args, "--data-dir");

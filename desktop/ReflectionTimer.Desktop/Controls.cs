@@ -1,17 +1,18 @@
 using ReflectionTimer.Core;
+using System.Globalization;
 
 namespace ReflectionTimer.Desktop;
 
 public static class Widgets
 {
-    public static readonly Color Ink = Color.FromArgb(23, 32, 51);
-    public static readonly Color Muted = Color.FromArgb(82, 96, 120);
-    public static readonly Color Green = Color.FromArgb(21, 128, 61);
+    public static Color Ink => DarkTheme.Text;
+    public static Color Muted => DarkTheme.Muted;
+    public static Color Green => DarkTheme.Accent;
     public static Label Text(string text, int width = 750) => new() { Text = text, AutoSize = true, MaximumSize = new(width, 0), ForeColor = Muted, Margin = new(0, 6, 0, 10) };
     public static Button Button(string text, EventHandler action, bool primary = false)
     {
         var button = new Button { Text = text, UseMnemonic = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(110, 36), Padding = new(10, 4, 10, 4), Margin = new(0, 4, 10, 4) };
-        if (primary) { button.BackColor = Green; button.ForeColor = Color.White; button.FlatStyle = FlatStyle.Flat; button.FlatAppearance.BorderSize = 0; }
+        DarkTheme.ApplyButton(button, primary);
         button.Click += action; return button;
     }
     public static FlowLayoutPanel Row(params Control[] controls)
@@ -21,7 +22,7 @@ public static class Widgets
     }
     public static FlowLayoutPanel Page(TabControl tabs, string title)
     {
-        var tab = new TabPage(title) { BackColor = Color.White, Padding = new(18) };
+        var tab = new TabPage(title) { BackColor = DarkTheme.Background, Padding = new(18) };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         tab.Controls.Add(flow); tabs.TabPages.Add(tab); return flow;
     }
@@ -29,7 +30,8 @@ public static class Widgets
     {
         var grid = new DataGridView { Width = 750, Height = 230, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
             MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-            RowHeadersVisible = false, BackgroundColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Margin = new(0, 6, 0, 8) };
+            RowHeadersVisible = false, BorderStyle = BorderStyle.FixedSingle, Margin = new(0, 6, 0, 8) };
+        DarkTheme.ApplyGrid(grid);
         foreach (var name in columns) grid.Columns.Add(name.Replace(" ", ""), name);
         return grid;
     }
@@ -86,5 +88,32 @@ public sealed class VolumeControl : UserControl
         Size = new(420, 50); var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         row.Controls.Add(label); row.Controls.Add(track); Controls.Add(row);
         track.Scroll += (_, _) => { label.Text = $"Sound {track.Value}%"; if (!assigning) UserChanged?.Invoke(); };
+    }
+}
+
+// The Win32 date picker still paints a white edit area in native dark mode.
+// A themed text field keeps date/time editing readable without custom native
+// painting or changing the persisted schedule format and local-time behavior.
+public sealed class SessionStartInput : TextBox
+{
+    public SessionStartInput()
+    {
+        PlaceholderText = "MM/DD/YYYY hh:mm AM/PM";
+        AccessibleName = "Session start date and time";
+        AccessibleDescription = "Enter a local date and time, for example 09/05/2026 06:00 PM.";
+    }
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public DateTime Value
+    {
+        get => Parse(Text);
+        set => Text = value.ToString("MM/dd/yyyy hh:mm tt", CultureInfo.InvariantCulture);
+    }
+
+    public static DateTime Parse(string text)
+    {
+        if (DateTime.TryParseExact(text.Trim(), ["M/d/yyyy h:mm tt", "MM/dd/yyyy hh:mm tt"], CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces, out var value)) return DateTime.SpecifyKind(value, DateTimeKind.Local);
+        throw new ArgumentException("Enter the start date and time as MM/DD/YYYY hh:mm AM/PM (for example, 09/05/2026 06:00 PM).");
     }
 }

@@ -18,7 +18,7 @@ public sealed class MainWindow : Form
     private readonly VolumeControl volume = new();
     private readonly Button start;
     private readonly DataGridView scheduleGrid = Widgets.Grid("Start time", "Duration", "Auto-start next", "Sound");
-    private readonly DateTimePicker scheduledStart = new() { Format = DateTimePickerFormat.Custom, CustomFormat = "MM/dd/yyyy hh:mm tt", Width = 300, Value = DateTime.Now.AddHours(1) };
+    private readonly SessionStartInput scheduledStart = new() { Width = 300, Value = DateTime.Now.AddHours(1) };
     private readonly DurationControl scheduledDuration = new();
     private readonly CheckBox scheduledRepeat = new() { Text = "Auto-start next session", AutoSize = true };
     private readonly VolumeControl scheduledVolume = new();
@@ -46,12 +46,12 @@ public sealed class MainWindow : Form
     {
         this.app = app;
         Text = "Reflection Timer Desktop"; Size = new(940, 810); MinimumSize = new(880, 700);
-        StartPosition = FormStartPosition.CenterScreen; Font = new("Segoe UI", 10); BackColor = Color.White;
+        StartPosition = FormStartPosition.CenterScreen; Font = new("Segoe UI", 10); BackColor = DarkTheme.Background;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information;
         var header = new Label { Text = "Reflection Timer", Dock = DockStyle.Top, Height = 72, Font = new("Segoe UI", 26, FontStyle.Bold), ForeColor = Widgets.Green, Padding = new(20, 12, 0, 0) };
         Controls.Add(tabs); Controls.Add(status); Controls.Add(header);
         var timer = Widgets.Page(tabs, "Timer");
-        migration.ForeColor = Color.FromArgb(153, 82, 0);
+        migration.ForeColor = DarkTheme.Warning;
         timer.Controls.Add(migration); timer.Controls.Add(display); timer.Controls.Add(timerStatus); timer.Controls.Add(duration);
         start = Widgets.Button("Start", (_, _) => Safe(() => {
             if (!app.Engine.Snapshot.ExtensionDisabledConfirmed) throw new InvalidOperationException("Turn off the Chrome extension, then confirm the switch in Settings.");
@@ -139,9 +139,10 @@ public sealed class MainWindow : Form
         FormClosing += (_, e) => {
             if (!AllowExit && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); app.Log.Record("app.hidden"); }
         };
+        DarkTheme.Apply(this);
     }
     public void FocusHours() { if (tabs.SelectedIndex == 0) duration.FocusHours(); }
-    public void SetStatus(string text, bool error = false) { status.Text = text; status.ForeColor = error ? Color.Firebrick : Widgets.Green; }
+    public void SetStatus(string text, bool error = false) { status.Text = text; status.ForeColor = error ? DarkTheme.Error : Widgets.Green; }
     private void Safe(Action action) { try { action(); } catch (Exception error) { app.Log.Record("error.unexpected"); SetStatus(error.Message, true); } }
     public static string Clock(int total) => total >= 3600 ? $"{total / 3600}:{total / 60 % 60:00}:{total % 60:00}" : $"{total / 60:00}:{total % 60:00}";
     public void RenderClock()

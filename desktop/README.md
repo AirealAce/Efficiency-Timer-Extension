@@ -1,6 +1,8 @@
-# Reflection Timer Desktop 3.0
+# Reflection Timer Desktop 3.0.1
 
 A native Windows tray app for focus sessions, standalone reflection prompts, and the existing Google Sheets receiver. It does not need Chrome to stay open and does not collect browser activity. The extension source remains available as a fallback.
+
+The default dark theme uses charcoal surfaces, light text, mint action buttons, and readable warning/error colors across the timer, schedules, outbox, settings, and reflection window. It does not change your Windows-wide theme. Windows accessibility contrast colors are respected at launch. Native title bars, menus, and system controls use [.NET's Windows 11 dark-mode support](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.application.setcolormode?view=windowsdesktop-10.0); Windows-owned dialogs may vary by OS version.
 
 ## Install and switch over
 
