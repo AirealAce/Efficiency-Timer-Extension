@@ -11,10 +11,21 @@
  * the request works cleanly from a Manifest V3 service worker.
  */
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 const ROWS_PER_BLOCK = 16;
 const MAX_COLUMN_PAIRS = 100;
 const MAX_REFLECTION_LENGTH = 5000;
+const NOTE_PREFIX = 'Reflection Timer: ';
+const HOUR_THEMES = [
+  ['#312e81', '#818cf8'], ['#3730a3', '#a5b4fc'], ['#4c1d95', '#a78bfa'],
+  ['#581c87', '#c084fc'], ['#701a75', '#e879f9'], ['#831843', '#f472b6'],
+  ['#9a3412', '#fb923c'], ['#c2410c', '#fdba74'], ['#92400e', '#fbbf24'],
+  ['#a16207', '#fde047'], ['#facc15', '#a16207'], ['#d9f99d', '#65a30d'],
+  ['#166534', '#4ade80'], ['#065f46', '#34d399'], ['#115e59', '#2dd4bf'],
+  ['#155e75', '#22d3ee'], ['#075985', '#38bdf8'], ['#1e40af', '#60a5fa'],
+  ['#980000', '#ff4d4d'], ['#9f1239', '#fb7185'], ['#9d174d', '#f9a8d4'],
+  ['#86198f', '#f0abfc'], ['#6b21a8', '#d8b4fe'], ['#4338ca', '#c7d2fe']
+];
 
 function doGet() {
   return jsonOutput_({
@@ -68,7 +79,7 @@ function doPost(event) {
     lock.waitLock(15000);
     const target = resolveTargetSheet_(spreadsheet, payload);
     const sheet = target.sheet || createDailySheet_(spreadsheet, target);
-    const result = appendReflection_(sheet, message);
+    const result = appendReflection_(sheet, message, submissionDate_(spreadsheet, payload), spreadsheet);
     SpreadsheetApp.flush();
 
     return jsonOutput_({
@@ -93,6 +104,12 @@ function doPost(event) {
 }
 
 function resolveTargetSheet_(spreadsheet, payload) {
+  // A test may never fall through to the live daily tab, even in fixed mode.
+  if (payload.isTest === true) {
+    const sheet = spreadsheet.getSheetByName('Temp');
+    if (!sheet) throw new Error('The test tab "Temp" is missing. Create it before testing; no daily tab was changed.');
+    return { sheet };
+  }
   // Requests from older extension versions have no mode: date routing is the default.
   const mode = payload.sheetMode || 'date';
   if (mode === 'fixed') {
@@ -144,6 +161,9 @@ function createDailySheet_(spreadsheet, target) {
     if (columns > 0) {
       sheet.getRange(1, 1, Math.min(ROWS_PER_BLOCK, sheet.getMaxRows()), columns).clearContent();
     }
+    // Test entries can now grow beyond 16 rows. Remove every copied A:B log entry and note.
+    sheet.getRange(1, 1, sheet.getMaxRows(), Math.min(2, sheet.getMaxColumns()))
+      .clearContent().clearNote();
     if (sheet.getMaxRows() < ROWS_PER_BLOCK) {
       sheet.insertRowsAfter(sheet.getMaxRows(), ROWS_PER_BLOCK - sheet.getMaxRows());
     }
@@ -171,13 +191,16 @@ function submissionDate_(spreadsheet, payload) {
     }
     // getTimezoneOffset is UTC minus local time; UTC getters avoid the script's zone.
     const localTime = new Date(timestamp.getTime() - offset * 60000);
-    parts = [localTime.getUTCFullYear(), localTime.getUTCMonth() + 1, localTime.getUTCDate()];
+    parts = [localTime.getUTCFullYear(), localTime.getUTCMonth() + 1, localTime.getUTCDate(),
+      localTime.getUTCHours(), localTime.getUTCMinutes()];
   } else {
-    parts = Utilities.formatDate(timestamp, spreadsheet.getSpreadsheetTimeZone(), 'yyyy-MM-dd')
+    parts = Utilities.formatDate(timestamp, spreadsheet.getSpreadsheetTimeZone(), 'yyyy-MM-dd-HH-mm')
       .split('-').map(Number);
   }
-  const [year, month, day] = parts;
-  return { year, month, day, name: `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}` };
+  const [year, month, day, hour, minute] = parts;
+  const hourStart = timestamp.getTime() - (minute * 60 + timestamp.getUTCSeconds()) * 1000 - timestamp.getUTCMilliseconds();
+  return { year, month, day, hour, minute, hourStart, timestamp,
+    name: `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}` };
 }
 
 function getConfig_() {
@@ -230,27 +253,106 @@ function extractSpreadsheetId_(value) {
   return match ? match[1] : null;
 }
 
-function appendReflection_(sheet, message) {
-  for (let pairIndex = 0; pairIndex < MAX_COLUMN_PAIRS; pairIndex += 1) {
-    const timestampColumn = 1 + (pairIndex * 2);
-    ensureColumns_(sheet, timestampColumn + 1);
-    const block = sheet.getRange(1, timestampColumn, ROWS_PER_BLOCK, 2);
-    const values = block.getDisplayValues();
+function appendReflection_(sheet, message, moment, spreadsheet) {
+  ensureColumns_(sheet, 2);
+  const previous = previousEntry_(sheet, spreadsheet);
+  const needsHour = !previous || previous.hourStart !== moment.hourStart;
+  const rows = needsHour ? 2 : 1;
+  const background = previous && textColor_(previous.background) === '#000000' ? '#595959' : '#ffffff';
+  reserveTopCells_(sheet, rows);
+  excludeNewCellsFromConditionalRules_(sheet, rows);
 
-    for (let rowIndex = 0; rowIndex < ROWS_PER_BLOCK; rowIndex += 1) {
-      const timestampIsEmpty = String(values[rowIndex][0] || '').trim() === '';
-      const messageIsEmpty = String(values[rowIndex][1] || '').trim() === '';
-      if (timestampIsEmpty && messageIsEmpty) {
-        const timestamp = new Date();
-        const target = sheet.getRange(rowIndex + 1, timestampColumn, 1, 2);
-        target.setValues([[timestamp, message]]);
-        target.getCell(1, 1).setNumberFormat('h:mm AM/PM');
-        target.getCell(1, 2).setWrap(true);
-        return { range: target.getA1Notation(), timestamp };
-      }
-    }
+  const entry = sheet.getRange(1, 1, 1, 2);
+  // Treat reflections as plain text, including messages beginning with '='.
+  entry.setNumberFormat('@');
+  const clockLabel = `${moment.hour % 12 || 12}:${String(moment.minute).padStart(2, '0')}`;
+  entry.setValues([[clockLabel, message.startsWith('=') ? "'" + message : message]])
+    .setFontWeight('normal').setVerticalAlignment('top')
+    .setBorder(false, false, false, false, false, false).clearNote();
+  entry.getCell(1, 1).setBackground(background)
+    .setFontColor(textColor_(background)).setNote(NOTE_PREFIX + JSON.stringify({
+      kind: 'entry', timestamp: moment.timestamp.toISOString(), hourStart: moment.hourStart
+    }));
+  entry.getCell(1, 2).setBackground('#0d0d0d').setFontColor('#ffffff').setWrap(true);
+
+  if (needsHour) {
+    const theme = HOUR_THEMES[moment.hour];
+    const marker = sheet.getRange(2, 1, 1, 2);
+    marker.setNumberFormat('@')
+      .setValues([[`${moment.hour % 12 || 12}:00 ${moment.hour < 12 ? 'AM' : 'PM'}`, '']])
+      .setBackground(theme[0]).setFontColor(textColor_(theme[0]))
+      .setFontWeight('bold').setWrap(false)
+      .setBorder(true, false, true, false, false, false, theme[1], SpreadsheetApp.BorderStyle.SOLID_MEDIUM)
+      .clearNote();
+    marker.getCell(1, 1).setNote(NOTE_PREFIX + JSON.stringify({ kind: 'hour', hourStart: moment.hourStart }));
   }
-  throw new Error('No open reflection slot was found.');
+  return { range: entry.getA1Notation(), timestamp: moment.timestamp };
+}
+
+function previousEntry_(sheet, spreadsheet) {
+  const count = Math.max(1, sheet.getLastRow());
+  const range = sheet.getRange(1, 1, count, 2);
+  const values = range.getValues();
+  const notes = range.getNotes();
+  for (let index = 0; index < count; index += 1) {
+    let metadata = {};
+    const note = notes[index][0];
+    if (note.startsWith(NOTE_PREFIX)) {
+      try { metadata = JSON.parse(note.slice(NOTE_PREFIX.length)); } catch (_error) { /* Ordinary note. */ }
+    }
+    if (metadata.kind === 'hour' || values[index][0] === '' || values[index][1] === '') continue;
+    let hourStart = metadata.kind === 'entry' && Number.isFinite(metadata.hourStart) ? metadata.hourStart : null;
+    const value = values[index][0];
+    if (hourStart === null && value instanceof Date && value.getUTCFullYear() >= 2000) {
+      hourStart = submissionDate_(spreadsheet, { submittedAt: value.toISOString() }).hourStart;
+    }
+    return { hourStart, background: sheet.getRange(index + 1, 1, 1, 1).getBackground() };
+  }
+  return null;
+}
+
+function reserveTopCells_(sheet, rows) {
+  if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
+  let emptyRows = 0;
+  while (emptyRows < rows && sheet.getRange(emptyRows + 1, 1, 1, 2).isBlank()) emptyRows += 1;
+  const insert = rows - emptyRows;
+  if (insert > 0) {
+    // Grow the sheet only if bottom cells would otherwise be pushed out of bounds.
+    if (!sheet.getRange(sheet.getMaxRows() - insert + 1, 1, insert, 2).isBlank()) {
+      sheet.insertRowsAfter(sheet.getMaxRows(), insert);
+    }
+    sheet.getRange(1, 1, insert, 2).insertCells(SpreadsheetApp.Dimension.ROWS);
+  }
+}
+
+function excludeNewCellsFromConditionalRules_(sheet, rows) {
+  // Existing blanket rules must not repaint the freshly styled A:B cells.
+  // Subtract only A1:B{rows}; preserve rule conditions and every neighboring range.
+  const rules = sheet.getConditionalFormatRules();
+  let changed = false;
+  const updated = [];
+  rules.forEach((rule) => {
+    const ranges = [];
+    rule.getRanges().forEach((range) => {
+      const row = range.getRow(), col = range.getColumn();
+      const endRow = row + range.getNumRows() - 1, endCol = col + range.getNumColumns() - 1;
+      if (row > rows || col > 2) { ranges.push(range); return; }
+      changed = true;
+      if (endCol > 2) ranges.push(sheet.getRange(row, 3, range.getNumRows(), endCol - 2));
+      if (endRow > rows) ranges.push(sheet.getRange(rows + 1, col, endRow - rows, Math.min(endCol, 2) - col + 1));
+    });
+    if (ranges.length) updated.push(rule.copy().setRanges(ranges).build());
+  });
+  if (changed) sheet.setConditionalFormatRules(updated);
+}
+
+function textColor_(background) {
+  const channels = background.replace('#', '').match(/.{2}/g).map((hex) => {
+    const channel = parseInt(hex, 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+  });
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? '#000000' : '#ffffff';
 }
 
 function ensureColumns_(sheet, requiredColumns) {

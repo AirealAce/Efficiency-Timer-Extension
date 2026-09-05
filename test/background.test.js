@@ -132,7 +132,7 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
   });
   const response = await harness.dispatch({ action: 'getTimerState' });
   assert.equal(response.success, true);
-  assert.equal(response.apiVersion, 5);
+  assert.equal(response.apiVersion, 6);
   assert.equal(response.state.durationSeconds, 1500);
   assert.equal(response.state.remainingSeconds, 1500);
   assert.equal(response.state.isRunning, false);
@@ -178,6 +178,24 @@ test('explicit fixed-tab mode is preserved in the receiver request', async () =>
   assert.equal((await harness.dispatch({ action: 'testSheetsConnection' })).success, true);
   assert.equal(payload.sheetMode, 'fixed');
   assert.equal(payload.sheetName, 'Custom');
+});
+
+test('test submissions forward isTest without dismissing a pending real reflection', async () => {
+  let payload;
+  const harness = createHarness({
+    timerStateV2: { durationSeconds: 1500, promptActive: true },
+    apiToken: 'test-token-with-at-least-16-characters',
+    webAppUrl: 'https://script.google.com/macros/s/test-deployment/exec'
+  }, {
+    async fetch(_url, options) {
+      payload = JSON.parse(options.body);
+      return { ok: true, text: async () => JSON.stringify({ success: true, sheet: 'Temp' }) };
+    }
+  });
+  const result = await harness.dispatch({ action: 'saveReflection', message: 'Test', isTest: true });
+  assert.equal(result.success, true);
+  assert.equal(payload.isTest, true);
+  assert.equal(harness.stored.timerStateV2.promptActive, true);
 });
 
 test('background persists the known Sheet and target tab as safe defaults', async () => {

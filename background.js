@@ -11,7 +11,7 @@ const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/synthetic-spre
 const DEFAULT_SHEET_NAME = 'Template';
 const MAX_REFLECTION_LENGTH = 5000;
 const REQUEST_TIMEOUT_MS = 20_000;
-const API_VERSION = 5;
+const API_VERSION = 6;
 const LEGACY_SECRET_KEYS = [
   'GOOGLE_SHEETS_CLIENT_EMAIL',
   'GOOGLE_SHEETS_PRIVATE_KEY',
@@ -506,7 +506,7 @@ async function callSheetsWebApp(action, extra = {}) {
   }
 }
 
-async function saveReflection(message) {
+async function saveReflection(message, isTest = false) {
   const cleanMessage = String(message || '').trim();
   if (!cleanMessage) {
     throw new Error('Write a reflection before submitting.');
@@ -518,11 +518,12 @@ async function saveReflection(message) {
   const submittedAt = new Date();
   const result = await callSheetsWebApp('appendReflection', {
     message: cleanMessage,
+    isTest: isTest === true,
     submittedAt: submittedAt.toISOString(),
     durationSeconds: timerState.durationSeconds,
     timezoneOffsetMinutes: submittedAt.getTimezoneOffset()
   });
-  await dismissReflection();
+  if (!isTest) await dismissReflection();
   return result;
 }
 
@@ -569,7 +570,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return dismissReflection();
       case 'saveReflection':
       case 'updateGoogleSheet':
-        return { success: true, data: await saveReflection(message.message) };
+        return { success: true, data: await saveReflection(message.message, message.isTest === true) };
       case 'testSheetsConnection':
         return { success: true, data: await callSheetsWebApp('ping') };
       case 'openSettings':

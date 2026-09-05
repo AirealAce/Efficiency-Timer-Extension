@@ -9,6 +9,7 @@
   const HOST_ID = '__aaron-reflection-timer-host-v2';
   const MAX_REFLECTION_LENGTH = 5000;
   let sfxVolume = 0.5;
+  let activePromptIsTest = false;
 
   chrome.storage.local.get(['sfxVolume']).then((result) => {
     const saved = Number(result.sfxVolume);
@@ -80,6 +81,7 @@
 
   function buildPrompt(options) {
     dismissLocalPrompt();
+    activePromptIsTest = options.isTest;
 
     const host = createElement('div', { id: HOST_ID });
     host.style.setProperty('all', 'initial', 'important');
@@ -187,7 +189,8 @@
     const context = createElement(
       'p',
       { className: 'context' },
-      `${formatDuration(options.durationSeconds)} finished. Capture the result while it is fresh.`
+      options.isTest ? 'Test mode: this reflection will be saved to Temp, not your daily tab.'
+        : `${formatDuration(options.durationSeconds)} finished. Capture the result while it is fresh.`
     );
     const label = createElement('label', { for: 'reflection-response' }, 'Reflection');
     const textarea = createElement('textarea', {
@@ -240,8 +243,8 @@
       setBusy(true);
       status.textContent = '';
       try {
-        await sendMessage({ action: 'saveReflection', message });
-        status.textContent = 'Saved.';
+        const response = await sendMessage({ action: 'saveReflection', message, isTest: options.isTest });
+        status.textContent = `Saved${response.data && response.data.sheet ? ` to ${response.data.sheet}` : ''}.`;
         status.classList.add('success');
         setTimeout(dismissLocalPrompt, 450);
       } catch (error) {
@@ -285,6 +288,10 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.action === 'showReflectionPrompt' || message.action === 'showTestChatbox') {
       if (document.getElementById(HOST_ID)) {
+        if ((message.isTest || message.action === 'showTestChatbox') && !activePromptIsTest) {
+          sendResponse({ success: false, error: 'A real reflection is already open. Save or skip it before testing in Temp.' });
+          return;
+        }
         sendResponse({ success: true, alreadyVisible: true });
         return;
       }
