@@ -40,6 +40,10 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
       getMaxRows: () => maxRows,
       getLastRow: () => grid.length,
       insertRowsAfter(_row, count) { maxRows += count; },
+      insertRowsBefore(row, count) {
+        maxRows += count;
+        this.getRange(row, 1, count, this.getMaxColumns()).insertCells('ROWS');
+      },
       getConditionalFormatRules: () => conditionalRules,
       setConditionalFormatRules(rules) { conditionalRules = rules; },
       showSheet() {},
@@ -241,7 +245,7 @@ test('Apps Script grows A:B past 16 entries without using other column pairs', (
   assert.equal(result.range, 'A1:B1');
   assert.equal(harness.grid[0][1], 'Session 17');
   assert.equal(harness.grid[16][1], 'Session 1');
-  assert.equal(harness.grid[0][3], undefined);
+  assert.equal(harness.grid[0][3] || '', '');
 });
 
 test('Apps Script rejects an invalid token without writing', () => {
@@ -266,14 +270,14 @@ const datedRequest = {
 };
 
 test('hour markers follow the example and entry colors alternate across the divider', () => {
-  const harness = createHarness(['Temp']);
+  const harness = createHarness(['test']);
   for (const time of ['17:54', '17:55', '17:57', '17:58', '18:21']) {
     const result = harness.request({ ...datedRequest, isTest: true,
       submittedAt: `2026-09-05T${time}:00-04:00`, message: `Test ${time}` });
     assert.equal(result.success, true, result.error);
   }
-  const grid = harness.grids.get('Temp');
-  const format = harness.formats.get('Temp');
+  const grid = harness.grids.get('test');
+  const format = harness.formats.get('test');
   assert.equal(grid[0][1], 'Test 18:21');
   assert.equal(grid[0][0], '6:21');
   assert.equal(grid[1][0], '6:00 PM');
@@ -294,20 +298,21 @@ test('hour markers follow the example and entry colors alternate across the divi
 });
 
 test('reused and inserted entry cells have thin white borders without changing hour dividers', () => {
-  const harness = createHarness(['Temp']);
+  const harness = createHarness(['test']);
   for (const time of ['17:58', '17:59', '18:01', '18:02']) {
     const result = harness.request({ ...datedRequest, isTest: true,
       submittedAt: `2026-09-05T${time}:00-04:00` });
     assert.equal(result.success, true, result.error);
-    const format = harness.formats.get('Temp');
+    const format = harness.formats.get('test');
     for (const cell of format[0].slice(0, 2)) {
       assert.deepEqual(cell.borders, { top: true, left: true, bottom: true,
         right: true, vertical: true, horizontal: false, color: '#ffffff', borderStyle: 'SOLID' });
     }
-    const notes = harness.notesBySheet.get('Temp');
+    const notes = harness.notesBySheet.get('test');
     for (let row = 0; row < notes.length; row += 1) {
       if (!notes[row]?.[0]?.includes('"kind":"hour"')) continue;
-      for (const cell of format[row].slice(0, 2)) {
+      assert.equal(format[row].length, 33);
+      for (const cell of format[row]) {
         assert.equal(cell.borders.top, true);
         assert.equal(cell.borders.bottom, true);
         assert.equal(cell.borders.left, false);
@@ -321,27 +326,49 @@ test('reused and inserted entry cells have thin white borders without changing h
 });
 
 test('empty top pairs are reused, while partial pairs and empty-result formulas are preserved', () => {
-  const empty = createHarness(['Temp']);
+  const empty = createHarness(['test']);
   empty.request({ ...datedRequest, isTest: true });
   assert.equal(empty.insertedCells.length, 0);
   for (const pair of [['existing time', ''], ['', 'existing note'], ['=""', '']]) {
-    const harness = createHarness(['Temp']);
-    harness.grids.get('Temp')[0] = [...pair, 'C stays here', 'D stays here'];
+    const harness = createHarness(['test']);
+    harness.grids.get('test')[0] = [...pair, 'C moves with its row', 'D moves with its row'];
     assert.equal(harness.request({ ...datedRequest, isTest: true }).success, true);
-    assert.deepEqual(harness.grids.get('Temp')[2].slice(0, 2), pair);
-    assert.deepEqual(harness.grids.get('Temp')[0].slice(2), ['C stays here', 'D stays here']);
-    assert.equal(harness.insertedCells[0].columnCount, 2);
+    assert.deepEqual(harness.grids.get('test')[2].slice(0, 2), pair);
+    assert.deepEqual(harness.grids.get('test')[2].slice(2, 4), ['C moves with its row', 'D moves with its row']);
+    assert.equal(harness.insertedCells[0].columnCount, 33);
+  }
+});
+
+test('whole-row insertion keeps full-width hour themes, notes and neighboring contents aligned', () => {
+  const harness = createHarness(['test']);
+  const sheet = harness.sheets[0];
+  const grid = harness.grids.get('test');
+  grid[0] = ['', '', 'Keep C', '=SUM(1,2)'];
+  sheet.getRange(1, 3, 1, 1).setNote('Keep this note').setBackground('#abcdef');
+  for (const time of ['17:58', '18:01', '18:02']) {
+    assert.equal(harness.request({ ...datedRequest, isTest: true,
+      submittedAt: `2026-09-05T${time}:00-04:00` }).success, true);
+  }
+  const format = harness.formats.get('test');
+  const notes = harness.notesBySheet.get('test');
+  assert.deepEqual(grid[5].slice(0, 4), ['', '', 'Keep C', '=SUM(1,2)']);
+  assert.equal(notes[5][2], 'Keep this note');
+  assert.equal(format[5][2].background, '#abcdef');
+  for (const [row, background] of [[2, '#980000'], [4, '#1e40af']]) {
+    assert.equal(format[row].length, 33);
+    assert.ok(format[row].every((cell) => cell.background === background));
+    assert.match(notes[row][0], /"kind":"hour"/);
   }
 });
 
 test('new hours get different readable themes, including midnight and noon', () => {
-  const harness = createHarness(['Temp']);
+  const harness = createHarness(['test']);
   const themes = new Set();
   for (let hour = 0; hour < 24; hour += 1) {
     harness.request({ ...datedRequest, isTest: true,
       submittedAt: `2026-09-05T${String(hour).padStart(2, '0')}:21:00-04:00` });
-    const grid = harness.grids.get('Temp');
-    const format = harness.formats.get('Temp')[1][0];
+    const grid = harness.grids.get('test');
+    const format = harness.formats.get('test')[1][0];
     assert.equal(grid[1][0], `${hour % 12 || 12}:00 ${hour < 12 ? 'AM' : 'PM'}`);
     assert.equal(format.fontColor, harness.context.textColor_(format.background));
     assert.notEqual(format.background, format.borders.color);
@@ -351,44 +378,46 @@ test('new hours get different readable themes, including midnight and noon', () 
 });
 
 test('same-hour entries do not duplicate the divider and time gaps add only the current hour', () => {
-  const harness = createHarness(['Temp']);
+  const harness = createHarness(['test']);
   for (const time of ['12:01', '12:59', '15:04']) {
     harness.request({ ...datedRequest, isTest: true, submittedAt: `2026-09-05T${time}:00-04:00` });
   }
-  const markers = harness.grids.get('Temp').filter((row) => /AM|PM/.test(row[0]));
+  const markers = harness.grids.get('test').filter((row) => /AM|PM/.test(row[0]));
   assert.deepEqual(markers.map((row) => row[0]), ['3:00 PM', '12:00 PM']);
 });
 
-test('test writes always use Temp and never create or write a daily tab', () => {
-  const harness = createHarness(['Temp', '09/05/2026', 'Custom']);
+test('test writes always use test and never create or write a template or daily tab', () => {
+  const harness = createHarness(['test', 'Temp', 'Template', '09/05/2026', 'Custom']);
   const result = harness.request({ ...datedRequest, isTest: true, sheetMode: 'fixed', sheetName: 'Custom' });
-  assert.equal(result.sheet, 'Temp');
+  assert.equal(result.sheet, 'test');
   assert.deepEqual(harness.grids.get('Custom')[0], ['', '']);
   assert.deepEqual(harness.grids.get('09/05/2026')[0], ['', '']);
+  assert.deepEqual(harness.grids.get('Temp')[0], ['', '']);
+  assert.deepEqual(harness.grids.get('Template')[0], ['', '']);
   assert.equal(harness.createdSheets.length, 0);
-  const missingTemp = createHarness(['09/05/2026']);
-  const failure = missingTemp.request({ ...datedRequest, isTest: true });
+  const missingTest = createHarness(['Temp', 'Template', '09/05/2026']);
+  const failure = missingTest.request({ ...datedRequest, isTest: true });
   assert.equal(failure.success, false);
-  assert.match(failure.error, /test tab "Temp" is missing/);
-  assert.deepEqual(missingTemp.grids.get('09/05/2026')[0], ['', '']);
+  assert.match(failure.error, /test tab "test" is missing/);
+  assert.deepEqual(missingTest.grids.get('09/05/2026')[0], ['', '']);
 });
 
 test('newly written cells are excluded from old conditional rules without changing neighbors', () => {
-  const harness = createHarness(['Temp']);
+  const harness = createHarness(['test']);
   const sheet = harness.sheets[0];
   const makeRule = (ranges) => ({ getRanges: () => ranges,
     copy() { return { setRanges(next) { return { build: () => makeRule(next) }; } }; } });
   sheet.setConditionalFormatRules([makeRule([sheet.getRange(1, 1, 774, 33)])]);
   harness.request({ ...datedRequest, isTest: true });
   const ranges = sheet.getConditionalFormatRules()[0].getRanges();
-  assert.deepEqual(Array.from(ranges, (r) => r.getA1Notation()), ['C1:AG774', 'A3:B774']);
+  assert.deepEqual(Array.from(ranges, (r) => r.getA1Notation()), ['A3:AG774', 'C1:AG1']);
 });
 
 test('reflections beginning with equals are stored as literal text', () => {
-  const harness = createHarness(['Temp']);
+  const harness = createHarness(['test']);
   harness.request({ ...datedRequest, isTest: true, message: '=1+1' });
-  assert.equal(harness.grids.get('Temp')[0][1], "'=1+1");
-  assert.equal(harness.formats.get('Temp')[0][1].numberFormat, '@');
+  assert.equal(harness.grids.get('test')[0][1], "'=1+1");
+  assert.equal(harness.formats.get('test')[0][1].numberFormat, '@');
 });
 
 test('default routing accepts two/four digit years and optional leading zeros', () => {
@@ -455,8 +484,8 @@ test('the first send copies Template once and clears only the copy log area', ()
   assert.equal(first.range, 'A1:B1');
   const dailyGrid = harness.grids.get(first.sheet);
   assert.equal(dailyGrid[0][1], datedRequest.message);
-  assert.deepEqual(dailyGrid[16], ['', '', ...original[16].slice(2)]);
-  assert.equal(dailyGrid[0][32], 'keep unpaired column');
+  assert.deepEqual(dailyGrid[18].slice(0, 4), ['', '', ...original[16].slice(2)]);
+  assert.equal(dailyGrid[2][32], 'keep unpaired column');
   assert.deepEqual(harness.grid, original, 'source template is never cleared');
   const second = harness.request({ ...datedRequest, message: 'Next session' });
   assert.equal(second.created, false);

@@ -189,7 +189,7 @@
     const context = createElement(
       'p',
       { className: 'context' },
-      options.isTest ? 'Test mode: this reflection will be saved to Temp, not your daily tab.'
+      options.isTest ? 'Test mode: this reflection will be saved to the test tab, not your template or daily tab.'
         : `${formatDuration(options.durationSeconds)} finished. Capture the result while it is fresh.`
     );
     const label = createElement('label', { for: 'reflection-response' }, 'Reflection');
@@ -289,7 +289,7 @@
     if (message.action === 'showReflectionPrompt' || message.action === 'showTestChatbox') {
       if (document.getElementById(HOST_ID)) {
         if ((message.isTest || message.action === 'showTestChatbox') && !activePromptIsTest) {
-          sendResponse({ success: false, error: 'A real reflection is already open. Save or skip it before testing in Temp.' });
+          sendResponse({ success: false, error: 'A real reflection is already open. Save or skip it before using the test tab.' });
           return;
         }
         sendResponse({ success: true, alreadyVisible: true });

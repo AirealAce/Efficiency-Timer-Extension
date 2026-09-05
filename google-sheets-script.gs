@@ -11,7 +11,7 @@
  * the request works cleanly from a Manifest V3 service worker.
  */
 
-const APP_VERSION = '2.2.1';
+const APP_VERSION = '2.3.0';
 const ROWS_PER_BLOCK = 16;
 const MAX_COLUMN_PAIRS = 100;
 const MAX_REFLECTION_LENGTH = 5000;
@@ -106,8 +106,8 @@ function doPost(event) {
 function resolveTargetSheet_(spreadsheet, payload) {
   // A test may never fall through to the live daily tab, even in fixed mode.
   if (payload.isTest === true) {
-    const sheet = spreadsheet.getSheetByName('Temp');
-    if (!sheet) throw new Error('The test tab "Temp" is missing. Create it before testing; no daily tab was changed.');
+    const sheet = spreadsheet.getSheetByName('test');
+    if (!sheet) throw new Error('The test tab "test" is missing. Create it before testing; no template or daily tab was changed.');
     return { sheet };
   }
   // Requests from older extension versions have no mode: date routing is the default.
@@ -259,7 +259,7 @@ function appendReflection_(sheet, message, moment, spreadsheet) {
   const needsHour = !previous || previous.hourStart !== moment.hourStart;
   const rows = needsHour ? 2 : 1;
   const background = previous && textColor_(previous.background) === '#000000' ? '#595959' : '#ffffff';
-  reserveTopCells_(sheet, rows);
+  reserveTopRows_(sheet, rows);
   excludeNewCellsFromConditionalRules_(sheet, rows);
 
   const entry = sheet.getRange(1, 1, 1, 2);
@@ -278,13 +278,12 @@ function appendReflection_(sheet, message, moment, spreadsheet) {
 
   if (needsHour) {
     const theme = HOUR_THEMES[moment.hour];
-    const marker = sheet.getRange(2, 1, 1, 2);
-    marker.setNumberFormat('@')
-      .setValues([[`${moment.hour % 12 || 12}:00 ${moment.hour < 12 ? 'AM' : 'PM'}`, '']])
-      .setBackground(theme[0]).setFontColor(textColor_(theme[0]))
+    const marker = sheet.getRange(2, 1, 1, sheet.getMaxColumns());
+    sheet.getRange(2, 1, 1, 2).setNumberFormat('@')
+      .setValues([[`${moment.hour % 12 || 12}:00 ${moment.hour < 12 ? 'AM' : 'PM'}`, '']]).clearNote();
+    marker.setBackground(theme[0]).setFontColor(textColor_(theme[0]))
       .setFontWeight('bold').setWrap(false)
-      .setBorder(true, false, true, false, false, false, theme[1], SpreadsheetApp.BorderStyle.SOLID_MEDIUM)
-      .clearNote();
+      .setBorder(true, false, true, false, false, false, theme[1], SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
     marker.getCell(1, 1).setNote(NOTE_PREFIX + JSON.stringify({ kind: 'hour', hourStart: moment.hourStart }));
   }
   return { range: entry.getA1Notation(), timestamp: moment.timestamp };
@@ -312,23 +311,19 @@ function previousEntry_(sheet, spreadsheet) {
   return null;
 }
 
-function reserveTopCells_(sheet, rows) {
+function reserveTopRows_(sheet, rows) {
   if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
   let emptyRows = 0;
-  while (emptyRows < rows && sheet.getRange(emptyRows + 1, 1, 1, 2).isBlank()) emptyRows += 1;
+  // Reuse only entirely empty rows; keep data in other columns with its original row.
+  while (emptyRows < rows && sheet.getRange(emptyRows + 1, 1, 1, sheet.getMaxColumns()).isBlank()) emptyRows += 1;
   const insert = rows - emptyRows;
-  if (insert > 0) {
-    // Grow the sheet only if bottom cells would otherwise be pushed out of bounds.
-    if (!sheet.getRange(sheet.getMaxRows() - insert + 1, 1, insert, 2).isBlank()) {
-      sheet.insertRowsAfter(sheet.getMaxRows(), insert);
-    }
-    sheet.getRange(1, 1, insert, 2).insertCells(SpreadsheetApp.Dimension.ROWS);
-  }
+  if (insert > 0) sheet.insertRowsBefore(1, insert);
 }
 
 function excludeNewCellsFromConditionalRules_(sheet, rows) {
-  // Existing blanket rules must not repaint the freshly styled A:B cells.
-  // Subtract only A1:B{rows}; preserve rule conditions and every neighboring range.
+  // Protect A1:B1 and the full-width hour row without changing neighboring rules.
+  const exclusions = [{ row: 1, col: 1, endRow: 1, endCol: 2 }];
+  if (rows === 2) exclusions.push({ row: 2, col: 1, endRow: 2, endCol: sheet.getMaxColumns() });
   const rules = sheet.getConditionalFormatRules();
   let changed = false;
   const updated = [];
@@ -337,10 +332,23 @@ function excludeNewCellsFromConditionalRules_(sheet, rows) {
     rule.getRanges().forEach((range) => {
       const row = range.getRow(), col = range.getColumn();
       const endRow = row + range.getNumRows() - 1, endCol = col + range.getNumColumns() - 1;
-      if (row > rows || col > 2) { ranges.push(range); return; }
-      changed = true;
-      if (endCol > 2) ranges.push(sheet.getRange(row, 3, range.getNumRows(), endCol - 2));
-      if (endRow > rows) ranges.push(sheet.getRange(rows + 1, col, endRow - rows, Math.min(endCol, 2) - col + 1));
+      let parts = [{ row, col, endRow, endCol }];
+      exclusions.forEach((cut) => {
+        parts = parts.flatMap((part) => {
+          const top = Math.max(part.row, cut.row), left = Math.max(part.col, cut.col);
+          const bottom = Math.min(part.endRow, cut.endRow), right = Math.min(part.endCol, cut.endCol);
+          if (top > bottom || left > right) return [part];
+          changed = true;
+          const remaining = [];
+          if (part.row < top) remaining.push({ ...part, endRow: top - 1 });
+          if (part.endRow > bottom) remaining.push({ ...part, row: bottom + 1 });
+          if (part.col < left) remaining.push({ row: top, endRow: bottom, col: part.col, endCol: left - 1 });
+          if (part.endCol > right) remaining.push({ row: top, endRow: bottom, col: right + 1, endCol: part.endCol });
+          return remaining;
+        });
+      });
+      parts.forEach((part) => ranges.push(sheet.getRange(part.row, part.col,
+        part.endRow - part.row + 1, part.endCol - part.col + 1)));
     });
     if (ranges.length) updated.push(rule.copy().setRanges(ranges).build());
   });

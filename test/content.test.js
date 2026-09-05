@@ -33,7 +33,7 @@ function createHarness() {
       onMessage: { addListener(fn) { listener = fn; } },
       sendMessage(message, callback) {
         messages.push(message);
-        callback({ success: true, data: { sheet: message.isTest ? 'Temp' : '9/5/26' } });
+        callback({ success: true, data: { sheet: message.isTest ? 'test' : '9/5/26' } });
       }
     }
   };
@@ -44,15 +44,15 @@ function createHarness() {
   };
 }
 
-test('test dialog labels Temp and passes test mode all the way to saving', async () => {
+test('test dialog labels the test tab and passes test mode all the way to saving', async () => {
   const harness = createHarness();
   harness.show(true);
-  assert.ok(harness.elements.some((e) => e.textContent.includes('saved to Temp')));
+  assert.ok(harness.elements.some((e) => e.textContent.includes('saved to the test tab')));
   harness.elements.find((e) => e.tag === 'textarea').value = 'Test message';
   await harness.elements.find((e) => e.className === 'submit').listeners.click();
   const saved = harness.messages.find((m) => m.action === 'saveReflection');
   assert.equal(saved.isTest, true);
-  assert.ok(harness.elements.some((e) => e.textContent === 'Saved to Temp.'));
+  assert.ok(harness.elements.some((e) => e.textContent === 'Saved to test.'));
 });
 
 test('normal prompts keep normal routing and are never silently relabeled as tests', async () => {

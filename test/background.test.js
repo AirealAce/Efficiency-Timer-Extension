@@ -189,7 +189,7 @@ test('test submissions forward isTest without dismissing a pending real reflecti
   }, {
     async fetch(_url, options) {
       payload = JSON.parse(options.body);
-      return { ok: true, text: async () => JSON.stringify({ success: true, sheet: 'Temp' }) };
+      return { ok: true, text: async () => JSON.stringify({ success: true, sheet: 'test' }) };
     }
   });
   const result = await harness.dispatch({ action: 'saveReflection', message: 'Test', isTest: true });
