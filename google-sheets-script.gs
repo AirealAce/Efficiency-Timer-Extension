@@ -11,7 +11,7 @@
  * the request works cleanly from a Manifest V3 service worker.
  */
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.3.1';
 const ROWS_PER_BLOCK = 16;
 const MAX_COLUMN_PAIRS = 100;
 const MAX_REFLECTION_LENGTH = 5000;
@@ -262,14 +262,15 @@ function appendReflection_(sheet, message, moment, spreadsheet) {
   reserveTopRows_(sheet, rows);
   excludeNewCellsFromConditionalRules_(sheet, rows);
 
+  // Match column B's white cell outlines across every column, without repainting fills.
+  sheet.getRange(1, 1, 1, sheet.getMaxColumns())
+    .setBorder(true, true, true, true, true, false, '#ffffff', SpreadsheetApp.BorderStyle.SOLID);
   const entry = sheet.getRange(1, 1, 1, 2);
   // Treat reflections as plain text, including messages beginning with '='.
   entry.setNumberFormat('@');
   const clockLabel = `${moment.hour % 12 || 12}:${String(moment.minute).padStart(2, '0')}`;
   entry.setValues([[clockLabel, message.startsWith('=') ? "'" + message : message]])
-    .setFontWeight('normal').setVerticalAlignment('top')
-    .setBorder(true, true, true, true, true, false, '#ffffff', SpreadsheetApp.BorderStyle.SOLID)
-    .clearNote();
+    .setFontWeight('normal').setVerticalAlignment('top').clearNote();
   entry.getCell(1, 1).setBackground(background)
     .setFontColor(textColor_(background)).setNote(NOTE_PREFIX + JSON.stringify({
       kind: 'entry', timestamp: moment.timestamp.toISOString(), hourStart: moment.hourStart

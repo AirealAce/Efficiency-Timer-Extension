@@ -297,14 +297,15 @@ test('hour markers follow the example and entry colors alternate across the divi
     color: '#ff4d4d', borderStyle: 'SOLID_MEDIUM' });
 });
 
-test('reused and inserted entry cells have thin white borders without changing hour dividers', () => {
+test('reused and inserted entry rows have thin white borders in every column without changing hour dividers', () => {
   const harness = createHarness(['test']);
   for (const time of ['17:58', '17:59', '18:01', '18:02']) {
     const result = harness.request({ ...datedRequest, isTest: true,
       submittedAt: `2026-09-05T${time}:00-04:00` });
     assert.equal(result.success, true, result.error);
     const format = harness.formats.get('test');
-    for (const cell of format[0].slice(0, 2)) {
+    assert.equal(format[0].length, 33);
+    for (const cell of format[0]) {
       assert.deepEqual(cell.borders, { top: true, left: true, bottom: true,
         right: true, vertical: true, horizontal: false, color: '#ffffff', borderStyle: 'SOLID' });
     }
@@ -322,6 +323,22 @@ test('reused and inserted entry cells have thin white borders without changing h
         assert.equal(cell.borders.borderStyle, 'SOLID_MEDIUM');
       }
     }
+  }
+});
+
+test('full-row entry borders preserve the other columns background, text and notes', () => {
+  const harness = createHarness(['test']);
+  harness.sheets[0].getRange(1, 3, 1, 31).setBackground('#abcdef')
+    .setFontColor('#123456').setFontWeight('bold').setNote('Keep my note');
+  assert.equal(harness.request({ ...datedRequest, isTest: true }).success, true);
+  const format = harness.formats.get('test')[0];
+  const notes = harness.notesBySheet.get('test')[0];
+  for (let column = 2; column < 33; column += 1) {
+    assert.equal(format[column].background, '#abcdef');
+    assert.equal(format[column].fontColor, '#123456');
+    assert.equal(format[column].fontWeight, 'bold');
+    assert.equal(format[column].borders.color, '#ffffff');
+    assert.equal(notes[column], 'Keep my note');
   }
 });
 
