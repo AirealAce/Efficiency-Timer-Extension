@@ -8,9 +8,10 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8');
 const diagnosticClientSource = fs.readFileSync(path.join(__dirname, '..', 'diagnostic-client.js'), 'utf8');
 
-function createHarness() {
+function createHarness(savedVolume = 50) {
   const elements = [];
   const messages = [];
+  const playedVolumes = [];
   let listener;
   function element(tag) {
     const value = { tag, children: [], listeners: {}, value: '', textContent: '',
@@ -32,8 +33,9 @@ function createHarness() {
     addEventListener(name, callback) { documentEvents[name] = callback; },
     getElementById: (id) => elements.find((e) => e.id === id && !e.removed) };
   const chrome = {
-    storage: { local: { async get() { return {}; } } },
+    storage: { local: { async get() { return { sfxVolume: savedVolume }; } } },
     runtime: {
+      getURL(file) { return `chrome-extension://test-extension/${file}`; },
       onMessage: { addListener(fn) { listener = fn; } },
       sendMessage(message, callback) {
         messages.push(message);
@@ -41,12 +43,14 @@ function createHarness() {
       }
     }
   };
-  const context = vm.createContext({ chrome, document, setTimeout() {}, addEventListener(name, callback) { pageEvents[name] = callback; } });
+  const context = vm.createContext({ chrome, document,
+    Audio: class { async play() { playedVolumes.push(this.volume); } },
+    setTimeout() {}, addEventListener(name, callback) { pageEvents[name] = callback; } });
   vm.runInContext(diagnosticClientSource, context);
   vm.runInContext(source, context);
   return {
-    elements, messages, document, documentEvents, pageEvents,
-    show(isTest) { let result; listener({ action: 'showReflectionPrompt', isTest }, {}, (r) => { result = r; }); return result; }
+    elements, messages, document, documentEvents, pageEvents, playedVolumes,
+    show(isTest, options = {}) { let result; listener({ action: 'showReflectionPrompt', isTest, ...options }, {}, (r) => { result = r; }); return result; }
   };
 }
 
@@ -92,4 +96,18 @@ test('prompt and visibility diagnostics never capture reflection text or typing'
   const visibility = events.find((m) => m.event === 'page.visibility');
   assert.equal(visibility.details.hasPrompt, true);
   assert.equal(visibility.details.visibility, 'hidden');
+});
+
+test('per-session sound overrides a pages cached global volume, including mute', async () => {
+  const audible = createHarness(10);
+  audible.document.hidden = false;
+  audible.show(false, { sfxVolume: 80 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(audible.playedVolumes, [0.8]);
+  const muted = createHarness(100);
+  muted.document.hidden = false;
+  muted.show(false, { sfxVolume: 0 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(muted.playedVolumes, []);
+  assert.ok(muted.messages.some((message) => message.event === 'sound.result' && message.details.outcome === 'muted'));
 });

@@ -5,7 +5,8 @@ importScripts('timer-utils.js', 'diagnostics.js');
 const TIMER_ALARM = 'reflectionTimerComplete';
 const SCHEDULE_ALARM = 'reflectionTimerScheduledStart';
 const TIMER_STATE_KEY = 'timerStateV2';
-const SCHEDULE_STATE_KEY = 'scheduledTimerV2';
+const SCHEDULE_STATE_KEY = 'scheduledSessionsV3';
+const MAX_SCHEDULED_SESSIONS = 50;
 const DEFAULT_DURATION_SECONDS = 25 * 60;
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit';
 const DEFAULT_SHEET_NAME = 'Template';
@@ -19,7 +20,14 @@ const LEGACY_SECRET_KEYS = [
 ];
 
 let timerState = createDefaultTimerState();
-let scheduledTimer = null;
+let scheduledTimers = [];
+// Appointments and live timer mutations share one queue so they cannot race.
+let scheduleQueue = Promise.resolve();
+function queueSchedule(operation) {
+  const result = scheduleQueue.then(operation);
+  scheduleQueue = result.catch(() => {});
+  return result;
+}
 let stateInitialized = false;
 const diagnostics = TimerDiagnostics.createRecorder(chrome.storage.local);
 function diagnose(event, details = {}, observedState = publicState()) {
@@ -33,10 +41,11 @@ const ready = initialize().then(() => {
   void diagnose('worker.failed', { errorKind: TimerDiagnostics.classifyError(error) });
   console.error('[Reflection Timer] State initialization failed; restoring safe defaults.', error);
   timerState = createDefaultTimerState();
-  scheduledTimer = null;
+  scheduledTimers = [];
   await chrome.alarms.clear(TIMER_ALARM);
   await chrome.alarms.clear(SCHEDULE_ALARM);
-  await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
+  // Keep saved appointments on disk if initialization fails; a later worker
+  // can recover them rather than erasing the user's schedule.
   await persistTimerState(false);
 });
 
@@ -57,6 +66,10 @@ function senderDetails(sender) {
 
 async function diagnosticSnapshot() {
   const snapshot = { timer: TimerDiagnostics.sanitizeState(publicState()), stateInitialized };
+  snapshot.scheduledSessions = scheduledTimers.map((entry) => TimerDiagnostics.sanitizeDetails({
+    scheduleId: entry.id, targetTime: entry.targetTime, requestedDurationSeconds: entry.durationSeconds,
+    autoRestart: entry.autoRestart, sfxVolume: entry.sfxVolume
+  }));
   const current = snapshot.timer;
   const expectedSchedule = current.scheduledTimer;
   const checks = { expectedCompletionAt: current.endTime, expectedScheduleAt: expectedSchedule && expectedSchedule.targetTime };
@@ -143,6 +156,7 @@ function createDefaultTimerState() {
     remainingSeconds: DEFAULT_DURATION_SECONDS,
     endTime: null,
     autoRestart: false,
+    sfxVolume: 50,
     promptActive: false,
     completedAt: null
   };
@@ -168,6 +182,7 @@ function normalizeTimerState(value) {
     remainingSeconds,
     endTime: value.isRunning && hasDeadline ? endTime : null,
     autoRestart: Boolean(value.autoRestart),
+    sfxVolume: normalizeVolume(value.sfxVolume),
     promptActive: Boolean(value.promptActive),
     completedAt: typeof value.completedAt === 'string' ? value.completedAt : null
   };
@@ -210,14 +225,21 @@ function normalizeScheduledTimer(value) {
   }
   const targetTime = Number(value.targetTime);
   const durationSeconds = clampDuration(value.durationSeconds);
-  if (!Number.isFinite(targetTime) || targetTime <= 0 || durationSeconds <= 0) {
+  if (!Number.isFinite(targetTime) || !Number.isFinite(new Date(targetTime).getTime()) || targetTime <= 0 || durationSeconds <= 0) {
     return null;
   }
   return {
+    id: Number.isSafeInteger(value.id) && value.id > 0 ? value.id : targetTime,
     targetTime,
     durationSeconds,
-    autoRestart: Boolean(value.autoRestart)
+    autoRestart: Boolean(value.autoRestart),
+    sfxVolume: normalizeVolume(value.sfxVolume)
   };
+}
+
+function normalizeVolume(value, fallback = 50) {
+  if (value === undefined || value === null || !Number.isFinite(Number(value))) return fallback;
+  return Math.max(0, Math.min(100, Math.round(Number(value))));
 }
 
 function clampDuration(value) {
@@ -232,6 +254,8 @@ async function initialize() {
   const stored = await chrome.storage.local.get([
     TIMER_STATE_KEY,
     SCHEDULE_STATE_KEY,
+    'scheduledTimerV2',
+    'sfxVolume',
     'backgroundTimerState',
     'scheduledTimer',
     'scheduledState',
@@ -245,12 +269,24 @@ async function initialize() {
     ? normalizeTimerState(stored[TIMER_STATE_KEY])
     : (migrateLegacyTimerState(stored.backgroundTimerState, stored.autoRestart) || createDefaultTimerState());
 
-  const normalizedStoredSchedule = normalizeScheduledTimer(stored[SCHEDULE_STATE_KEY]);
-  scheduledTimer = normalizedStoredSchedule
+  timerState.sfxVolume = normalizeVolume(stored[TIMER_STATE_KEY]?.sfxVolume, normalizeVolume(stored.sfxVolume));
+  const legacySchedule = normalizeScheduledTimer(stored.scheduledTimerV2)
     || migrateLegacySchedule(stored.scheduledTimer, stored.scheduledState, stored.autoRestart);
-
-  if (stored[SCHEDULE_STATE_KEY] && !normalizedStoredSchedule) {
-    await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
+  const candidates = Array.isArray(stored[SCHEDULE_STATE_KEY]) ? stored[SCHEDULE_STATE_KEY]
+    : legacySchedule ? [{ ...legacySchedule, sfxVolume: normalizeVolume(stored.sfxVolume) }] : [];
+  scheduledTimers = candidates.map(normalizeScheduledTimer).filter(Boolean).sort((a, b) => a.targetTime - b.targetTime);
+  const ids = new Set();
+  const times = new Set();
+  scheduledTimers = scheduledTimers.filter((entry) => {
+    if (ids.has(entry.id) || times.has(entry.targetTime)) return false;
+    ids.add(entry.id);
+    times.add(entry.targetTime);
+    return true;
+  }).slice(0, MAX_SCHEDULED_SESSIONS);
+  // Persist the migrated list before removing the old single-entry format.
+  await chrome.storage.local.set({ [SCHEDULE_STATE_KEY]: scheduledTimers });
+  if (stored.scheduledTimerV2) {
+    await chrome.storage.local.remove('scheduledTimerV2');
   }
 
   const configuredSheetUrl = TimerUtils.extractSpreadsheetId(stored.sheetUrl)
@@ -281,26 +317,20 @@ async function initialize() {
     }
   }
 
-  if (scheduledTimer) {
-    if (Number(scheduledTimer.targetTime) > Date.now()) {
-      await chrome.alarms.create(SCHEDULE_ALARM, { when: Number(scheduledTimer.targetTime) });
-      await chrome.storage.local.set({ [SCHEDULE_STATE_KEY]: scheduledTimer });
-    } else {
-      await startScheduledTimer();
-    }
-  }
+  await startScheduledTimer();
 }
 
 function publicState() {
   return {
     ...timerState,
     remainingSeconds: TimerUtils.getRemainingSeconds(timerState),
-    scheduledTimer
+    scheduledTimer: scheduledTimers[0] || null, // Compatibility with older popups and diagnostic reports.
+    scheduledTimers
   };
 }
 
-async function persistTimerState(shouldBroadcast = true) {
-  await chrome.storage.local.set({ [TIMER_STATE_KEY]: timerState });
+async function persistTimerState(shouldBroadcast = true, extra = {}) {
+  await chrome.storage.local.set({ ...extra, [TIMER_STATE_KEY]: timerState });
   void diagnose('timer.persisted');
   if (shouldBroadcast) {
     broadcastRuntimeMessage({ action: 'timerStateChanged', state: publicState() });
@@ -328,13 +358,14 @@ async function startTimer(durationSeconds, autoRestart, options = {}) {
     remainingSeconds: safeDuration,
     endTime: Date.now() + (safeDuration * 1000),
     autoRestart: Boolean(autoRestart),
+    sfxVolume: normalizeVolume(options.sfxVolume, timerState.sfxVolume),
     promptActive: options.keepPrompt === true && timerState.promptActive,
     completedAt: options.keepPrompt === true ? timerState.completedAt : null
   };
 
   await chrome.alarms.clear(TIMER_ALARM);
   await chrome.alarms.create(TIMER_ALARM, { when: timerState.endTime });
-  await persistTimerState();
+  await persistTimerState(true, options.scheduledStart ? { [SCHEDULE_STATE_KEY]: scheduledTimers } : {});
   if (shouldDismissPrompt) {
     void dismissPromptInAllTabs().catch(() => {});
   }
@@ -418,7 +449,7 @@ async function completeTimer() {
   return publicState();
 }
 
-async function scheduleTimer(targetTimeValue, durationSeconds, autoRestart) {
+async function scheduleTimer(targetTimeValue, durationSeconds, autoRestart, sfxVolume, id) {
   const targetTime = new Date(targetTimeValue).getTime();
   const duration = clampDuration(durationSeconds);
   if (!Number.isFinite(targetTime) || targetTime <= Date.now()) {
@@ -428,30 +459,69 @@ async function scheduleTimer(targetTimeValue, durationSeconds, autoRestart) {
     throw new Error('Choose a timer duration greater than zero.');
   }
 
-  scheduledTimer = { targetTime, durationSeconds: duration, autoRestart: Boolean(autoRestart) };
-  await chrome.storage.local.set({ [SCHEDULE_STATE_KEY]: scheduledTimer });
-  await chrome.alarms.clear(SCHEDULE_ALARM);
-  await chrome.alarms.create(SCHEDULE_ALARM, { when: targetTime });
+  const editing = id !== undefined && id !== null;
+  if (editing && !scheduledTimers.some((entry) => entry.id === id)) throw new Error('That scheduled session no longer exists. Add a new session instead.');
+  if (!editing && scheduledTimers.length >= MAX_SCHEDULED_SESSIONS) throw new Error('You can schedule up to 50 sessions. Remove one before adding another.');
+  if (scheduledTimers.some((entry) => entry.targetTime === targetTime && entry.id !== id)) throw new Error('Another session already starts at that time. Choose a different start time.');
+  const entry = {
+    id: editing ? id : Math.max(Date.now(), ...scheduledTimers.map((item) => item.id + 1)),
+    targetTime, durationSeconds: duration, autoRestart: Boolean(autoRestart),
+    sfxVolume: normalizeVolume(sfxVolume, timerState.sfxVolume)
+  };
+  const next = [...scheduledTimers.filter((item) => item.id !== entry.id), entry].sort((a, b) => a.targetTime - b.targetTime);
+  await chrome.storage.local.set({ [SCHEDULE_STATE_KEY]: next });
+  scheduledTimers = next;
+  await armNextScheduledSession();
+  void diagnose('schedule.saved', { scheduleId: entry.id, targetTime, requestedDurationSeconds: duration, autoRestart: entry.autoRestart, sfxVolume: entry.sfxVolume });
   broadcastRuntimeMessage({ action: 'timerStateChanged', state: publicState() });
   return publicState();
 }
 
-async function clearScheduledTimer() {
-  scheduledTimer = null;
+async function armNextScheduledSession() {
   await chrome.alarms.clear(SCHEDULE_ALARM);
-  await chrome.storage.local.remove(SCHEDULE_STATE_KEY);
+  if (scheduledTimers[0]) await chrome.alarms.create(SCHEDULE_ALARM, { when: scheduledTimers[0].targetTime });
+}
+
+async function clearScheduledTimer(id) {
+  // Legacy callers cancel the next entry, never the entire schedule list.
+  const targetId = id ?? scheduledTimers[0]?.id;
+  const next = scheduledTimers.filter((entry) => entry.id !== targetId);
+  await chrome.storage.local.set({ [SCHEDULE_STATE_KEY]: next });
+  scheduledTimers = next;
+  await armNextScheduledSession();
+  void diagnose('schedule.removed', { scheduleId: targetId });
   broadcastRuntimeMessage({ action: 'timerStateChanged', state: publicState() });
   return publicState();
 }
 
 async function startScheduledTimer() {
-  if (!scheduledTimer) {
+  const due = scheduledTimers.filter((entry) => entry.targetTime <= Date.now());
+  if (!due.length) {
+    await armNextScheduledSession();
     return publicState();
   }
-  const pending = scheduledTimer;
-  void diagnose('schedule.started', { lateByMs: Math.max(0, Date.now() - pending.targetTime) });
-  await clearScheduledTimer();
-  const state = await startTimer(pending.durationSeconds, pending.autoRestart);
+  // After sleep/restart, run the most recent due appointment once, not a burst
+  // of every missed session. Future appointments stay queued.
+  const pending = due[due.length - 1];
+  const next = scheduledTimers.filter((entry) => entry.targetTime > pending.targetTime);
+  for (const skipped of due.slice(0, -1)) void diagnose('schedule.skipped', { scheduleId: skipped.id, targetTime: skipped.targetTime });
+  void diagnose('schedule.started', { scheduleId: pending.id, lateByMs: Math.max(0, Date.now() - pending.targetTime) });
+  // Persist removal and new timer together so a worker restart cannot replay it.
+  const previous = scheduledTimers;
+  const previousTimer = timerState;
+  scheduledTimers = next;
+  let state;
+  try {
+    state = await startTimer(pending.durationSeconds, pending.autoRestart, { sfxVolume: pending.sfxVolume, scheduledStart: true });
+  } catch (error) {
+    scheduledTimers = previous;
+    timerState = previousTimer;
+    await chrome.alarms.clear(TIMER_ALARM);
+    if (timerState.isRunning) await chrome.alarms.create(TIMER_ALARM, { when: timerState.endTime });
+    await chrome.alarms.create(SCHEDULE_ALARM, { when: Date.now() + 60000 });
+    throw error;
+  }
+  await armNextScheduledSession();
   createNotification(`scheduled-${Date.now()}`, {
     type: 'basic',
     iconUrl: 'extension_icon_128.png',
@@ -519,6 +589,7 @@ async function showPromptInActiveTab(isTest = false) {
     action: 'showReflectionPrompt',
     isTest,
     durationSeconds: timerState.durationSeconds,
+    sfxVolume: timerState.sfxVolume,
     completedAt: timerState.completedAt || new Date().toISOString()
   };
   const firstAttempt = await sendTabMessage(tab.id, promptMessage);
@@ -662,34 +733,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const startedAt = Date.now();
   const details = { ...senderDetails(sender), action: message && message.action,
     isTest: Boolean(message && message.isTest), requestedDurationSeconds: message && message.durationSeconds,
-    autoRestart: message && message.autoRestart };
+    autoRestart: message && message.autoRestart, scheduleId: message && message.id, sfxVolume: message && message.sfxVolume };
   if (trackCommand) void diagnose('command.received', details);
   (async () => {
     if (diagnosticAction) return handleDiagnostics(message, sender);
     await ready;
     switch (message && message.action) {
       case 'getTimerState':
-        return { success: true, apiVersion: API_VERSION, state: await getCurrentState() };
+        return { success: true, apiVersion: API_VERSION, state: await queueSchedule(() => getCurrentState()) };
       case 'startTimer':
-        return { success: true, state: await startTimer(message.durationSeconds, message.autoRestart) };
+        return { success: true, state: await queueSchedule(() => startTimer(message.durationSeconds, message.autoRestart, { sfxVolume: message.sfxVolume })) };
       case 'pauseTimer':
       case 'stopTimer':
-        return { success: true, state: await pauseTimer() };
+        return { success: true, state: await queueSchedule(() => pauseTimer()) };
       case 'resumeTimer':
-        return { success: true, state: await resumeTimer(message.autoRestart) };
+        return { success: true, state: await queueSchedule(() => resumeTimer(message.autoRestart)) };
       case 'resetTimer':
-        return { success: true, state: await resetTimer(message.durationSeconds) };
+        return { success: true, state: await queueSchedule(() => resetTimer(message.durationSeconds)) };
       case 'updateAutoRestart':
-        timerState.autoRestart = Boolean(message.autoRestart);
-        await persistTimerState();
-        return { success: true, state: publicState() };
+        return queueSchedule(async () => {
+          timerState.autoRestart = Boolean(message.autoRestart);
+          await persistTimerState();
+          return { success: true, state: publicState() };
+        });
+      case 'updateVolume':
+        return queueSchedule(async () => {
+          timerState.sfxVolume = normalizeVolume(message.sfxVolume, timerState.sfxVolume);
+          await persistTimerState();
+          return { success: true, state: publicState() };
+        });
       case 'scheduleTimer':
+      case 'saveScheduledSession':
         return {
           success: true,
-          state: await scheduleTimer(message.targetTime, message.durationSeconds, message.autoRestart)
+          state: await queueSchedule(() => scheduleTimer(message.targetTime, message.durationSeconds, message.autoRestart, message.sfxVolume, message.id))
         };
       case 'clearScheduledTimer':
-        return { success: true, state: await clearScheduledTimer() };
+      case 'removeScheduledSession':
+        return { success: true, state: await queueSchedule(() => clearScheduledTimer(message.id)) };
       case 'showTestPrompt':
         return showPromptInActiveTab(true);
       case 'contentReady':
@@ -699,6 +780,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             action: 'showReflectionPrompt',
             isTest: false,
             durationSeconds: timerState.durationSeconds,
+            sfxVolume: timerState.sfxVolume,
             completedAt: timerState.completedAt
           });
         }
@@ -735,13 +817,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   void diagnose('alarm.fired', { alarm: alarm.name === TIMER_ALARM ? 'completion' : alarm.name === SCHEDULE_ALARM ? 'scheduled_start' : 'other',
     scheduledTime: alarm.scheduledTime, lateByMs: Math.max(0, Date.now() - alarm.scheduledTime) });
-  ready.then(async () => {
+  ready.then(() => queueSchedule(async () => {
     if (alarm.name === TIMER_ALARM) {
-      await completeTimer();
+      // A completion event queued for the previous timer must not end a new
+      // scheduled session that has just taken over.
+      if (timerState.isRunning && TimerUtils.getRemainingSeconds(timerState) > 0) {
+        void diagnose('timer.completionSkipped');
+        await chrome.alarms.create(TIMER_ALARM, { when: timerState.endTime });
+      } else await completeTimer();
     } else if (alarm.name === SCHEDULE_ALARM) {
       await startScheduledTimer();
     }
-  }).catch((error) => {
+  })).catch((error) => {
     void diagnose('event.failed', { trigger: 'alarm', errorKind: TimerDiagnostics.classifyError(error) });
     console.error('[Reflection Timer] Alarm failed:', error);
   });

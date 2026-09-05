@@ -46,14 +46,30 @@
     </section>
 
     <details id="schedulePanel" class="schedule-panel">
-      <summary>Schedule a start time</summary>
-      <div class="schedule-controls">
-        <label for="startTime">Start at</label>
-        <input id="startTime" type="datetime-local">
-        <button id="schedule" class="secondary" type="button">Schedule</button>
-        <button id="cancelSchedule" class="text-button" type="button" hidden>Cancel scheduled start</button>
+      <summary>Scheduling session times</summary>
+      <div class="schedule-editor">
+        <p id="scheduleStatus" class="hint" role="status"></p>
+        <ol id="scheduledSessions" class="scheduled-sessions" aria-label="Scheduled sessions"></ol>
+        <h2 id="scheduleEditorTitle">Add a session</h2>
+        <label class="schedule-start-label" for="startTime">Start date &amp; time (local)</label>
+        <input id="startTime" type="datetime-local" required>
+        <fieldset class="duration-fields scheduled-duration">
+          <legend class="sr-only">Scheduled session duration</legend>
+          <label><span>Hours</span><input id="scheduleHours" type="number" min="0" max="8760" value="0" inputmode="numeric"></label>
+          <span class="colon" aria-hidden="true">:</span>
+          <label><span>Minutes</span><input id="scheduleMinutes" type="number" min="0" max="59" value="25" inputmode="numeric"></label>
+          <span class="colon" aria-hidden="true">:</span>
+          <label><span>Seconds</span><input id="scheduleSeconds" type="number" min="0" max="59" value="0" inputmode="numeric"></label>
+        </fieldset>
+        <label class="check-row"><input id="scheduleAutoRestart" type="checkbox"><span>Auto-start next session</span></label>
+        <p class="hint">Repeat this duration immediately after each session ends.</p>
+        <label class="range-row"><span>Sound</span><input id="scheduleVolume" type="range" min="0" max="100" value="50"><output id="scheduleVolumeValue">50%</output></label>
+        <div class="schedule-editor-actions">
+          <button id="schedule" class="secondary" type="button">Add session</button>
+          <button id="cancelScheduleEdit" class="text-button" type="button" hidden>Cancel edit</button>
+        </div>
+        <p class="hint">Each entry runs once and takes over any current timer at its start time. Entries keep their own duration, repeat setting, and sound level. If several starts were missed while Chrome was closed or asleep, only the latest missed session starts on return.</p>
       </div>
-      <p id="scheduleStatus" class="hint"></p>
     </details>
 
     <div class="footer-actions">
@@ -68,6 +84,7 @@
   <script src="timer-utils.js"></script>
   <script src="diagnostic-client.js"></script>
   <script src="diagnostics-ui.js"></script>
+  <script src="scheduled-sessions.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

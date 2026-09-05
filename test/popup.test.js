@@ -9,6 +9,7 @@ const TimerUtils = require('../timer-utils.js');
 
 const popupSource = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
 const diagnosticClientSource = fs.readFileSync(path.join(__dirname, '..', 'diagnostic-client.js'), 'utf8');
+const scheduleSource = fs.readFileSync(path.join(__dirname, '..', 'scheduled-sessions.js'), 'utf8');
 
 function createElement(id, document) {
   const listeners = new Map();
@@ -22,6 +23,10 @@ function createElement(id, document) {
     hidden: false,
     open: false,
     selectCount: 0,
+    children: [],
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
+    setAttribute(name, value) { this[name] = value; },
     addEventListener(type, callback) { listeners.set(type, callback); },
     click() { listeners.get('click')?.({}); },
     focus() { document.activeElement = this; },
@@ -42,10 +47,13 @@ function createHarness(getStateResponse) {
     },
     getElementById(id) { return this.elements.get(id); }
   };
+  document.createElement = (tag) => createElement(tag, document);
   for (const id of [
     'hours', 'minutes', 'seconds', 'display', 'timerStatus', 'startPause', 'reset',
     'autoRestart', 'volume', 'volumeValue', 'startTime', 'schedule', 'cancelSchedule',
-    'scheduleStatus', 'schedulePanel', 'openSettings', 'testPrompt', 'currentTime', 'status'
+    'scheduleStatus', 'schedulePanel', 'openSettings', 'testPrompt', 'currentTime', 'status',
+    'scheduleHours', 'scheduleMinutes', 'scheduleSeconds', 'scheduleAutoRestart', 'scheduleVolume',
+    'scheduleVolumeValue', 'scheduledSessions', 'scheduleEditorTitle', 'cancelScheduleEdit'
   ]) {
     document.elements.set(id, createElement(id, document));
   }
@@ -84,6 +92,7 @@ function createHarness(getStateResponse) {
   };
   const sandbox = vm.createContext(context);
   vm.runInContext(diagnosticClientSource, sandbox);
+  vm.runInContext(scheduleSource, sandbox);
   vm.runInContext(popupSource, sandbox, { filename: 'popup.js' });
   domReady();
   return {

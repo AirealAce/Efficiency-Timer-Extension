@@ -9,7 +9,7 @@
   const EVENTS = new Set([
     'worker.started', 'worker.restored', 'worker.failed', 'extension.installed',
     'command.received', 'command.finished', 'command.failed', 'timer.persisted',
-    'timer.completed', 'timer.completionSkipped', 'schedule.started', 'alarm.fired',
+    'timer.completed', 'timer.completionSkipped', 'schedule.started', 'schedule.saved', 'schedule.removed', 'schedule.skipped', 'alarm.fired',
     'event.failed', 'tab.activated', 'tab.updated', 'tab.removed', 'window.focused',
     'prompt.delivery', 'prompt.unavailable', 'prompt.injected', 'notification.result',
     'notification.clicked', 'sheets.started', 'sheets.finished', 'sheets.failed',
@@ -31,7 +31,7 @@
     'updateAutoRestart', 'scheduleTimer', 'clearScheduledTimer', 'showTestPrompt',
     'contentReady', 'dismissReflection', 'updateChatboxState', 'saveReflection',
     'updateGoogleSheet', 'testSheetsConnection', 'openSettings', 'showReflectionPrompt',
-    'dismissReflectionPrompt', 'appendReflection', 'ping'
+    'dismissReflectionPrompt', 'appendReflection', 'ping', 'saveScheduledSession', 'removeScheduledSession', 'updateVolume'
   ];
   const ENUMS = {
     action: ACTIONS,
@@ -50,7 +50,7 @@
     'tabId', 'windowId', 'frameId', 'requestedDurationSeconds', 'targetTime',
     'elapsedMs', 'lateByMs', 'scheduledTime', 'httpStatus', 'attempt', 'clientAt',
     'observedRemainingSeconds', 'observedEndTime', 'completionAlarmAt', 'scheduleAlarmAt',
-    'alarmCount', 'activeTabId', 'expectedCompletionAt', 'expectedScheduleAt'
+    'alarmCount', 'activeTabId', 'expectedCompletionAt', 'expectedScheduleAt', 'scheduleId', 'sfxVolume', 'scheduledCount'
   ]);
   const BOOLEANS = new Set([
     'active', 'discarded', 'frozen', 'audible', 'isTest', 'hasPrompt', 'persisted',
@@ -77,7 +77,7 @@
     for (const key of ['isRunning', 'autoRestart', 'promptActive']) {
       if (typeof value[key] === 'boolean') clean[key] = value[key];
     }
-    for (const key of ['durationSeconds', 'remainingSeconds', 'endTime']) {
+    for (const key of ['durationSeconds', 'remainingSeconds', 'endTime', 'sfxVolume']) {
       if (typeof value[key] === 'number' && Number.isFinite(value[key])) clean[key] = value[key];
       else if (value[key] === null) clean[key] = null;
     }
@@ -89,6 +89,8 @@
       const duration = value.scheduledTimer.durationSeconds;
       if (typeof duration === 'number' && Number.isFinite(duration)) clean.scheduledTimer.durationSeconds = duration;
     } else clean.scheduledTimer = null;
+    if (Array.isArray(value.scheduledTimers)) clean.scheduledCount = value.scheduledTimers.length;
+    else if (Number.isSafeInteger(value.scheduledCount)) clean.scheduledCount = value.scheduledCount;
     return clean;
   }
 

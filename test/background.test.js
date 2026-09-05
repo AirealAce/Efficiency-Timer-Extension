@@ -19,11 +19,18 @@ function createEvent() {
 }
 
 function createHarness(seed = {}, options = {}) {
+  let frozenTime = options.now ?? null;
+  const now = () => frozenTime ?? Date.now();
+  class ClockDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [now()])); }
+    static now() { return now(); }
+  }
   const stored = { ...seed };
   const clearedAlarms = [];
   const createdAlarms = [];
   const activeAlarms = new Map();
   const injectedScripts = [];
+  const sentTabMessages = [];
   const removedStorageKeys = [];
   let contentScriptInjected = false;
   let tabMessageCount = 0;
@@ -37,6 +44,7 @@ function createHarness(seed = {}, options = {}) {
         },
         async set(values) {
           if (options.diagnosticStorageFails && TimerDiagnostics.STORAGE_KEY in values) throw new Error('Storage quota exceeded');
+          if (options.failScheduledCommit && 'scheduledSessionsV3' in values && 'timerStateV2' in values) throw new Error('Storage write failed');
           Object.assign(stored, structuredClone(values));
         },
         async remove(keys) {
@@ -66,6 +74,7 @@ function createHarness(seed = {}, options = {}) {
     tabs: {
       async query() { return options.tabs || []; },
       sendMessage(_tabId, _message, callback) {
+        sentTabMessages.push({ tabId: _tabId, ..._message });
         tabMessageCount += 1;
         if (options.missingReceiverUntilInjected && !contentScriptInjected) {
           chrome.runtime.lastError = { message: 'Could not establish connection. Receiving end does not exist.' };
@@ -99,7 +108,8 @@ function createHarness(seed = {}, options = {}) {
   const context = {
     AbortController,
     URL,
-    TimerUtils,
+    Date: ClockDate,
+    TimerUtils: { ...TimerUtils, getRemainingSeconds: (state, time = now()) => TimerUtils.getRemainingSeconds(state, time) },
     TimerDiagnostics,
     chrome,
     console,
@@ -125,11 +135,14 @@ function createHarness(seed = {}, options = {}) {
 
   return {
     chrome,
+    now,
+    advanceTime(ms) { frozenTime = now() + ms; },
     activeAlarms,
     createdAlarms,
     clearedAlarms,
     dispatch,
     injectedScripts,
+    sentTabMessages,
     removedStorageKeys,
     stored,
     get optionsPageOpenCount() { return optionsPageOpenCount; },
@@ -434,6 +447,7 @@ test('disabled logs stay disabled after worker restarts and clearing does not er
 test('alarm lateness and completion are recorded without changing the normal completion workflow', async () => {
   const harness = createHarness({}, { tabs: [{ id: 9, url: 'https://example.com', active: true }] });
   await harness.dispatch({ action: 'startTimer', durationSeconds: 120 });
+  harness.advanceTime(120000);
   harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerComplete', scheduledTime: Date.now() - 4000 });
   await new Promise((resolve) => setImmediate(resolve));
   const { report } = await harness.dispatch({ action: 'getDiagnostics' });
@@ -443,4 +457,161 @@ test('alarm lateness and completion are recorded without changing the normal com
   assert.ok(report.events.some((entry) => entry.event === 'timer.completed'));
   assert.equal(report.snapshot.timer.isRunning, false);
   assert.equal(report.snapshot.timer.promptActive, true);
+});
+
+test('multiple sessions keep independent settings, sort by start time, and survive worker restart', async () => {
+  const harness = createHarness({}, { now: Date.now() });
+  const later = await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 7200000, durationSeconds: 1200, autoRestart: true, sfxVolume: 0 });
+  const laterId = later.state.scheduledTimers[0].id;
+  const earlier = await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 3600000, durationSeconds: 600, autoRestart: false, sfxVolume: 85 });
+  assert.equal(earlier.state.scheduledTimers.length, 2);
+  assert.equal(earlier.state.scheduledTimers[0].durationSeconds, 600);
+  assert.equal(earlier.state.scheduledTimers[1].id, laterId);
+  assert.equal(earlier.state.scheduledTimers[1].autoRestart, true);
+  assert.equal(earlier.state.scheduledTimers[1].sfxVolume, 0);
+  assert.equal(harness.activeAlarms.get('reflectionTimerScheduledStart').scheduledTime, harness.now() + 3600000);
+  const restored = createHarness(harness.stored, { now: harness.now() });
+  const response = await restored.dispatch({ action: 'getTimerState' });
+  assert.deepEqual(JSON.parse(JSON.stringify(response.state.scheduledTimers)), harness.stored.scheduledSessionsV3);
+  const report = (await restored.dispatch({ action: 'getDiagnostics' })).report;
+  assert.equal(report.snapshot.scheduledSessions.length, 2);
+  assert.equal(report.snapshot.timer.scheduledCount, 2);
+});
+
+test('editing and removing affect only the selected session and not the running timer', async () => {
+  const harness = createHarness({}, { now: Date.now() });
+  await harness.dispatch({ action: 'startTimer', durationSeconds: 900, autoRestart: false, sfxVolume: 20 });
+  const first = (await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 60000, durationSeconds: 60, sfxVolume: 0 })).state.scheduledTimers[0];
+  const second = (await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 120000, durationSeconds: 90, sfxVolume: 100 })).state.scheduledTimers[1];
+  const before = JSON.stringify(harness.stored.timerStateV2);
+  const changed = await harness.dispatch({ action: 'saveScheduledSession', id: first.id, targetTime: harness.now() + 180000, durationSeconds: 180, autoRestart: true, sfxVolume: 40 });
+  assert.equal(changed.state.scheduledTimers[0].id, second.id);
+  assert.equal(changed.state.scheduledTimers[1].id, first.id);
+  assert.equal(changed.state.scheduledTimers[1].sfxVolume, 40);
+  const removed = await harness.dispatch({ action: 'removeScheduledSession', id: second.id });
+  assert.equal(removed.state.scheduledTimers.length, 1);
+  assert.equal(removed.state.scheduledTimers[0].id, first.id);
+  assert.equal(JSON.stringify(harness.stored.timerStateV2), before);
+  assert.equal(harness.activeAlarms.get('reflectionTimerScheduledStart').scheduledTime, harness.now() + 180000);
+});
+
+test('old single scheduled start migrates once with its options and sound preference', async () => {
+  const now = Date.now();
+  const harness = createHarness({ scheduledTimerV2: { targetTime: now + 600000, durationSeconds: 450, autoRestart: true }, sfxVolume: 73 }, { now });
+  const response = await harness.dispatch({ action: 'getTimerState' });
+  assert.equal(response.state.scheduledTimers.length, 1);
+  assert.equal(response.state.scheduledTimers[0].durationSeconds, 450);
+  assert.equal(response.state.scheduledTimers[0].autoRestart, true);
+  assert.equal(response.state.scheduledTimers[0].sfxVolume, 73);
+  assert.equal('scheduledTimerV2' in harness.stored, false);
+  const restarted = createHarness(harness.stored, { now });
+  assert.equal((await restarted.dispatch({ action: 'getTimerState' })).state.scheduledTimers.length, 1);
+});
+
+test('due session takes over with its options, repeats with those options, and leaves future entries intact', async () => {
+  const harness = createHarness({}, { now: Date.now(), tabs: [{ id: 8, url: 'https://example.com', active: true }] });
+  await harness.dispatch({ action: 'startTimer', durationSeconds: 900, sfxVolume: 10 });
+  await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 60000, durationSeconds: 120, autoRestart: true, sfxVolume: 80 });
+  await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 600000, durationSeconds: 300, autoRestart: false, sfxVolume: 0 });
+  harness.advanceTime(60000);
+  harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerScheduledStart', scheduledTime: harness.now() });
+  let response = await harness.dispatch({ action: 'getTimerState' });
+  assert.equal(response.state.durationSeconds, 120);
+  assert.equal(response.state.autoRestart, true);
+  assert.equal(response.state.sfxVolume, 80);
+  assert.equal(response.state.scheduledTimers.length, 1);
+  assert.equal(harness.stored.scheduledSessionsV3.length, 1);
+  harness.advanceTime(120000);
+  harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerComplete', scheduledTime: harness.now() });
+  response = await harness.dispatch({ action: 'getTimerState' });
+  assert.equal(response.state.isRunning, true);
+  assert.equal(response.state.remainingSeconds, 120);
+  assert.equal(response.state.sfxVolume, 80);
+  assert.equal(response.state.scheduledTimers.length, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(harness.sentTabMessages.some((message) => message.action === 'showReflectionPrompt' && message.sfxVolume === 80));
+});
+
+test('missed starts coalesce to the latest, future starts remain queued, and stale alarms cannot restart or finish it', async () => {
+  const now = Date.now();
+  const sessions = [
+    { id: 1, targetTime: now - 120000, durationSeconds: 90, autoRestart: false, sfxVolume: 10 },
+    { id: 2, targetTime: now - 60000, durationSeconds: 600, autoRestart: true, sfxVolume: 70 },
+    { id: 3, targetTime: now + 3600000, durationSeconds: 300, autoRestart: false, sfxVolume: 0 }
+  ];
+  const harness = createHarness({ scheduledSessionsV3: sessions }, { now });
+  const started = await harness.dispatch({ action: 'getTimerState' });
+  assert.equal(started.state.durationSeconds, 600);
+  assert.equal(started.state.scheduledTimers.length, 1);
+  const deadline = started.state.endTime;
+  harness.advanceTime(1000);
+  harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerScheduledStart', scheduledTime: now - 60000 });
+  harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerComplete', scheduledTime: now - 60000 });
+  const after = await harness.dispatch({ action: 'getTimerState' });
+  assert.equal(after.state.isRunning, true);
+  assert.equal(after.state.endTime, deadline);
+  const restarted = createHarness(harness.stored, { now: harness.now() });
+  assert.equal((await restarted.dispatch({ action: 'getTimerState' })).state.endTime, deadline);
+});
+
+test('concurrent additions preserve both entries and duplicate/invalid edits do not change saved sessions', async () => {
+  const harness = createHarness({}, { now: Date.now() });
+  const results = await Promise.all([60000, 120000].map((offset) => harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + offset, durationSeconds: 60 })));
+  assert.ok(results.every((result) => result.success));
+  assert.equal(harness.stored.scheduledSessionsV3.length, 2);
+  const before = JSON.stringify(harness.stored.scheduledSessionsV3);
+  for (const request of [
+    { targetTime: harness.now() + 60000, durationSeconds: 60 },
+    { targetTime: harness.now() - 60000, durationSeconds: 60 },
+    { targetTime: harness.now() + 180000, durationSeconds: 0 },
+    { targetTime: harness.now() + 180000, durationSeconds: 60, id: 999 }
+  ]) assert.equal((await harness.dispatch({ action: 'saveScheduledSession', ...request })).success, false);
+  assert.equal(JSON.stringify(harness.stored.scheduledSessionsV3), before);
+});
+
+test('failed scheduled start keeps the appointment for retry without consuming it', async () => {
+  const options = { now: Date.now(), failScheduledCommit: false };
+  const harness = createHarness({}, options);
+  await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 60000, durationSeconds: 180 });
+  options.failScheduledCommit = true;
+  harness.advanceTime(60000);
+  harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerScheduledStart', scheduledTime: harness.now() });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.stored.scheduledSessionsV3.length, 1);
+  assert.equal((await harness.dispatch({ action: 'getTimerState' })).state.isRunning, false);
+  assert.equal(harness.activeAlarms.get('reflectionTimerScheduledStart').scheduledTime, harness.now() + 60000);
+  options.failScheduledCommit = false;
+  harness.advanceTime(60000);
+  harness.chrome.alarms.onAlarm.listeners[0]({ name: 'reflectionTimerScheduledStart', scheduledTime: harness.now() });
+  const response = await harness.dispatch({ action: 'getTimerState' });
+  assert.equal(response.state.durationSeconds, 180);
+  assert.equal(response.state.scheduledTimers.length, 0);
+});
+
+test('schedule capacity rejects additions but still permits editing an existing entry', async () => {
+  const now = Date.now();
+  const sessions = Array.from({ length: 50 }, (_, index) => ({ id: index + 1, targetTime: now + (index + 1) * 60000, durationSeconds: 60, autoRestart: false, sfxVolume: 50 }));
+  const harness = createHarness({ scheduledSessionsV3: sessions }, { now });
+  const denied = await harness.dispatch({ action: 'saveScheduledSession', targetTime: now + 4000000, durationSeconds: 60 });
+  assert.equal(denied.success, false);
+  assert.match(denied.error, /50 sessions/);
+  const edited = await harness.dispatch({ action: 'saveScheduledSession', id: 25, targetTime: now + 4000000, durationSeconds: 180, autoRestart: true, sfxVolume: 30 });
+  assert.equal(edited.success, true);
+  assert.equal(edited.state.scheduledTimers.length, 50);
+  assert.equal(edited.state.scheduledTimers.at(-1).id, 25);
+});
+
+test('regular timer pause/reset and preference changes do not change saved appointment options', async () => {
+  const harness = createHarness({}, { now: Date.now() });
+  await harness.dispatch({ action: 'saveScheduledSession', targetTime: harness.now() + 3600000, durationSeconds: 3600, autoRestart: true, sfxVolume: 0 });
+  const before = JSON.stringify(harness.stored.scheduledSessionsV3);
+  await harness.dispatch({ action: 'startTimer', durationSeconds: 600, autoRestart: false, sfxVolume: 95 });
+  await harness.dispatch({ action: 'pauseTimer' });
+  await harness.dispatch({ action: 'resumeTimer', autoRestart: false });
+  assert.equal(harness.stored.timerStateV2.sfxVolume, 95);
+  await harness.dispatch({ action: 'updateAutoRestart', autoRestart: true });
+  await harness.dispatch({ action: 'updateVolume', sfxVolume: 10 });
+  await harness.dispatch({ action: 'resetTimer' });
+  assert.equal(JSON.stringify(harness.stored.scheduledSessionsV3), before);
+  assert.equal(harness.activeAlarms.get('reflectionTimerScheduledStart').scheduledTime, harness.now() + 3600000);
 });

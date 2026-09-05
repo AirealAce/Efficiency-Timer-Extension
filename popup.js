@@ -18,10 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
     autoRestart: document.getElementById('autoRestart'),
     volume: document.getElementById('volume'),
     volumeValue: document.getElementById('volumeValue'),
-    startTime: document.getElementById('startTime'),
-    schedule: document.getElementById('schedule'),
-    cancelSchedule: document.getElementById('cancelSchedule'),
-    scheduleStatus: document.getElementById('scheduleStatus'),
     schedulePanel: document.getElementById('schedulePanel'),
     openSettings: document.getElementById('openSettings'),
     testPrompt: document.getElementById('testPrompt'),
@@ -32,11 +28,16 @@ document.addEventListener('DOMContentLoaded', () => {
   let state = null;
   let inputsDirty = false;
   let durationPresetUntouched = durationFromInputs() === DEFAULT_DURATION_SECONDS;
+  const scheduleEditor = ScheduledSessions.createEditor({
+    sendMessage,
+    onState(nextState) { adoptState(nextState, { preserveInputs: true }); setStatus('Schedule saved.', 'success'); },
+    onError(message) { setStatus(message, 'error'); }
+  });
 
   function sendMessage(message) {
     const startedAt = Date.now();
     log('client.request', { action: message.action, requestedDurationSeconds: message.durationSeconds,
-      autoRestart: message.autoRestart });
+      autoRestart: message.autoRestart, scheduleId: message.id, sfxVolume: message.sfxVolume });
     return new Promise((resolve, reject) => {
       let settled = false;
       const timeoutId = setTimeout(() => {
@@ -146,23 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function updateScheduleDisplay() {
-    const scheduled = state && state.scheduledTimer;
-    elements.cancelSchedule.hidden = !scheduled;
-    if (scheduled) {
-      const when = new Date(scheduled.targetTime).toLocaleString([], {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-      });
-      elements.scheduleStatus.textContent = `Scheduled for ${when}.`;
-      elements.schedulePanel.open = true;
-      elements.schedule.textContent = 'Reschedule';
-    } else {
-      elements.scheduleStatus.textContent = '';
-      elements.schedule.textContent = 'Schedule';
-    }
+    scheduleEditor.render(state);
   }
 
   function adoptState(nextState, { preserveInputs = false } = {}) {
@@ -175,6 +160,10 @@ document.addEventListener('DOMContentLoaded', () => {
       durationPresetUntouched = durationFromInputs() === DEFAULT_DURATION_SECONDS;
     }
     elements.autoRestart.checked = Boolean(state && state.autoRestart);
+    if (Number.isFinite(state?.sfxVolume)) {
+      elements.volume.value = String(state.sfxVolume);
+      elements.volumeValue.textContent = `${state.sfxVolume}%`;
+    }
     updateTimerDisplay();
     updateScheduleDisplay();
   }
@@ -209,13 +198,11 @@ document.addEventListener('DOMContentLoaded', () => {
         inputsDirty = durationFromInputs() !== response.state.durationSeconds;
         durationPresetUntouched = savedDuration === DEFAULT_DURATION_SECONDS;
       }
-      if (saved.sfxVolume !== undefined) {
+      if (saved.sfxVolume !== undefined && !Number.isFinite(response.state.sfxVolume)) {
         elements.volume.value = String(saved.sfxVolume);
       }
       elements.volumeValue.textContent = `${elements.volume.value}%`;
-      if (saved.autoRestart !== undefined && !response.state.isRunning) {
-        elements.autoRestart.checked = Boolean(saved.autoRestart);
-      }
+      scheduleEditor.setDefaultVolume(Number(saved.sfxVolume ?? 50));
       updateTimerDisplay();
       log('popup.loaded', { observedRunning: state.isRunning, observedRemainingSeconds: getDisplayedRemaining(),
         observedEndTime: state.endTime, observedPromptActive: state.promptActive, inputsDirty });
@@ -274,7 +261,8 @@ document.addEventListener('DOMContentLoaded', () => {
         response = await sendMessage({
           action: 'startTimer',
           durationSeconds,
-          autoRestart: elements.autoRestart.checked
+          autoRestart: elements.autoRestart.checked,
+          sfxVolume: Number(elements.volume.value)
         });
       }
       adoptState(response.state);
@@ -314,35 +302,11 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.volumeValue.textContent = `${elements.volume.value}%`;
   });
   elements.volume.addEventListener('change', async () => {
-    await chrome.storage.local.set({ sfxVolume: Number(elements.volume.value) });
-  });
-
-  elements.schedule.addEventListener('click', async () => {
     try {
-      const targetTime = new Date(elements.startTime.value);
-      if (!elements.startTime.value || !Number.isFinite(targetTime.getTime())) {
-        throw new Error('Choose a start date and time.');
-      }
-      const durationSeconds = durationFromInputs();
-      const response = await sendMessage({
-        action: 'scheduleTimer',
-        targetTime: targetTime.toISOString(),
-        durationSeconds,
-        autoRestart: elements.autoRestart.checked
-      });
-      adoptState(response.state);
-      setStatus('Start time scheduled.', 'success');
-    } catch (error) {
-      setStatus(error.message, 'error');
-    }
-  });
-
-  elements.cancelSchedule.addEventListener('click', async () => {
-    try {
-      const response = await sendMessage({ action: 'clearScheduledTimer' });
+      const sfxVolume = Number(elements.volume.value);
+      await chrome.storage.local.set({ sfxVolume });
+      const response = await sendMessage({ action: 'updateVolume', sfxVolume });
       state = response.state;
-      updateScheduleDisplay();
-      setStatus('Scheduled start cancelled.', 'success');
     } catch (error) {
       setStatus(error.message, 'error');
     }
@@ -367,9 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
       log('popup.stateReceived', { observedRunning: message.state.isRunning,
         observedRemainingSeconds: message.state.remainingSeconds, observedEndTime: message.state.endTime,
         observedPromptActive: message.state.promptActive });
-      state = message.state;
-      updateTimerDisplay();
-      updateScheduleDisplay();
+      adoptState(message.state, { preserveInputs: !message.state.isRunning });
     }
   });
 
@@ -381,11 +343,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     updateTimerDisplay();
   }
-
-  const defaultStart = new Date(Date.now() + (60 * 60 * 1000));
-  defaultStart.setSeconds(0, 0);
-  const localDefault = new Date(defaultStart.getTime() - (defaultStart.getTimezoneOffset() * 60_000));
-  elements.startTime.value = localDefault.toISOString().slice(0, 16);
 
   load();
   requestAnimationFrame(focusAndSelectHours);

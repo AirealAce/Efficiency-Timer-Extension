@@ -24,6 +24,16 @@ A Manifest V3 Chrome extension for running focus sessions, prompting for a short
 
 Chrome blocks content scripts on its own internal pages. Keep a normal `http://` or `https://` tab open when a timer finishes or when testing the reflection prompt. The test button automatically reconnects the prompt to an older tab after an extension reload.
 
+## Scheduling session times (2.5+)
+
+Expand **Scheduling session times** in the popup to add multiple one-time sessions. Each entry has its own local start date/time, hours/minutes/seconds, **Auto-start next session**, and sound level (0% mutes the prompt sound). These controls are independent of the regular timer and remain editable while it runs. Use **Edit** or **Remove** on a saved entry; editing preserves its identity and does not replace other sessions. Up to 50 sessions can be saved, ordered by start time; identical start times are rejected.
+
+A scheduled start takes over any current countdown, using that entry's full duration and options. Auto-start repeats the same duration immediately after completion, until paused/reset, disabled on the regular timer, or replaced by another scheduled start. It does not move the next scheduled appointment earlier. Appointments themselves run once; existing single-entry schedules migrate automatically on upgrade. Pausing or resetting the regular timer does not cancel future appointments—remove those entries explicitly.
+
+After browser downtime or sleep, the latest missed appointment starts with its full duration, earlier missed appointments are skipped, and future entries remain scheduled. Schedule changes and timer/alarm actions are serialized; a stale completion alarm cannot end a new scheduled session. Starts, edits, removals, and skipped appointments appear in the local diagnostic log, and exports include the pending schedule's timing/options without connection settings or reflection text.
+
+Reload the unpacked extension and refresh existing webpages to use the per-session sound settings. This update does not change the Google Sheets receiver or require an Apps Script redeployment.
+
 ## Configure Google Sheets
 
 The included [`google-sheets-script.gs`](google-sheets-script.gs) is the only component allowed to write to the Sheet.

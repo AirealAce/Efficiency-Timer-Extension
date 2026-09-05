@@ -10,6 +10,7 @@
   const MAX_REFLECTION_LENGTH = 5000;
   let sfxVolume = 0.5;
   let activePromptIsTest = false;
+  let promptVolumeSet = false;
   const log = (event, details = {}) => globalThis.TimerDiagnosticClient?.event(event, {
     hasPrompt: Boolean(document.getElementById(HOST_ID)), isTest: activePromptIsTest,
     visibility: document.hidden ? 'hidden' : 'visible', ...details
@@ -20,7 +21,7 @@
 
   chrome.storage.local.get(['sfxVolume']).then((result) => {
     const saved = Number(result.sfxVolume);
-    if (Number.isFinite(saved)) {
+    if (Number.isFinite(saved) && !promptVolumeSet) {
       sfxVolume = Math.max(0, Math.min(1, saved / 100));
     }
   }).catch(() => {});
@@ -101,6 +102,10 @@
   function buildPrompt(options) {
     dismissLocalPrompt();
     activePromptIsTest = options.isTest;
+    if (Number.isFinite(options.sfxVolume)) {
+      sfxVolume = Math.max(0, Math.min(1, options.sfxVolume / 100));
+      promptVolumeSet = true;
+    }
 
     const host = createElement('div', { id: HOST_ID });
     host.style.setProperty('all', 'initial', 'important');
@@ -321,6 +326,7 @@
       }
       buildPrompt({
         isTest: Boolean(message.isTest || message.action === 'showTestChatbox'),
+        sfxVolume: message.sfxVolume,
         durationSeconds: message.durationSeconds || (Number(message.minutes) * 60) || 1500
       });
       sendResponse({ success: true });
