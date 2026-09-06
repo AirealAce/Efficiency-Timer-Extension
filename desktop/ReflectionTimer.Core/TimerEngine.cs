@@ -216,6 +216,10 @@ public sealed class TimerEngine
     }, id);
     public void MarkAlreadySent(Guid id) => Change("upload.confirmedByUser", s =>
         s.Outbox = s.Outbox.Select(x => x.Id == id && x.Status == DeliveryStatus.NeedsReview ? x with { Status = DeliveryStatus.Sent, ErrorKind = "" } : x).ToList(), id);
+    public void SetPopupPosition(ReflectionPopupPosition position) => Change("display.changed", s => {
+        if (!Enum.IsDefined(position)) throw new ArgumentException("Choose a reflection popup position from the list.");
+        s.PopupPosition = position;
+    }, value: (int)position);
     public void SetAlertSound(string path) => Change("sound.changed", s => {
         if (path.Length > 0 && (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".mp3", StringComparison.OrdinalIgnoreCase)))
             throw new ArgumentException("Choose a local MP3 file.");

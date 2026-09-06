@@ -6,6 +6,8 @@ public sealed class ReflectionWindow : Form
 {
     private readonly TimerApplication app;
     private readonly ReflectionPrompt prompt;
+    private readonly Point openingPointer = Cursor.Position;
+    private readonly ReflectionPopupPosition popupPosition;
     private readonly TextBox response = new() { Multiline = true, MaxLength = 5000, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true };
     private readonly Label status = new() { Dock = DockStyle.Bottom, Height = 44, ForeColor = Widgets.Muted };
     private readonly System.Windows.Forms.Timer draftDelay = new() { Interval = 500 };
@@ -13,8 +15,9 @@ public sealed class ReflectionWindow : Form
     public ReflectionWindow(TimerApplication app, ReflectionPrompt prompt)
     {
         this.app = app; this.prompt = prompt;
+        popupPosition = app.Engine.Snapshot.PopupPosition;
         Text = prompt.IsTest ? "Reflection Timer — test prompt" : "Reflection Timer — session complete";
-        Size = new(560, 440); MinimumSize = new(480, 360); StartPosition = FormStartPosition.CenterScreen;
+        Size = new(560, 440); MinimumSize = new(480, 360); StartPosition = FormStartPosition.Manual;
         Font = new("Segoe UI", 11); Padding = new(20); BackColor = DarkTheme.Background;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information;
         var heading = new Label { Text = "How did you spend your time?", Dock = DockStyle.Top, Height = 45, Font = new("Segoe UI", 19, FontStyle.Bold), ForeColor = Widgets.Ink };
@@ -30,10 +33,22 @@ public sealed class ReflectionWindow : Form
         response.TextChanged += (_, _) => { status.Text = response.TextLength + " / 5,000 · Ctrl+Enter to save"; draftDelay.Stop(); draftDelay.Start(); };
         draftDelay.Tick += (_, _) => { draftDelay.Stop(); PersistDraft(); };
         response.KeyDown += (_, e) => { if (e.Control && e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Save(); } };
-        Shown += (_, _) => { response.Focus(); response.SelectionStart = response.TextLength; };
+        Shown += (_, _) => { PlaceOnOpeningScreen(); response.Focus(); response.SelectionStart = response.TextLength; };
         FormClosing += (_, e) => { if (!saving && !PersistDraft()) e.Cancel = true; };
         FormClosed += (_, _) => draftDelay.Dispose();
         DarkTheme.Apply(this);
+        PlaceOnOpeningScreen(); // Pick the target monitor before the native handle and DPI scaling.
+    }
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        PlaceOnOpeningScreen();
+    }
+    private void PlaceOnOpeningScreen()
+    {
+        // Re-evaluate the working area at opening, after scaling; never move a draft while typing.
+        var workArea = Screen.FromPoint(openingPointer).WorkingArea;
+        Location = ReflectionPlacement.Calculate(workArea, Size, popupPosition, (int)Math.Round(16 * DeviceDpi / 96d));
     }
     public bool PersistDraft()
     {

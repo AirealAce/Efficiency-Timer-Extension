@@ -32,6 +32,7 @@ public record ConnectionSettings
 }
 
 public enum DeliveryStatus { Pending, Sending, Sent, NeedsReview }
+public enum ReflectionPopupPosition { Center = 0, TopLeft = 1, TopRight = 2, BottomLeft = 3, BottomRight = 4 }
 public record OutboxItem
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -57,6 +58,7 @@ public record AppState
     public List<OutboxItem> Outbox { get; set; } = [];
     public ConnectionSettings Connection { get; set; } = new();
     public string AlertSoundPath { get; set; } = ""; // Empty means the bundled extension sound.
+    public ReflectionPopupPosition PopupPosition { get; set; } = ReflectionPopupPosition.Center;
     public bool LoggingEnabled { get; set; } = true;
     public bool StartAtLogin { get; set; }
     public bool ExtensionDisabledConfirmed { get; set; }

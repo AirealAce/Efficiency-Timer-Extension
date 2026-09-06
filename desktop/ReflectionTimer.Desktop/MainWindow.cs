@@ -31,6 +31,7 @@ public sealed class MainWindow : Form
     private readonly TextBox webAppUrl = new() { Width = 750 };
     private readonly TextBox token = new() { Width = 750, UseSystemPasswordChar = true };
     private readonly Label alertSoundChoice = Widgets.Text("");
+    private readonly ComboBox popupPosition = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Reflection popup position" };
     private readonly ComboBox mode = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox sheetName = new() { Width = 350 };
     private readonly CheckBox logging = new() { Text = "Record local diagnostic events", AutoSize = true };
@@ -111,6 +112,24 @@ public sealed class MainWindow : Form
         })), Widgets.Button("Open Google Sheet", (_, _) => OpenSheet())));
 
         var settings = Widgets.Page(tabs, "Settings");
+        settings.Controls.Add(Widgets.Text("Display"));
+        settings.Controls.Add(Widgets.Text("Reflection popup position"));
+        popupPosition.Items.AddRange(["Center", "Top left", "Top right", "Bottom left", "Bottom right"]);
+        settings.Controls.Add(popupPosition);
+        popupPosition.SelectedIndexChanged += (_, _) => {
+            if (binding || popupPosition.SelectedIndex < 0) return;
+            try {
+                app.Engine.SetPopupPosition((ReflectionPopupPosition)popupPosition.SelectedIndex);
+                SetStatus("Popup position saved. Applies the next time a reflection window opens.");
+            }
+            catch {
+                binding = true;
+                popupPosition.SelectedIndex = PopupPositionIndex(app.Engine.Snapshot.PopupPosition);
+                binding = false;
+                SetStatus("Could not save the popup position. Your previous setting is unchanged.", true);
+            }
+        };
+        settings.Controls.Add(Widgets.Text("Saves immediately for regular, scheduled, and test reflections. Uses the screen containing your mouse pointer when the popup opens, leaving space for the taskbar. An already-open reflection stays where it is."));
         settings.Controls.Add(Widgets.Text("Alert sound")); settings.Controls.Add(alertSoundChoice);
         var chooseSound = Widgets.Button("Choose MP3…", async (sender, _) => {
             using var dialog = new OpenFileDialog { Title = "Choose an alert sound", Filter = "MP3 audio|*.mp3", CheckFileExists = true, Multiselect = false };
@@ -171,6 +190,7 @@ public sealed class MainWindow : Form
         DarkTheme.Apply(this);
     }
     public void FocusHours() { if (tabs.SelectedIndex == 0) duration.FocusHours(); }
+    private static int PopupPositionIndex(ReflectionPopupPosition position) => Enum.IsDefined(position) ? (int)position : 0;
     public void SetStatus(string text, bool error = false) { status.Text = text; status.ForeColor = error ? DarkTheme.Error : Widgets.Green; }
     private void Safe(Action action) { try { action(); } catch (Exception error) { app.Log.Record("error.unexpected"); SetStatus(error.Message, true); } }
     public static string Clock(int total) => total >= 3600 ? $"{total / 3600}:{total / 60 % 60:00}:{total % 60:00}" : $"{total / 60:00}:{total % 60:00}";
@@ -185,6 +205,7 @@ public sealed class MainWindow : Form
     public void Render(AppState state)
     {
         binding = true;
+        popupPosition.SelectedIndex = PopupPositionIndex(state.PopupPosition);
         alertSoundChoice.Text = string.IsNullOrEmpty(state.AlertSoundPath) ? "Default · original extension sound (popup.mp3)" : "Custom MP3 · " + Path.GetFileName(state.AlertSoundPath);
         if (state.Timer.IsRunning || !duration.Dirty) duration.LoadSeconds(state.Timer.DurationSeconds, true);
         duration.Enabled = !state.Timer.IsRunning; repeat.LoadOptions(state.Timer.AutoRestart, state.Timer.AutoRestartUntil); volume.Value = state.Timer.Volume;

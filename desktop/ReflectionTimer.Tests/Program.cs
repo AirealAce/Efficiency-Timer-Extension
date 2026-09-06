@@ -58,12 +58,69 @@ internal static class Program
         foreach (var url in new[] { "https://script.google.com/home/projects/abc/edit", "http://script.google.com/macros/s/a/exec", "https://evil.test/macros/s/a/exec", "https://user@script.google.com/macros/s/a/exec", "https://script.google.com:444/macros/s/a/exec" }) Test("reject endpoint " + url, () => Is(SheetsClient.Validate(Connection with { WebAppUrl = url }) is not null));
         Test("valid connection and validation failures", () => { Is(SheetsClient.Validate(Connection) is null); Is(SheetsClient.Validate(Connection with { ApiToken = "short" }) is not null); Is(SheetsClient.Validate(Connection with { SheetUrl = "https://evil.test/sheet" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "oops" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "fixed", SheetName = "" }) is not null); });
         TestAutoRestartCutoff();
+        TestDisplayPlacement();
         Task.Run(TestAlertSounds).GetAwaiter().GetResult();
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
         TestTheme();
         Console.WriteLine($"\n{passed} passed; {failed} failed.");
         return failed == 0 ? 0 : 1;
+    }
+
+    private static void TestDisplayPlacement()
+    {
+        Test("old state and new installations default to centered reflections", () => {
+            Equal(ReflectionPopupPosition.Center, new AppState().PopupPosition);
+            Equal(ReflectionPopupPosition.Center, JsonSerializer.Deserialize<AppState>("{\"FormatVersion\":1}", DataJson.Options)!.PopupPosition);
+        });
+        Test("display preference survives restart and unrelated settings edits", () => {
+            var f = new Fixture(); var id = f.Engine.TestPrompt(); f.Engine.SaveDraft(id, "retained draft");
+            f.Engine.Start(60, true, 17); f.Add(100, 30);
+            var before = f.Engine.Snapshot; var events = new List<Activity>(); f.Engine.ActivityRecorded += events.Add;
+            f.Engine.SetPopupPosition(ReflectionPopupPosition.BottomRight);
+            f.Engine.SaveSettings(Connection, true, false, true); f.Engine.SetAlertSound("");
+            var restored = f.Restart().Snapshot; Equal(ReflectionPopupPosition.BottomRight, restored.PopupPosition);
+            Equal(before.Timer, restored.Timer); Equal(before.Schedules.Single(), restored.Schedules.Single());
+            Equal(before.Prompts.Single(), restored.Prompts.Single());
+            var change = events.Single(x => x.Event == "display.changed"); Equal<long?>(4, change.Value);
+        });
+        Test("invalid display preference does not commit", () => {
+            var f = new Fixture();
+            foreach (var invalid in new[] { -1, 5, int.MaxValue })
+                Throws<ArgumentException>(() => f.Engine.SetPopupPosition((ReflectionPopupPosition)invalid));
+            Equal(0, f.Store.Writes); Equal(ReflectionPopupPosition.Center, f.Engine.Snapshot.PopupPosition);
+        });
+        Test("failed display save retains previous preference and emits no change", () => {
+            var f = new Fixture(); f.Engine.SetPopupPosition(ReflectionPopupPosition.TopLeft);
+            var changes = 0; f.Engine.Changed += () => changes++; f.Store.Fail = true;
+            Throws<IOException>(() => f.Engine.SetPopupPosition(ReflectionPopupPosition.TopRight));
+            Equal(ReflectionPopupPosition.TopLeft, f.Engine.Snapshot.PopupPosition); Equal(0, changes);
+        });
+        var positions = new[] { new Point(680, 320), new Point(16, 56), new Point(1344, 56), new Point(16, 584), new Point(1344, 584) };
+        foreach (var position in Enum.GetValues<ReflectionPopupPosition>()) Test("working-area placement " + position, () => {
+            var area = new Rectangle(0, 40, 1920, 1000); var size = new Size(560, 440);
+            var result = ReflectionPlacement.Calculate(area, size, position, 16);
+            Equal(positions[(int)position], result); Is(area.Contains(new Rectangle(result, size)));
+            var negative = area with { X = -1920, Y = -1040 };
+            Equal(new Point(result.X - 1920, result.Y - 1080), ReflectionPlacement.Calculate(negative, size, position, 16));
+        });
+        Test("placement honors scaled size and margin", () => {
+            Equal(new Point(1696, 732), ReflectionPlacement.Calculate(new(0, 0, 2560, 1416), new(840, 660), ReflectionPopupPosition.BottomRight, 24));
+        });
+        Test("placement reduces margins when there is little room", () => {
+            foreach (var position in Enum.GetValues<ReflectionPopupPosition>()) {
+                var area = new Rectangle(-100, 30, 570, 446); var size = new Size(560, 440);
+                var point = ReflectionPlacement.Calculate(area, size, position, 16);
+                Equal(new Point(-95, 33), point); Is(area.Contains(new Rectangle(point, size)));
+            }
+        });
+        Test("oversized reflections keep their title bar on screen", () => {
+            foreach (var position in Enum.GetValues<ReflectionPopupPosition>())
+                Equal(new Point(-800, 40), ReflectionPlacement.Calculate(new(-800, 40, 400, 300), new(560, 440), position, 16));
+        });
+        Test("unknown saved placement falls back to center", () => {
+            Equal(new Point(680, 320), ReflectionPlacement.Calculate(new(0, 40, 1920, 1000), new(560, 440), (ReflectionPopupPosition)99, 16));
+        });
     }
 
     private static void TestAutoRestartCutoff()
@@ -301,6 +358,33 @@ internal static class Program
         var root = Path.Combine(Path.GetTempPath(), "ReflectionTimer-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try {
+            Test("display preference is encrypted and included in safe diagnostics", () => {
+                var directory = Path.Combine(root, "display"); var store = new EncryptedStore(directory);
+                var state = new AppState { PopupPosition = ReflectionPopupPosition.BottomLeft }; store.Save(state);
+                Equal(state.PopupPosition, new EncryptedStore(directory).Load().PopupPosition);
+                var log = new DiagnosticLog(directory); log.Record("display.changed", value: 3);
+                var report = JsonSerializer.Serialize(log.Report(state)); Is(report.Contains("BottomLeft")); Equal(1, log.Recent().Count);
+            });
+            Test("display selector loads saves and preserves an open reflection position", () => {
+                var directory = Path.Combine(root, "display-ui");
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
+                using var main = new MainWindow(app);
+                var selector = Descendants(main).OfType<ComboBox>().Single(x => x.AccessibleName == "Reflection popup position");
+                main.Render(app.Engine.Snapshot); Equal(0, selector.SelectedIndex); Equal(5, selector.Items.Count);
+                foreach (var position in Enum.GetValues<ReflectionPopupPosition>()) {
+                    selector.SelectedIndex = (int)position; Equal(position, app.Engine.Snapshot.PopupPosition);
+                    var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+                    using var prompt = new ReflectionWindow(app, new(Guid.NewGuid(), 0, 10, 0, true));
+                    prompt.Show();
+                    Equal(ReflectionPlacement.Calculate(area, prompt.Size, position, (int)Math.Round(16 * prompt.DeviceDpi / 96d)), prompt.Location);
+                    Is(prompt.ActiveControl is TextBox); var original = prompt.Location;
+                    app.Engine.SetPopupPosition(ReflectionPopupPosition.Center);
+                    Equal(original, prompt.Location); prompt.Close();
+                }
+                app.Engine.SetPopupPosition(ReflectionPopupPosition.BottomRight); main.Render(app.Engine.Snapshot);
+                Equal(4, selector.SelectedIndex);
+            });
             Test("invalid custom audio is rejected before saving", () => {
                 var empty = Path.Combine(root, "empty.mp3"); File.WriteAllBytes(empty, []);
                 var bad = Path.Combine(root, "bad.mp3"); File.WriteAllText(bad, "This is not MP3 audio.");
