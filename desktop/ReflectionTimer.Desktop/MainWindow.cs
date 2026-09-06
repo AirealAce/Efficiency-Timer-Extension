@@ -82,10 +82,10 @@ public sealed class MainWindow : Form
                 app.Engine.SetLowTime(lowTime.Selection);
                 app.Engine.Resume();
             }
-            else app.Engine.Start(duration.Seconds, repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil, lowTime.Selection);
+            else app.Engine.Start(duration.CommitSeconds(), repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil, lowTime.Selection);
             duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true);
         }), true);
-        timer.Controls.Add(Widgets.Row(start, Widgets.Button("Reset", (_, _) => Safe(() => { app.Engine.Reset(duration.Dirty ? duration.Seconds : null); duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true); }))));
+        timer.Controls.Add(Widgets.Row(start, Widgets.Button("Reset", (_, _) => Safe(() => { app.Engine.Reset(duration.Dirty ? duration.CommitSeconds() : null); duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true); }))));
         timer.Controls.Add(repeat); timer.Controls.Add(lowTime); timer.Controls.Add(volume);
         lowTime.UserChanged += () => {
             if (binding) return;
@@ -125,7 +125,7 @@ public sealed class MainWindow : Form
         saveSchedule = Widgets.Button("Add session", (_, _) => Safe(() => {
             var picked = scheduledStart.Value;
             var minute = new DateTime(picked.Year, picked.Month, picked.Day, picked.Hour, picked.Minute, 0, DateTimeKind.Local);
-            app.Engine.SaveSchedule(editing, new DateTimeOffset(minute), scheduledDuration.Seconds, scheduledRepeat.AutoRestart, scheduledVolume.Value, scheduledRepeat.AutoRestartUntil, scheduledLowTime.Selection);
+            app.Engine.SaveSchedule(editing, new DateTimeOffset(minute), scheduledDuration.CommitSeconds(), scheduledRepeat.AutoRestart, scheduledVolume.Value, scheduledRepeat.AutoRestartUntil, scheduledLowTime.Selection);
             ResetScheduleEditor(); SetStatus("Schedule saved.", success: true);
         }), true);
         schedule.Controls.Add(Widgets.Row(saveSchedule, Widgets.Button("Cancel edit / new session", (_, _) => ResetScheduleEditor())));
@@ -266,7 +266,12 @@ public sealed class MainWindow : Form
     {
         var state = app.Engine.Snapshot;
         var remaining = TimerEngine.Remaining(state.Timer, app.Engine.Now);
-        display.Text = Clock(!state.Timer.IsRunning && duration.Dirty ? duration.Seconds : remaining);
+        start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && state.Timer.RemainingSeconds is > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Resume" : "Start";
+        var shown = remaining;
+        if (!state.Timer.IsRunning && duration.Dirty && !duration.TryGetSeconds(out shown, out var error)) {
+            display.Text = "—"; timerStatus.Text = error; timerStatus.ForeColor = AppTheme.Error; return;
+        }
+        display.Text = Clock(shown); timerStatus.ForeColor = AppTheme.Muted;
         timerStatus.Text = state.Timer.IsRunning ? "Running · ends " + DateTimeOffset.FromUnixTimeMilliseconds(state.Timer.EndTime!.Value).ToLocalTime().ToString("t")
             : state.Timer.RemainingSeconds is > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Paused" : "Ready";
     }

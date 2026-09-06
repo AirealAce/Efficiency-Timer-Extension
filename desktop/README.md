@@ -1,4 +1,4 @@
-# Reflection Timer Desktop 3.6.2
+# Reflection Timer Desktop 3.6.3
 
 A native Windows tray app for focus sessions, standalone reflection prompts, and the existing Google Sheets receiver. It does not need Chrome to stay open and does not collect browser activity. The extension source remains available as a fallback.
 
@@ -38,6 +38,7 @@ The installer runs tests, publishes a framework-dependent build, installs under 
 ## Using the app
 
 - Opening the Timer tab selects the Hours field. Typing hours clears the untouched 25-minute preset; minutes you explicitly edit are preserved.
+- Timer and Scheduling accept whole-number minutes and seconds above 59. Values carry into the next unit when you leave the duration editor, press Enter, or start/save the session: **1h 20m 100s → 1h 21m 40s**. Switching between Hours, Minutes, and Seconds keeps your typed values until you finish the group. The countdown previews the equivalent total while editing. The existing one-year total limit remains; oversized or invalid entries stay visible for correction rather than being silently clipped.
 - **Ctrl+Alt+T** is a global shortcut that brings the running app's existing main window forward, including from the tray or a minimized state. It preserves the selected tab, maximized state, timer, and drafts; it does not start a session. On the Timer tab, Hours is selected as usual. An active modal dialog remains in front of its owner. The shortcut is released on Quit and does not launch a closed app. **Settings → Display → Keyboard shortcut** reports registration conflicts; close the conflicting app and reopen Reflection Timer to retry. It uses Windows' [RegisterHotKey API](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey) with repeat suppression, not a keyboard hook or keystroke logger.
 - Start, pause/resume, reset, auto-start next session, and sound level are available on the regular timer.
 - **Settings → Display → App theme** previews and saves Dark, Light, High Contrast, or Glamour for the next launch. Theme selection is independent of connection settings and does not upload anything.

@@ -92,7 +92,7 @@ public sealed class DiagnosticLog
     public IReadOnlyList<Activity> Recent() { lock (gate) { Prune(); return events.ToArray(); } }
     public void Clear() { lock (gate) { EncryptedStore.Write(path, new List<Activity>()); events = []; StorageAvailable = true; } }
     public object Report(AppState state) => new {
-        FormatVersion = 1, AppVersion = "3.6.2", ExportedAt = DateTimeOffset.Now,
+        FormatVersion = 1, AppVersion = "3.6.3", ExportedAt = DateTimeOffset.Now,
         Privacy = "No reflection text, drafts, connection credentials, browsing URLs, window titles, audio filenames/paths, or other-app activity.",
         CustomAlertSound = !string.IsNullOrEmpty(state.AlertSoundPath),
         PopupPosition = state.PopupPosition.ToString(),

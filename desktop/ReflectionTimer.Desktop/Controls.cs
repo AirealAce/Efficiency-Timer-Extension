@@ -1,5 +1,6 @@
 using ReflectionTimer.Core;
 using System.Globalization;
+using System.Numerics;
 
 namespace ReflectionTimer.Desktop;
 
@@ -43,23 +44,59 @@ public static class Widgets
 // Sized with the native fields after inheriting the form's font and DPI.
 public sealed class RowLabel : Label { }
 
+// Retain native spin buttons and accessibility, but never clip typed overflow
+// or invalid text before the duration editor can validate the whole duration.
+public sealed class DurationPartInput : NumericUpDown
+{
+    public DurationPartInput() { Minimum = 0; Maximum = decimal.MaxValue; }
+    public bool TryRead(out BigInteger value)
+    {
+        var text = Text.Trim();
+        if (text.Length == 0) { value = 0; return true; }
+        return BigInteger.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value >= 0;
+    }
+    public void SetNumber(int number)
+    {
+        UserEdit = false; Value = number; Text = number.ToString(CultureInfo.InvariantCulture);
+    }
+    protected override void ValidateEditText()
+    {
+        if (Text.Trim().Length == 0) { SetNumber(0); return; }
+        if (TryRead(out var number) && number <= (BigInteger)decimal.MaxValue) base.ValidateEditText();
+        // Preserve invalid or extremely large text for correction, not a stale value.
+    }
+    protected override void UpdateEditText()
+    {
+        // Native focus loss calls this directly, bypassing ValidateEditText.
+        if (UserEdit) {
+            if (Text.Trim().Length == 0) { SetNumber(0); return; }
+            if (!TryRead(out var number) || number > (BigInteger)decimal.MaxValue) return;
+        }
+        base.UpdateEditText();
+    }
+    public override void UpButton() { if (TryRead(out var number) && number < (BigInteger)decimal.MaxValue) base.UpButton(); }
+    public override void DownButton() { if (TryRead(out var number) && number <= (BigInteger)decimal.MaxValue) base.DownButton(); }
+}
+
 public sealed class DurationControl : UserControl
 {
-    private readonly NumericUpDown hours = Number(8760), minutes = Number(59), seconds = Number(59);
+    private readonly DurationPartInput hours = Number(), minutes = Number(), seconds = Number();
     private bool assigning, untouched;
     public bool Dirty { get; private set; }
     public event Action? UserChanged;
-    private static NumericUpDown Number(int maximum) => new() { Minimum = 0, Maximum = maximum, Width = 120, Font = new("Segoe UI", 15), TextAlign = HorizontalAlignment.Center };
+    private static DurationPartInput Number() => new() { Width = 120, Font = new("Segoe UI", 15), TextAlign = HorizontalAlignment.Center };
     public DurationControl()
     {
         Size = new(450, 80); Margin = new(0, 6, 0, 10);
         var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         foreach (var pair in new[] { ("Hours", hours), ("Minutes", minutes), ("Seconds", seconds) }) {
+            pair.Item2.AccessibleName = pair.Item1;
+            pair.Item2.AccessibleDescription = "Whole numbers; values above 59 carry into the next unit when you finish editing or press Enter.";
             var panel = new FlowLayoutPanel { Width = 140, Height = 78, FlowDirection = FlowDirection.TopDown, WrapContents = false };
             panel.Controls.Add(new Label { Text = pair.Item1, AutoSize = true, ForeColor = Widgets.Muted }); panel.Controls.Add(pair.Item2); row.Controls.Add(panel);
             void Edited(object? sender, EventArgs args) {
                 if (assigning) return;
-                if (pair.Item2 == hours && untouched) { assigning = true; minutes.Value = 0; assigning = false; }
+                if (pair.Item2 == hours && untouched) { assigning = true; minutes.SetNumber(0); assigning = false; }
                 untouched = false; Dirty = true; UserChanged?.Invoke();
             }
             pair.Item2.ValueChanged += Edited;
@@ -70,13 +107,50 @@ public sealed class DurationControl : UserControl
             pair.Item2.Enter += (_, _) => pair.Item2.Select(0, pair.Item2.Text.Length);
         }
         Controls.Add(row); LoadSeconds(1500, true);
+        Leave += (_, _) => Normalize();
     }
-    public int Seconds => Math.Min(TimerEngine.MaxDuration, (int)(hours.Value * 3600 + minutes.Value * 60 + seconds.Value));
-    public void LoadSeconds(int total, bool clearPresetWhenTypingHours = false)
+    // Preview reads raw text without forcing NumericUpDown to commit/clamp it.
+    public bool TryGetSeconds(out int total, out string? error)
+    {
+        total = 0; error = null;
+        if (!hours.TryRead(out var h) || !minutes.TryRead(out var m) || !seconds.TryRead(out var s)) {
+            error = "Enter whole, non-negative numbers for hours, minutes, and seconds."; return false;
+        }
+        var sum = h * 3600 + m * 60 + s;
+        if (sum > TimerEngine.MaxDuration) { error = "The total duration can be up to one year (8,760 hours)."; return false; }
+        total = (int)sum; return true;
+    }
+    public int Seconds => TryGetSeconds(out var total, out var error) ? total : throw new ArgumentException(error);
+    public int CommitSeconds() { var total = Seconds; Normalize(); return total; }
+    public bool Normalize()
+    {
+        if (!TryGetSeconds(out var total, out _)) return false;
+        var changed = hours.Text != (total / 3600).ToString(CultureInfo.InvariantCulture)
+            || minutes.Text != (total / 60 % 60).ToString(CultureInfo.InvariantCulture)
+            || seconds.Text != (total % 60).ToString(CultureInfo.InvariantCulture);
+        AssignParts(total);
+        // Normalization must not clear Dirty: an edited paused timer should start
+        // the new duration rather than resume the old remainder.
+        if (changed) UserChanged?.Invoke();
+        return true;
+    }
+    private void AssignParts(int total)
     {
         assigning = true;
-        hours.Value = Math.Clamp(total / 3600, 0, 8760); minutes.Value = Math.Clamp(total / 60 % 60, 0, 59); seconds.Value = Math.Clamp(total % 60, 0, 59);
-        assigning = false; Dirty = false; untouched = clearPresetWhenTypingHours && total == 1500;
+        try { hours.SetNumber(total / 3600); minutes.SetNumber(total / 60 % 60); seconds.SetNumber(total % 60); }
+        finally { assigning = false; }
+    }
+    public void LoadSeconds(int total, bool clearPresetWhenTypingHours = false)
+    {
+        AssignParts(Math.Clamp(total, 0, TimerEngine.MaxDuration));
+        Dirty = false; untouched = clearPresetWhenTypingHours && total == 1500;
+    }
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData != Keys.Enter) return base.ProcessCmdKey(ref msg, keyData);
+        Normalize();
+        foreach (var input in new[] { hours, minutes, seconds }) if (input.ContainsFocus) input.Select(0, input.Text.Length);
+        return true;
     }
     public void FocusHours() { if (Enabled) { hours.Focus(); hours.Select(0, hours.Text.Length); } }
 }
