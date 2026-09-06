@@ -1,4 +1,3 @@
-using System.Media;
 using System.Net.NetworkInformation;
 using Microsoft.Win32;
 using ReflectionTimer.Core;
@@ -10,6 +9,7 @@ public sealed class TimerApplication : ApplicationContext
     public TimerEngine Engine { get; }
     public DiagnosticLog Log { get; }
     public SheetsClient Sheets { get; } = new();
+    public AlertSoundPlayer Sounds { get; } = new();
     private readonly MainWindow main;
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer pulse = new() { Interval = 1000 };
@@ -104,7 +104,7 @@ public sealed class TimerApplication : ApplicationContext
         tray.ShowBalloonTip(5000, pending.IsTest ? "Test reflection" : "Session complete", "Your reflection window is ready.", ToolTipIcon.Info);
         reflection.Show();
         reflection.Activate();
-        PlayTone(pending.Volume);
+        _ = PlayAlertSound(pending.Volume);
     }
     public async Task Sync()
     {
@@ -136,31 +136,25 @@ public sealed class TimerApplication : ApplicationContext
         quitting = true; pulse.Stop(); tray.Visible = false;
         reflection?.Dispose(); main.AllowExit = true; main.Close(); ExitThread();
     }
-    private static void PlayTone(int volume)
+    public async Task PlayAlertSound(int volume, bool preview = false)
     {
-        if (volume <= 0) return;
-        _ = Task.Run(() => {
-            try {
-                const int rate = 22050, samples = 11025;
-                using var stream = new MemoryStream();
-                using (var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, true)) {
-                    writer.Write("RIFF"u8); writer.Write(36 + samples * 2); writer.Write("WAVEfmt "u8);
-                    writer.Write(16); writer.Write((short)1); writer.Write((short)1); writer.Write(rate); writer.Write(rate * 2);
-                    writer.Write((short)2); writer.Write((short)16); writer.Write("data"u8); writer.Write(samples * 2);
-                    for (var i = 0; i < samples; i++) {
-                        var envelope = Math.Min(1d, i / 500d) * Math.Max(0, 1 - i / (double)samples);
-                        writer.Write((short)(Math.Sin(i * 2 * Math.PI * 660 / rate) * 18000 * Math.Clamp(volume, 0, 100) / 100 * envelope));
-                    }
-                }
-                stream.Position = 0; using var player = new SoundPlayer(stream); player.PlaySync();
-            } catch { /* Audio failure must not affect the timer or saved reflection. */ }
-        });
+        if (preview) { Log.Record("sound.preview", value: volume); main.SetStatus("Playing sound preview…"); }
+        var result = await Sounds.PlayAsync(Engine.Snapshot.AlertSoundPath, volume);
+        if (quitting) return;
+        Log.Record(result switch {
+            AlertSoundResult.Played => "sound.played", AlertSoundResult.DefaultFallback => "sound.fallback",
+            AlertSoundResult.Muted => "sound.muted", AlertSoundResult.Cancelled => "sound.stopped", _ => "sound.failed"
+        }, value: volume);
+        if (result == AlertSoundResult.DefaultFallback) main.SetStatus("Custom MP3 unavailable. Played the extension's default sound.", true);
+        else if (result == AlertSoundResult.Failed) main.SetStatus("Could not play the alert sound. Check your audio output; the timer and reflection are unaffected.", true);
+        else if (preview && result == AlertSoundResult.Played) main.SetStatus("Sound preview finished.");
+        else if (preview && result == AlertSoundResult.Muted) main.SetStatus("Sound is muted. Raise the Timer sound level to preview it.");
     }
     protected override void Dispose(bool disposing)
     {
         if (disposing) {
             quitting = true; SystemEvents.PowerModeChanged -= PowerChanged; SystemEvents.SessionSwitch -= SessionChanged;
-            pulse.Dispose(); tray.Dispose(); reflection?.Dispose(); main.Dispose(); Sheets.Dispose();
+            pulse.Dispose(); tray.Dispose(); reflection?.Dispose(); main.Dispose(); Sheets.Dispose(); Sounds.Dispose();
         }
         base.Dispose(disposing);
     }

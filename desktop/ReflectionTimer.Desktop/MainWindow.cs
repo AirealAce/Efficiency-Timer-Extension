@@ -30,6 +30,7 @@ public sealed class MainWindow : Form
     private readonly TextBox sheetUrl = new() { Width = 750 };
     private readonly TextBox webAppUrl = new() { Width = 750 };
     private readonly TextBox token = new() { Width = 750, UseSystemPasswordChar = true };
+    private readonly Label alertSoundChoice = Widgets.Text("");
     private readonly ComboBox mode = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox sheetName = new() { Width = 350 };
     private readonly CheckBox logging = new() { Text = "Record local diagnostic events", AutoSize = true };
@@ -38,6 +39,7 @@ public sealed class MainWindow : Form
     private readonly Label diagnosticsSummary = Widgets.Text("");
     private readonly TextBox diagnosticPreview = new() { Width = 750, Height = 280, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Font = new("Consolas", 10) };
     private bool binding;
+    private int soundSelectionVersion;
     private string scheduleSignature = "", outboxSignature = "";
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool AllowExit { get; set; }
@@ -109,6 +111,26 @@ public sealed class MainWindow : Form
         })), Widgets.Button("Open Google Sheet", (_, _) => OpenSheet())));
 
         var settings = Widgets.Page(tabs, "Settings");
+        settings.Controls.Add(Widgets.Text("Alert sound")); settings.Controls.Add(alertSoundChoice);
+        var chooseSound = Widgets.Button("Choose MP3…", async (sender, _) => {
+            using var dialog = new OpenFileDialog { Title = "Choose an alert sound", Filter = "MP3 audio|*.mp3", CheckFileExists = true, Multiselect = false };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            var selectionVersion = ++soundSelectionVersion;
+            var button = (Button)sender!; button.Enabled = false;
+            SetStatus("Checking the MP3…");
+            try {
+                var path = await Task.Run(() => Mp3AudioBackend.ValidateCustomFile(dialog.FileName));
+                if (IsDisposed || selectionVersion != soundSelectionVersion) return;
+                app.Engine.SetAlertSound(path); app.Sounds.Stop(); SetStatus("Custom alert sound saved.");
+            }
+            catch (Exception) { if (!IsDisposed && selectionVersion == soundSelectionVersion) SetStatus("Could not save that sound. Choose a readable MP3 under 50 MB; your previous selection is unchanged.", true); }
+            finally { if (!IsDisposed) button.Enabled = true; }
+        });
+        settings.Controls.Add(Widgets.Row(chooseSound,
+            Widgets.Button("Preview sound", async (_, _) => await app.PlayAlertSound(app.Engine.Snapshot.Timer.Volume, true)),
+            Widgets.Button("Stop preview", (_, _) => { app.Sounds.Stop(); SetStatus("Sound stopped."); }),
+            Widgets.Button("Use extension default", (_, _) => Safe(() => { ++soundSelectionVersion; app.Engine.SetAlertSound(""); app.Sounds.Stop(); SetStatus("Default extension sound restored."); }))));
+        settings.Controls.Add(Widgets.Text("Sound choices save immediately and apply to all alerts. Preview uses the Timer sound level; scheduled sessions keep their own volume. Keep a custom MP3 at its selected location. If unavailable, the bundled extension sound plays instead. Audio files and their paths are never uploaded."));
         settings.Controls.Add(Widgets.Text("Switch over: open chrome://extensions, turn off Reflection Timer (leave it installed as a fallback), then check the confirmation below. This app does not read Chrome profile files or collect browser activity."));
         settings.Controls.Add(disabledExtension);
         settings.Controls.Add(Widgets.Text("Google Sheets URL")); settings.Controls.Add(sheetUrl);
@@ -163,6 +185,7 @@ public sealed class MainWindow : Form
     public void Render(AppState state)
     {
         binding = true;
+        alertSoundChoice.Text = string.IsNullOrEmpty(state.AlertSoundPath) ? "Default · original extension sound (popup.mp3)" : "Custom MP3 · " + Path.GetFileName(state.AlertSoundPath);
         if (state.Timer.IsRunning || !duration.Dirty) duration.LoadSeconds(state.Timer.DurationSeconds, true);
         duration.Enabled = !state.Timer.IsRunning; repeat.LoadOptions(state.Timer.AutoRestart, state.Timer.AutoRestartUntil); volume.Value = state.Timer.Volume;
         start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && state.Timer.RemainingSeconds > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Resume" : "Start";

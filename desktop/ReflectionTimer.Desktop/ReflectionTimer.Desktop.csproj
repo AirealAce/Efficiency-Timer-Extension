@@ -6,11 +6,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ReflectionTimer</AssemblyName>
-    <Version>3.1.0</Version>
+    <Version>3.2.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>../../favicon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../ReflectionTimer.Core/ReflectionTimer.Core.csproj" />
+    <PackageReference Include="NAudio" Version="3.0.1" />
+    <PackageReference Include="System.Numerics.Tensors" Version="9.0.0" GeneratePathProperty="true" />
+    <Content Include="../../popup.mp3" Link="popup.mp3" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(PkgSystem_Numerics_Tensors)/THIRD-PARTY-NOTICES.TXT" Link="Tensors-THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -56,6 +56,7 @@ public record AppState
     public List<ReflectionPrompt> Prompts { get; set; } = [];
     public List<OutboxItem> Outbox { get; set; } = [];
     public ConnectionSettings Connection { get; set; } = new();
+    public string AlertSoundPath { get; set; } = ""; // Empty means the bundled extension sound.
     public bool LoggingEnabled { get; set; } = true;
     public bool StartAtLogin { get; set; }
     public bool ExtensionDisabledConfirmed { get; set; }

@@ -58,6 +58,7 @@ internal static class Program
         foreach (var url in new[] { "https://script.google.com/home/projects/abc/edit", "http://script.google.com/macros/s/a/exec", "https://evil.test/macros/s/a/exec", "https://user@script.google.com/macros/s/a/exec", "https://script.google.com:444/macros/s/a/exec" }) Test("reject endpoint " + url, () => Is(SheetsClient.Validate(Connection with { WebAppUrl = url }) is not null));
         Test("valid connection and validation failures", () => { Is(SheetsClient.Validate(Connection) is null); Is(SheetsClient.Validate(Connection with { ApiToken = "short" }) is not null); Is(SheetsClient.Validate(Connection with { SheetUrl = "https://evil.test/sheet" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "oops" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "fixed", SheetName = "" }) is not null); });
         TestAutoRestartCutoff();
+        Task.Run(TestAlertSounds).GetAwaiter().GetResult();
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
         TestTheme();
@@ -203,6 +204,85 @@ internal static class Program
         });
     }
 
+    private static async Task TestAlertSounds()
+    {
+        Test("old state defaults to the extension sound", () => {
+            Equal("", JsonSerializer.Deserialize<AppState>("{}", DataJson.Options)!.AlertSoundPath);
+            Equal("", new Fixture().Engine.Snapshot.AlertSoundPath);
+        });
+        Test("custom sound persists and does not change other settings", () => {
+            var f = new Fixture(); var path = Path.Combine(Path.GetTempPath(), "my sound.MP3");
+            f.Engine.Start(60, true, 37); var timer = f.Engine.Snapshot.Timer;
+            f.Engine.SetAlertSound(path); Equal(path, f.Restart().Snapshot.AlertSoundPath); Equal(timer, f.Engine.Snapshot.Timer);
+            f.Engine.SaveSettings(Connection, true, false, true); Equal(path, f.Engine.Snapshot.AlertSoundPath);
+            f.Store.Fail = true; Throws<IOException>(() => f.Engine.SetAlertSound("")); Equal(path, f.Engine.Snapshot.AlertSoundPath);
+            f.Store.Fail = false; f.Engine.SetAlertSound(""); Equal("", f.Restart().Snapshot.AlertSoundPath);
+        });
+        Test("sound settings reject non-local or non-MP3 selections atomically", () => {
+            var f = new Fixture();
+            foreach (var path in new[] { "relative.mp3", "https://example.com/audio.mp3", Path.Combine(Path.GetTempPath(), "sound.wav") })
+                Throws<ArgumentException>(() => f.Engine.SetAlertSound(path));
+            Equal(0, f.Store.Writes);
+        });
+        Test("bundled sound is the original extension MP3 and decodes", () => {
+            var path = AlertSoundPlayer.BundledPath;
+            Equal("01714F0BF6EC9F13DFBE0CBEAF02C3F499A39681BC8DE28C6C2E4AD9CD3FFBFA", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))));
+            Equal(path, Mp3AudioBackend.ValidateCustomFile(path));
+            using var reader = new NAudio.Wave.AudioFileReader(path); var buffer = new byte[4096];
+            Is(reader.TotalTime > TimeSpan.Zero); var audible = false;
+            while (reader.Read(buffer, 0, buffer.Length) is var count && count > 0) audible |= buffer.Take(count).Any(b => b != 0);
+            Is(audible); // The original clip starts with silence; inspect the whole file.
+        });
+        await TestAsync("empty selection plays bundled MP3 at clamped volume", async () => {
+            var backend = new FakeAudio(); using var player = new AlertSoundPlayer(backend, "bundled.mp3");
+            Equal(AlertSoundResult.Played, await player.PlayAsync("", 500)); Equal(("bundled.mp3", 100), backend.Calls.Single());
+        });
+        await TestAsync("custom MP3 uses the same session volume", async () => {
+            var backend = new FakeAudio(); using var player = new AlertSoundPlayer(backend, "bundled.mp3");
+            Equal(AlertSoundResult.Played, await player.PlayAsync("chosen.mp3", 37)); Equal(("chosen.mp3", 37), backend.Calls.Single());
+        });
+        await TestAsync("muted sound never opens an audio file or device", async () => {
+            var backend = new FakeAudio(); using var player = new AlertSoundPlayer(backend);
+            Equal(AlertSoundResult.Muted, await player.PlayAsync("missing.mp3", 0));
+            Equal(AlertSoundResult.Muted, await player.PlayAsync("", -100)); Equal(0, backend.Calls.Count);
+        });
+        await TestAsync("unavailable custom sound falls back once at the same volume", async () => {
+            var backend = new FakeAudio { Play = (path, _) => path == "missing.mp3" ? Task.FromException(new IOException("private path")) : Task.CompletedTask };
+            using var player = new AlertSoundPlayer(backend, "bundled.mp3");
+            Equal(AlertSoundResult.DefaultFallback, await player.PlayAsync("missing.mp3", 42));
+            Equal(2, backend.Calls.Count); Equal(("bundled.mp3", 42), backend.Calls[1]);
+        });
+        await TestAsync("unavailable output reports failure without throwing or looping", async () => {
+            var backend = new FakeAudio { Play = (_, _) => Task.FromException(new IOException("private driver data")) };
+            using var player = new AlertSoundPlayer(backend, "bundled.mp3");
+            Equal(AlertSoundResult.Failed, await player.PlayAsync("chosen.mp3", 50)); Equal(2, backend.Calls.Count);
+        });
+        await TestAsync("new sound cancels previous playback without overlap or fallback", async () => {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var active = 0; var peak = 0;
+            var backend = new FakeAudio { Play = async (path, token) => {
+                peak = Math.Max(peak, Interlocked.Increment(ref active));
+                try { if (path == "first.mp3") { entered.TrySetResult(); await Task.Delay(Timeout.Infinite, token); } }
+                finally { Interlocked.Decrement(ref active); }
+            } };
+            using var player = new AlertSoundPlayer(backend);
+            var first = player.PlayAsync("first.mp3", 30); await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var second = player.PlayAsync("second.mp3", 40);
+            Equal(AlertSoundResult.Cancelled, await first.WaitAsync(TimeSpan.FromSeconds(5)));
+            Equal(AlertSoundResult.Played, await second.WaitAsync(TimeSpan.FromSeconds(5))); Equal(1, peak); Equal(2, backend.Calls.Count);
+        });
+        await TestAsync("stop and disposal cancel audio without affecting timer state", async () => {
+            foreach (var dispose in new[] { false, true }) {
+                var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var backend = new FakeAudio { Play = async (_, token) => { entered.TrySetResult(); await Task.Delay(Timeout.Infinite, token); } };
+                using var player = new AlertSoundPlayer(backend); var playing = player.PlayAsync("chosen.mp3", 20);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                if (dispose) player.Dispose(); else player.Stop();
+                Equal(AlertSoundResult.Cancelled, await playing.WaitAsync(TimeSpan.FromSeconds(5))); Equal(1, backend.Calls.Count);
+                if (dispose) Equal(AlertSoundResult.Cancelled, await player.PlayAsync("", 20));
+            }
+        });
+    }
+
     private static async Task RunHttpTests()
     {
         await TestAsync("ping contract uses POST and no reflection", async () => { var handler = new FakeHttp(_ => Json("{\"success\":true,\"target\":\"Book / test\"}")); using var client = new SheetsClient(handler); var result = await client.Ping(Connection); Is(result.Success); Equal("Book / test", result.Target); using var body = JsonDocument.Parse(handler.Requests[0].Body); Equal("ping", body.RootElement.GetProperty("action").GetString()); Equal("", body.RootElement.GetProperty("message").GetString()); });
@@ -221,6 +301,21 @@ internal static class Program
         var root = Path.Combine(Path.GetTempPath(), "ReflectionTimer-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try {
+            Test("invalid custom audio is rejected before saving", () => {
+                var empty = Path.Combine(root, "empty.mp3"); File.WriteAllBytes(empty, []);
+                var bad = Path.Combine(root, "bad.mp3"); File.WriteAllText(bad, "This is not MP3 audio.");
+                var large = Path.Combine(root, "large.mp3"); using (var stream = File.Create(large)) stream.SetLength(50 * 1024 * 1024 + 1);
+                foreach (var path in new[] { empty, bad, large, Path.Combine(root, "missing.mp3"), "relative.mp3", "https://example.com/sound.mp3" })
+                    Throws<ArgumentException>(() => Mp3AudioBackend.ValidateCustomFile(path));
+            });
+            Test("sound path is encrypted and excluded from diagnostic exports", () => {
+                var directory = Path.Combine(root, "sound-privacy"); var store = new EncryptedStore(directory);
+                var state = new AppState { AlertSoundPath = Path.Combine(root, "private-audio-name.mp3") }; store.Save(state);
+                Equal(state.AlertSoundPath, store.Load().AlertSoundPath);
+                Is(!Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(directory, "state.dat"))).Contains("private-audio-name"));
+                var log = new DiagnosticLog(directory); log.Record("sound.changed"); log.Record("sound.fallback");
+                var report = JsonSerializer.Serialize(log.Report(state)); Is(!report.Contains("private-audio-name")); Is(!report.Contains(root)); Equal(2, log.Recent().Count);
+            });
             Test("desktop startup constructs both timer and scheduling forms", () => {
                 var directory = Path.Combine(root, "startup");
                 using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
@@ -332,6 +427,14 @@ internal static class Program
         public TimerEngine Restart() => new(Store, () => Time);
         public Guid Add(int secondsFromNow, int duration, bool repeat = false, int volume = 0) => Engine.SaveSchedule(null, Time.AddSeconds(secondsFromNow), duration, repeat, volume);
         public Guid Queue() { var id = Engine.TestPrompt(); Engine.QueueReflection(id, "unit test reflection"); return id; }
+    }
+    private sealed class FakeAudio : IAlertAudioBackend
+    {
+        public readonly List<(string Path, int Volume)> Calls = [];
+        public Func<string, CancellationToken, Task> Play = (_, _) => Task.CompletedTask;
+        public Task PlayAsync(string path, int volume, CancellationToken cancellationToken) {
+            Calls.Add((path, volume)); return Play(path, cancellationToken);
+        }
     }
     private sealed class FakeHttp(Func<int, HttpResponseMessage> respond) : HttpMessageHandler
     {

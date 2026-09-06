@@ -1,4 +1,4 @@
-# Reflection Timer Desktop 3.1.0
+# Reflection Timer Desktop 3.2.0
 
 A native Windows tray app for focus sessions, standalone reflection prompts, and the existing Google Sheets receiver. It does not need Chrome to stay open and does not collect browser activity. The extension source remains available as a fallback.
 
@@ -6,7 +6,7 @@ The default dark theme uses charcoal surfaces, light text, mint action buttons, 
 
 ## Install and switch over
 
-Requires Windows and the **.NET 10 Desktop Runtime (x64)**. Building requires the .NET 10 SDK. No third-party NuGet packages are needed.
+Requires Windows and the **.NET 10 Desktop Runtime (x64)**. Building requires the .NET 10 SDK and restores the pinned [NAudio 3.0.1](https://www.nuget.org/packages/NAudio/3.0.1) dependency for MP3 playback. Playback uses Windows audio codecs/output and works offline.
 
 From PowerShell in this folder:
 
@@ -29,6 +29,8 @@ The installer runs tests, publishes a framework-dependent build, installs under 
 
 - Opening the Timer tab selects the Hours field. Typing hours clears the untouched 25-minute preset; minutes you explicitly edit are preserved.
 - Start, pause/resume, reset, auto-start next session, and sound level are available on the regular timer.
+- The default alert is the extension's original **popup.mp3**, bundled unchanged with the desktop app. **Settings → Alert sound → Choose MP3** selects a custom file (up to 50 MB); it is validated and saved immediately, separately from connection settings. **Preview sound**, **Stop preview**, and **Use extension default** are alongside it. This global choice applies to regular, scheduled, and test reflections; their existing volume settings still apply, including mute at 0%. Previews use the Timer volume and do not create reflections or contact Sheets.
+- Custom files stay at their original location, so keep them available. Missing, unreadable, or undecodable custom audio falls back to the bundled default with a visible warning. Audio runs off the timer thread, never overlaps another preview/alert, stops when the app quits, and does not stop a timer or discard a reflection if playback fails. The custom path is saved in encrypted state but excluded from diagnostic exports; neither the audio nor its path is uploaded.
 - Each scheduled session has its own local start date/time (minute precision), duration, repeat option, and sound level. Up to 50 one-time appointments are retained. A due appointment takes over the current timer. Pausing/resetting does not cancel future appointments.
 - After sleep or downtime, only the latest missed appointment starts with its full duration. Earlier missed appointments are skipped, and future ones remain. A completed live session retains its reflection; an unfinished timer replaced by a scheduled appointment does not generate one.
 - Auto-start repeats the duration immediately after completion, independently of the reflection window. After a long sleep it resumes once, rather than generating a flood of missed sessions.
@@ -68,7 +70,7 @@ dotnet build ReflectionTimer.Desktop -c Release
 dotnet run --project ReflectionTimer.Desktop -- --data-dir 'C:\path\to\isolated-test-data'
 ```
 
-The package-free Windows test runner covers deadlines, auto-start cutoffs (including exact-boundary and paused expiration), restart/sleep catch-up, independent schedules, transaction failures, draft/queue durability, ambiguous delivery, safe HTTP redirects, request contracts, encrypted storage recovery, diagnostic privacy, duration editing, and shared repeat/cutoff controls. It never contacts Google; HTTP is mocked. The existing extension/receiver tests remain runnable with `npm test` and `npm run check` at the repository root.
+The Windows test runner covers deadlines, auto-start cutoffs (including exact-boundary and paused expiration), restart/sleep catch-up, independent schedules, transaction failures, draft/queue durability, ambiguous delivery, safe HTTP redirects, request contracts, encrypted storage recovery, diagnostic privacy, duration editing, shared repeat/cutoff controls, MP3 decoding/validation, default/custom sound selection, mute, cancellation, and fallback. Routine tests do not emit audio or contact Google; audio output and HTTP are mocked. The existing extension/receiver tests remain runnable with `npm test` and `npm run check` at the repository root.
 
 For explicit connection provisioning, with the app closed, the executable accepts `--import-connection` with a `ConnectionSettings` JSON object through **stdin**. It validates and encrypts the settings without logging the token. Never pass secrets as command-line arguments or commit a provisioning file. `--check-connection` performs a read-only ping and prints a credential-free result. Invoke the DLL with `dotnet ReflectionTimer.dll ...` for reliable console piping. `--tray` starts without the main window once migration is confirmed.
 

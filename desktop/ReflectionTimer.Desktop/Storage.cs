@@ -62,7 +62,8 @@ public sealed class DiagnosticLog
         "timer.started", "timer.paused", "timer.resumed", "timer.reset", "timer.preferences", "timer.deadline", "timer.autoRestartDisabled",
         "schedule.saved", "schedule.removed", "prompt.test", "prompt.shown", "prompt.later", "prompt.draftSaved", "prompt.skipped",
         "reflection.queued", "upload.started", "upload.sent", "upload.needsReview", "upload.recovered", "upload.retryRequested",
-        "upload.confirmedByUser", "settings.saved", "connection.checked", "issue.marked", "error.storage", "error.unexpected"
+        "upload.confirmedByUser", "settings.saved", "connection.checked", "issue.marked", "error.storage", "error.unexpected",
+        "sound.changed", "sound.preview", "sound.played", "sound.fallback", "sound.muted", "sound.stopped", "sound.failed"
     };
     public bool Enabled { get; set; } = true;
     public bool StorageAvailable { get; private set; } = true;
@@ -90,8 +91,9 @@ public sealed class DiagnosticLog
     public IReadOnlyList<Activity> Recent() { lock (gate) { Prune(); return events.ToArray(); } }
     public void Clear() { lock (gate) { EncryptedStore.Write(path, new List<Activity>()); events = []; StorageAvailable = true; } }
     public object Report(AppState state) => new {
-        FormatVersion = 1, AppVersion = "3.1.0", ExportedAt = DateTimeOffset.Now,
-        Privacy = "No reflection text, drafts, connection credentials, browsing URLs, window titles, or other-app activity.",
+        FormatVersion = 1, AppVersion = "3.2.0", ExportedAt = DateTimeOffset.Now,
+        Privacy = "No reflection text, drafts, connection credentials, browsing URLs, window titles, audio filenames/paths, or other-app activity.",
+        CustomAlertSound = !string.IsNullOrEmpty(state.AlertSoundPath),
         Enabled, StorageAvailable, Events = Recent(), Timer = state.Timer,
         Schedules = state.Schedules, PendingPrompts = state.Prompts.Count,
         Outbox = state.Outbox.Select(x => new { x.Id, x.SubmittedAt, x.Status, x.IsTest, x.Attempts, ErrorKind = TimerEngine.SafeError(x.ErrorKind) }),
