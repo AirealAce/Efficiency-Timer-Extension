@@ -20,9 +20,14 @@ public sealed class TimerApplication : ApplicationContext
     private int syncing;
     private long lastSync;
     private bool quitting;
+    private readonly bool enableAudio;
+    private readonly HashSet<Guid> soundedPrompts = [];
+    private long lastFailureSound;
+    private bool timerSaveFailed;
 
-    public TimerApplication(EncryptedStore store, string directory, EventWaitHandle showRequest)
+    public TimerApplication(EncryptedStore store, string directory, EventWaitHandle showRequest, bool enableAudio = false)
     {
+        this.enableAudio = enableAudio; // Tests opt out by default; the desktop entry point opts in.
         this.showRequest = showRequest;
         Engine = new(store);
         Log = new(directory) { Enabled = Engine.Snapshot.LoggingEnabled };
@@ -38,7 +43,17 @@ public sealed class TimerApplication : ApplicationContext
             Visible = true, ContextMenuStrip = menu };
         tray.DoubleClick += (_, _) => Open();
         tray.BalloonTipClicked += (_, _) => ShowReflections();
-        Engine.ActivityRecorded += activity => Log.Record(activity);
+        Engine.ActivityRecorded += activity => {
+            Log.Record(activity);
+            if (activity.Event is "timer.paused" or "timer.reset" or "timer.started") Sounds.Stop(SoundEvent.LowTime);
+            if (activity.Event is "timer.deadline" or "timer.autoRestartDisabled" && activity.Value > 0) Sounds.Stop(SoundEvent.LowTime);
+            if (activity.Event == "timer.lowTimeOptions" && !Engine.Snapshot.Timer.LowTime.Enabled) Sounds.Stop(SoundEvent.LowTime);
+        };
+        Engine.LowTimeReached += timer => Ui(() => {
+            var current = Engine.Snapshot.Timer;
+            if (!current.IsRunning || !current.LowTime.Enabled || current.EndTime != timer.EndTime || TimerEngine.Remaining(current, Engine.Now) <= 0) return;
+            _ = PlaySound(SoundEvent.LowTime, timer.Volume, AudioSettings.From(Engine.Snapshot).ForLowTime(timer.LowTime));
+        });
         Engine.Changed += () => Ui(Refresh);
         SystemEvents.PowerModeChanged += PowerChanged;
         SystemEvents.SessionSwitch += SessionChanged;
@@ -88,17 +103,24 @@ public sealed class TimerApplication : ApplicationContext
         {
             if (showRequest.WaitOne(0)) Open();
             if (Engine.Snapshot.ExtensionDisabledConfirmed) Engine.Advance();
+            timerSaveFailed = false;
             main.RenderClock();
             tray.Text = "Reflection Timer · " + MainWindow.Clock(TimerEngine.Remaining(Engine.Snapshot.Timer, Engine.Now));
             if (Engine.Now - lastSync > 15000) { lastSync = Engine.Now; _ = Sync(); }
         }
-        catch { Log.Record("error.storage"); main.SetStatus("Could not save a timer update. Check disk access; your last saved state is retained.", true); }
+        catch { Log.Record("error.storage"); main.SetStatus("Could not save a timer update. Check disk access; your last saved state is retained.", true, silent: timerSaveFailed); timerSaveFailed = true; }
     }
     private void Refresh()
     {
         var state = Engine.Snapshot;
         Log.Enabled = state.LoggingEnabled;
         main.Render(state);
+        var newPrompts = state.Prompts.Where(x => !soundedPrompts.Contains(x.Id)).ToList();
+        foreach (var prompt in newPrompts) soundedPrompts.Add(prompt.Id);
+        soundedPrompts.IntersectWith(state.Prompts.Select(x => x.Id));
+        // Sound each completion even while another reflection remains open; Later
+        // and reopening that same draft do not replay the session-end effect.
+        if (newPrompts.LastOrDefault() is { } completed) _ = PlayAlertSound(completed.Volume);
         EnsurePrompt();
     }
     public void ShowReflections()
@@ -124,7 +146,6 @@ public sealed class TimerApplication : ApplicationContext
         tray.ShowBalloonTip(5000, pending.IsTest ? "Test reflection" : "Session complete", "Your reflection window is ready.", ToolTipIcon.Info);
         reflection.Show();
         reflection.Activate();
-        _ = PlayAlertSound(pending.Volume);
     }
     public async Task Sync()
     {
@@ -139,7 +160,7 @@ public sealed class TimerApplication : ApplicationContext
                 if (item is null) break;
                 var reply = await Sheets.Upload(settings, item);
                 Engine.FinishUpload(item.Id, reply.Success, reply.ErrorKind, reply.Tab);
-                Ui(() => main.SetStatus(reply.Success ? $"Reflection sent to {reply.Tab}." : "A reflection needs review in the Outbox. " + reply.DisplayMessage, !reply.Success));
+                Ui(() => main.SetStatus(reply.Success ? $"Reflection sent to {reply.Tab}." : "A reflection needs review in the Outbox. " + reply.DisplayMessage, !reply.Success, success: reply.Success));
                 if (!reply.Success) break;
             }
         }
@@ -153,20 +174,30 @@ public sealed class TimerApplication : ApplicationContext
             "Quit Reflection Timer", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         if (reflection is not null && !reflection.PersistDraft()) return;
         Log.Record("app.exiting");
-        quitting = true; focusShortcut?.Dispose(); pulse.Stop(); tray.Visible = false;
+        quitting = true; Sounds.Stop(); focusShortcut?.Dispose(); pulse.Stop(); tray.Visible = false;
         reflection?.Dispose(); main.AllowExit = true; main.Close(); ExitThread();
     }
-    public async Task PlayAlertSound(int volume, bool preview = false)
+    public Task PlayAlertSound(int volume, bool preview = false) => PlaySound(SoundEvent.SessionEnd, volume, preview: preview);
+    public void PlayFeedback(bool success)
     {
+        if (!success) { var now = Environment.TickCount64; if (now - lastFailureSound < 750) return; lastFailureSound = now; }
+        _ = PlaySound(success ? SoundEvent.Success : SoundEvent.Failure, Engine.Snapshot.Timer.Volume);
+    }
+    public async Task PlaySound(SoundEvent kind, int volume, SoundSetting? setting = null, bool preview = false)
+    {
+        if (!enableAudio || quitting) return;
         if (preview) { Log.Record("sound.preview", value: volume); main.SetStatus("Playing sound preview…"); }
-        var result = await Sounds.PlayAsync(Engine.Snapshot.AlertSoundPath, volume);
+        setting ??= AudioSettings.From(Engine.Snapshot).For(kind);
+        Log.Record("sound.requested", value: (int)kind * 10 + (int)setting.Behavior);
+        var result = await Sounds.PlayAsync(SoundLibrary.Resolve(kind, setting), volume, setting.Behavior, kind, SoundLibrary.Fallback(kind));
         if (quitting) return;
         Log.Record(result switch {
             AlertSoundResult.Played => "sound.played", AlertSoundResult.DefaultFallback => "sound.fallback",
             AlertSoundResult.Muted => "sound.muted", AlertSoundResult.Cancelled => "sound.stopped", _ => "sound.failed"
         }, value: volume);
-        if (result == AlertSoundResult.DefaultFallback) main.SetStatus("Custom MP3 unavailable. Played the extension's default sound.", true);
-        else if (result == AlertSoundResult.Failed) main.SetStatus("Could not play the alert sound. Check your audio output; the timer and reflection are unaffected.", true);
+        // Audio failures must never trigger their own failure sound recursively.
+        if (result == AlertSoundResult.DefaultFallback) main.SetStatus("Selected MP3 unavailable. Played a fallback sound.", true, silent: true);
+        else if (result == AlertSoundResult.Failed) main.SetStatus("Could not play the sound. Check your audio output; the timer and reflection are unaffected.", true, silent: true);
         else if (preview && result == AlertSoundResult.Played) main.SetStatus("Sound preview finished.");
         else if (preview && result == AlertSoundResult.Muted) main.SetStatus("Sound is muted. Raise the Timer sound level to preview it.");
     }

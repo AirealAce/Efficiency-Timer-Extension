@@ -4,7 +4,7 @@ using System.Text.Json;
 using ReflectionTimer.Core;
 using ReflectionTimer.Desktop;
 
-internal static class Program
+internal static partial class Program
 {
     private static int passed, failed;
     private static readonly ConnectionSettings Connection = new() { WebAppUrl = "https://script.google.com/macros/s/test-deployment/exec", ApiToken = "unit-test-token-not-a-real-secret" };
@@ -14,6 +14,17 @@ internal static class Program
     {
         var smokeTheme = args is ["--theme-smoke", var selected] ? Enum.Parse<AppColorTheme>(selected) : AppColorTheme.Dark;
         AppTheme.Initialize(() => smokeTheme);
+        if (args is ["--audio-smoke"]) {
+            // Explicit hardware check only: normal tests never emit audio.
+            return Task.Run(async () => {
+                using var player = new AlertSoundPlayer();
+                foreach (var kind in new[] { SoundEvent.Success, SoundEvent.Failure }) {
+                    var result = await player.PlayAsync(SoundLibrary.Resolve(kind, new()), 5, SoundBehavior.Disruptive, kind);
+                    Console.WriteLine($"{kind}: {result}"); if (result != AlertSoundResult.Played) return 1;
+                }
+                return 0;
+            }).GetAwaiter().GetResult();
+        }
         if (args.Length >= 2 && args[0] == "--seed-ui") {
             var path = args[1];
             var theme = args.Length == 3 ? Enum.Parse<AppColorTheme>(args[2]) : AppColorTheme.Dark;
@@ -71,6 +82,8 @@ internal static class Program
         TestThemePreferences();
         TestGlobalShortcut();
         Task.Run(TestAlertSounds).GetAwaiter().GetResult();
+        TestLowTime();
+        Task.Run(TestAudioPolicies).GetAwaiter().GetResult();
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
         TestTheme();
@@ -541,6 +554,11 @@ internal static class Program
             Test("sound path is encrypted and excluded from diagnostic exports", () => {
                 var directory = Path.Combine(root, "sound-privacy"); var store = new EncryptedStore(directory);
                 var state = new AppState { AlertSoundPath = Path.Combine(root, "private-audio-name.mp3") }; store.Save(state);
+                state.Audio = new() { Success = new() { Mp3Path = state.AlertSoundPath, Behavior = SoundBehavior.Assertive } };
+                state.Timer = state.Timer with { LowTime = new() { Enabled = true, Mp3Path = state.AlertSoundPath } };
+                state.Schedules.Add(new(Guid.NewGuid(), 10000, 300, false, 50) { LowTime = state.Timer.LowTime }); store.Save(state);
+                Equal(SoundBehavior.Assertive, store.Load().Audio!.Success.Behavior);
+                Equal(state.AlertSoundPath, store.Load().Schedules.Single().LowTime.Mp3Path);
                 Equal(state.AlertSoundPath, store.Load().AlertSoundPath);
                 Is(!Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(directory, "state.dat"))).Contains("private-audio-name"));
                 var log = new DiagnosticLog(directory); log.Record("sound.changed"); log.Record("sound.fallback");
@@ -552,6 +570,28 @@ internal static class Program
                 using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
                 app.OpenUnlessTray(false);
                 Is(!app.Engine.Snapshot.Timer.IsRunning);
+            });
+            Test("Audio settings UI saves each mode, source and threshold independently", () => {
+                var directory = Path.Combine(root, "audio-ui");
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
+                using var main = new MainWindow(app); main.Render(app.Engine.Snapshot); main.Show();
+                Descendants(main).OfType<TabControl>().Single().SelectedIndex = 3;
+                var control = Descendants(main).OfType<AudioSettingsControl>().Single();
+                foreach (var kind in Enum.GetValues<SoundEvent>()) {
+                    var behavior = Descendants(control).OfType<ComboBox>().Single(x => x.AccessibleName == kind + " playback behavior");
+                    Equal(0, behavior.SelectedIndex); behavior.SelectedIndex = 1;
+                    Equal(SoundBehavior.Assertive, AudioSettings.From(app.Engine.Snapshot).For(kind).Behavior);
+                    var source = Descendants(control).OfType<ComboBox>().Single(x => x.AccessibleName == kind + " sound");
+                    source.SelectedIndex = (int)LibrarySound.ChampionBattle;
+                    Equal(LibrarySound.ChampionBattle, AudioSettings.From(app.Engine.Snapshot).For(kind).Track);
+                    Equal(SoundBehavior.Assertive, AudioSettings.From(app.Engine.Snapshot).For(kind).Behavior);
+                }
+                var threshold = Descendants(control).OfType<NumericUpDown>().Single(); threshold.Value = 120;
+                Descendants(control).OfType<Button>().Single(x => x.Text == "Save threshold").PerformClick();
+                Equal(120, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
+                Equal(2, Descendants(main).OfType<LowTimeControl>().Count());
+                Is(!app.Engine.Snapshot.Timer.LowTime.Enabled); Is(!app.Engine.Snapshot.Timer.IsRunning);
             });
             Test("encrypted state round-trip without plaintext credentials", () => {
                 var store = new EncryptedStore(Path.Combine(root, "roundtrip")); var state = new AppState { Connection = Connection };
@@ -710,8 +750,8 @@ internal static class Program
     {
         public readonly List<(string Path, int Volume)> Calls = [];
         public Func<string, CancellationToken, Task> Play = (_, _) => Task.CompletedTask;
-        public Task PlayAsync(string path, int volume, CancellationToken cancellationToken) {
-            Calls.Add((path, volume)); return Play(path, cancellationToken);
+        public Task PlayAsync(string path, AudioLevel level, CancellationToken cancellationToken) {
+            Calls.Add((path, level.Volume)); return Play(path, cancellationToken);
         }
     }
     private sealed class FakeHttp(Func<int, HttpResponseMessage> respond) : HttpMessageHandler

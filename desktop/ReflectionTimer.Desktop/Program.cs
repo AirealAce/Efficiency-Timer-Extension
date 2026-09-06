@@ -38,7 +38,7 @@ internal static class Program
                 return;
             }
             AppTheme.Initialize(() => store.Load().Theme);
-            using var app = new TimerApplication(store, directory, show);
+            using var app = new TimerApplication(store, directory, show, enableAudio: true);
             if (!args.Contains("--no-global-shortcut")) app.EnableGlobalShortcut();
             Application.ThreadException += (_, _) => app.ShowError("An unexpected app error occurred. Your last committed state is retained. Export diagnostics if this repeats.");
             app.OpenUnlessTray(args.Contains("--tray"));

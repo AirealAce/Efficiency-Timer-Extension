@@ -26,7 +26,7 @@ public sealed class ReflectionWindow : Form
         actions.Controls.Add(Widgets.Button("Save & send", (_, _) => Save(), true));
         actions.Controls.Add(Widgets.Button("Later", (_, _) => { PersistDraft(); app.Log.Record("prompt.later", prompt.Id); Close(); }));
         actions.Controls.Add(Widgets.Button("Skip", (_, _) => {
-            try { app.Engine.SkipPrompt(prompt.Id); Close(); } catch { status.Text = "Could not save that change. Your reflection is still available."; }
+            try { app.Engine.SkipPrompt(prompt.Id); Close(); } catch { status.Text = "Could not save that change. Your reflection is still available."; app.PlayFeedback(false); }
         }));
         Controls.Add(response); Controls.Add(context); Controls.Add(heading); Controls.Add(status); Controls.Add(actions);
         response.Text = prompt.Draft;
@@ -53,13 +53,13 @@ public sealed class ReflectionWindow : Form
     public bool PersistDraft()
     {
         try { app.Engine.SaveDraft(prompt.Id, response.Text); return true; }
-        catch { status.Text = "Draft could not be saved. Keep this window open and check disk access."; return false; }
+        catch { status.Text = "Draft could not be saved. Keep this window open and check disk access."; app.PlayFeedback(false); return false; }
     }
     private void Save()
     {
         if (saving) return;
         try {
             app.Engine.QueueReflection(prompt.Id, response.Text); saving = true; draftDelay.Stop(); Close(); _ = app.Sync();
-        } catch (Exception error) { status.Text = error.Message; status.ForeColor = AppTheme.Error; response.Focus(); }
+        } catch (Exception error) { status.Text = error.Message; status.ForeColor = AppTheme.Error; app.PlayFeedback(false); response.Focus(); }
     }
 }

@@ -17,9 +17,14 @@ public record TimerState
     public bool AutoRestart { get; init; }
     public long? AutoRestartUntil { get; init; }
     public int Volume { get; init; } = 50;
+    public LowTimeOptions LowTime { get; init; } = new();
+    public bool LowTimePlayed { get; init; }
 }
 
-public record ScheduledSession(Guid Id, long StartTime, int DurationSeconds, bool AutoRestart, int Volume, long? AutoRestartUntil = null);
+public record ScheduledSession(Guid Id, long StartTime, int DurationSeconds, bool AutoRestart, int Volume, long? AutoRestartUntil = null)
+{
+    public LowTimeOptions LowTime { get; init; } = new();
+}
 public record ReflectionPrompt(Guid Id, long CompletedAt, int DurationSeconds, int Volume, bool IsTest, string Draft = "");
 
 public record ConnectionSettings
@@ -59,6 +64,7 @@ public record AppState
     public List<OutboxItem> Outbox { get; set; } = [];
     public ConnectionSettings Connection { get; set; } = new();
     public string AlertSoundPath { get; set; } = ""; // Empty means the bundled extension sound.
+    public AudioSettings? Audio { get; set; } // Null migrates the existing session-end MP3 without changing it.
     public ReflectionPopupPosition PopupPosition { get; set; } = ReflectionPopupPosition.Center;
     public AppColorTheme Theme { get; set; } = AppColorTheme.Dark;
     public bool LoggingEnabled { get; set; } = true;

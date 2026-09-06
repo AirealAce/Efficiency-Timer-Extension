@@ -15,12 +15,14 @@ public sealed class MainWindow : Form
     private readonly Label pending = Widgets.Text("");
     private readonly DurationControl duration = new();
     private readonly AutoRestartOptions repeat = new();
+    private readonly LowTimeControl lowTime = new();
     private readonly VolumeControl volume = new();
     private readonly Button start;
-    private readonly DataGridView scheduleGrid = Widgets.Grid("Start time", "Duration", "Auto-start", "Auto-start cutoff", "Sound");
+    private readonly DataGridView scheduleGrid = Widgets.Grid("Start time", "Duration", "Auto-start", "Auto-start cutoff", "Sound", "Low on time");
     private readonly SessionStartInput scheduledStart = new() { Width = 300, Value = DateTime.Now.AddHours(1) };
     private readonly DurationControl scheduledDuration = new();
     private readonly AutoRestartOptions scheduledRepeat;
+    private readonly LowTimeControl scheduledLowTime = new();
     private readonly VolumeControl scheduledVolume = new();
     private readonly Label scheduleHeading = Widgets.Text("Add a scheduled session");
     private readonly Button saveSchedule;
@@ -30,7 +32,7 @@ public sealed class MainWindow : Form
     private readonly TextBox sheetUrl = new() { Width = 750 };
     private readonly TextBox webAppUrl = new() { Width = 750 };
     private readonly TextBox token = new() { Width = 750, UseSystemPasswordChar = true };
-    private readonly Label alertSoundChoice = Widgets.Text("");
+    private readonly AudioSettingsControl audio;
     private readonly ComboBox popupPosition = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Reflection popup position" };
     private readonly ComboBox themeChoice = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "App theme" };
     private readonly ThemePreview themePreview = new();
@@ -44,7 +46,6 @@ public sealed class MainWindow : Form
     private readonly Label diagnosticsSummary = Widgets.Text("");
     private readonly TextBox diagnosticPreview = new() { Width = 750, Height = 280, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Font = new("Consolas", 10) };
     private bool binding;
-    private int soundSelectionVersion;
     private string scheduleSignature = "", outboxSignature = "";
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool AllowExit { get; set; }
@@ -67,13 +68,21 @@ public sealed class MainWindow : Form
             if (current.IsRunning) app.Engine.Pause();
             else if (!duration.Dirty && current.RemainingSeconds > 0 && current.RemainingSeconds < current.DurationSeconds) {
                 app.Engine.SetPreferences(repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
+                app.Engine.SetLowTime(lowTime.Selection);
                 app.Engine.Resume();
             }
-            else app.Engine.Start(duration.Seconds, repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
+            else app.Engine.Start(duration.Seconds, repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil, lowTime.Selection);
             duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true);
         }), true);
         timer.Controls.Add(Widgets.Row(start, Widgets.Button("Reset", (_, _) => Safe(() => { app.Engine.Reset(duration.Dirty ? duration.Seconds : null); duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true); }))));
-        timer.Controls.Add(repeat); timer.Controls.Add(volume);
+        timer.Controls.Add(repeat); timer.Controls.Add(lowTime); timer.Controls.Add(volume);
+        lowTime.UserChanged += () => {
+            if (binding) return;
+            try { app.Engine.SetLowTime(lowTime.Selection); SetStatus("Low-time options saved.", success: true); }
+            catch (Exception error) { lowTime.LoadOptions(app.Engine.Snapshot.Timer.LowTime, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds, true); SetStatus(error.Message, true); }
+        };
+        lowTime.Error += text => SetStatus(text, true);
+        scheduledLowTime.Error += text => SetStatus(text, true);
         repeat.UserChanged += SaveTimerPreferences;
         volume.UserChanged += SaveTimerPreferences;
         duration.UserChanged += RenderClock;
@@ -88,17 +97,18 @@ public sealed class MainWindow : Form
         scheduleGrid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
         scheduleGrid.Columns[0].FillWeight = 160; scheduleGrid.Columns[1].FillWeight = 85;
         scheduleGrid.Columns[2].FillWeight = 90; scheduleGrid.Columns[3].FillWeight = 160; scheduleGrid.Columns[4].FillWeight = 55;
+        scheduleGrid.Columns[4].MinimumWidth = 65;
         schedule.Controls.Add(scheduleGrid);
         schedule.Controls.Add(Widgets.Row(Widgets.Button("Edit selected", (_, _) => EditSelectedSchedule()), Widgets.Button("Remove selected", (_, _) => Safe(() => {
             if (SelectedSchedule() is { } selected) { app.Engine.RemoveSchedule(selected.Id); if (editing == selected.Id) ResetScheduleEditor(); }
         })), Widgets.Button("Import extension schedules…", (_, _) => ImportSchedules())));
         schedule.Controls.Add(scheduleHeading); schedule.Controls.Add(Widgets.Text("Start date and time (your local time zone)")); schedule.Controls.Add(scheduledStart);
-        schedule.Controls.Add(scheduledDuration); schedule.Controls.Add(scheduledRepeat); schedule.Controls.Add(scheduledVolume);
+        schedule.Controls.Add(scheduledDuration); schedule.Controls.Add(scheduledRepeat); schedule.Controls.Add(scheduledLowTime); schedule.Controls.Add(scheduledVolume);
         saveSchedule = Widgets.Button("Add session", (_, _) => Safe(() => {
             var picked = scheduledStart.Value;
             var minute = new DateTime(picked.Year, picked.Month, picked.Day, picked.Hour, picked.Minute, 0, DateTimeKind.Local);
-            app.Engine.SaveSchedule(editing, new DateTimeOffset(minute), scheduledDuration.Seconds, scheduledRepeat.AutoRestart, scheduledVolume.Value, scheduledRepeat.AutoRestartUntil);
-            ResetScheduleEditor(); SetStatus("Schedule saved.");
+            app.Engine.SaveSchedule(editing, new DateTimeOffset(minute), scheduledDuration.Seconds, scheduledRepeat.AutoRestart, scheduledVolume.Value, scheduledRepeat.AutoRestartUntil, scheduledLowTime.Selection);
+            ResetScheduleEditor(); SetStatus("Schedule saved.", success: true);
         }), true);
         schedule.Controls.Add(Widgets.Row(saveSchedule, Widgets.Button("Cancel edit / new session", (_, _) => ResetScheduleEditor())));
         schedule.Controls.Add(Widgets.Text("Auto-start repeats this duration until its optional cutoff; it does not move the next appointment earlier. Cutoffs must follow the scheduled start. Pausing, resetting, or reaching a cutoff does not remove future appointments."));
@@ -126,7 +136,7 @@ public sealed class MainWindow : Form
             try {
                 app.Engine.SetTheme((AppColorTheme)themeChoice.SelectedIndex);
                 RenderThemeChoice(app.Engine.Snapshot.Theme);
-                SetStatus("Theme saved. " + themeNotice.Text);
+                SetStatus("Theme saved. " + themeNotice.Text, success: true);
             }
             catch {
                 RenderThemeChoice(app.Engine.Snapshot.Theme);
@@ -140,7 +150,7 @@ public sealed class MainWindow : Form
             if (binding || popupPosition.SelectedIndex < 0) return;
             try {
                 app.Engine.SetPopupPosition((ReflectionPopupPosition)popupPosition.SelectedIndex);
-                SetStatus("Popup position saved. Applies the next time a reflection window opens.");
+                SetStatus("Popup position saved. Applies the next time a reflection window opens.", success: true);
             }
             catch {
                 binding = true;
@@ -150,26 +160,9 @@ public sealed class MainWindow : Form
             }
         };
         settings.Controls.Add(Widgets.Text("Saves immediately for regular, scheduled, and test reflections. Uses the screen containing your mouse pointer when the popup opens, leaving space for the taskbar. An already-open reflection stays where it is."));
-        settings.Controls.Add(Widgets.Text("Alert sound")); settings.Controls.Add(alertSoundChoice);
-        var chooseSound = Widgets.Button("Choose MP3…", async (sender, _) => {
-            using var dialog = new OpenFileDialog { Title = "Choose an alert sound", Filter = "MP3 audio|*.mp3", CheckFileExists = true, Multiselect = false };
-            if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            var selectionVersion = ++soundSelectionVersion;
-            var button = (Button)sender!; button.Enabled = false;
-            SetStatus("Checking the MP3…");
-            try {
-                var path = await Task.Run(() => Mp3AudioBackend.ValidateCustomFile(dialog.FileName));
-                if (IsDisposed || selectionVersion != soundSelectionVersion) return;
-                app.Engine.SetAlertSound(path); app.Sounds.Stop(); SetStatus("Custom alert sound saved.");
-            }
-            catch (Exception) { if (!IsDisposed && selectionVersion == soundSelectionVersion) SetStatus("Could not save that sound. Choose a readable MP3 under 50 MB; your previous selection is unchanged.", true); }
-            finally { if (!IsDisposed) button.Enabled = true; }
-        });
-        settings.Controls.Add(Widgets.Row(chooseSound,
-            Widgets.Button("Preview sound", async (_, _) => await app.PlayAlertSound(app.Engine.Snapshot.Timer.Volume, true)),
-            Widgets.Button("Stop preview", (_, _) => { app.Sounds.Stop(); SetStatus("Sound stopped."); }),
-            Widgets.Button("Use extension default", (_, _) => Safe(() => { ++soundSelectionVersion; app.Engine.SetAlertSound(""); app.Sounds.Stop(); SetStatus("Default extension sound restored."); }))));
-        settings.Controls.Add(Widgets.Text("Sound choices save immediately and apply to all alerts. Preview uses the Timer sound level; scheduled sessions keep their own volume. Keep a custom MP3 at its selected location. If unavailable, the bundled extension sound plays instead. Audio files and their paths are never uploaded."));
+        audio = new AudioSettingsControl(app);
+        audio.Status += (text, error) => SetStatus(text, error, success: text == "Audio settings saved.");
+        settings.Controls.Add(audio);
         settings.Controls.Add(Widgets.Text("Switch over: open chrome://extensions, turn off Reflection Timer (leave it installed as a fallback), then check the confirmation below. This app does not read Chrome profile files or collect browser activity."));
         settings.Controls.Add(disabledExtension);
         settings.Controls.Add(Widgets.Text("Google Sheets URL")); settings.Controls.Add(sheetUrl);
@@ -185,7 +178,7 @@ public sealed class MainWindow : Form
             SetStatus("Checking the Sheets connection…");
             var result = await app.Sheets.Ping(app.Engine.Snapshot.Connection);
             app.Log.Record("connection.checked", value: result.Success ? 1 : 0);
-            SetStatus(result.Success ? "Connection works · " + result.Target : result.DisplayMessage, !result.Success);
+            SetStatus(result.Success ? "Connection works · " + result.Target : result.DisplayMessage, !result.Success, success: result.Success);
         })));
         settings.Controls.Add(Widgets.Text("The API token, reflections, and drafts are encrypted for your Windows account in LocalAppData. Connection settings may be saved incomplete; sending waits until they are valid. Windows sign-in startup is optional and off by default."));
 
@@ -231,7 +224,11 @@ public sealed class MainWindow : Form
         }
         finally { binding = wasBinding; }
     }
-    public void SetStatus(string text, bool error = false) { status.Text = text; status.ForeColor = error ? AppTheme.Error : Widgets.Green; }
+    public void SetStatus(string text, bool error = false, bool success = false, bool silent = false)
+    {
+        status.Text = text; status.ForeColor = error ? AppTheme.Error : Widgets.Green;
+        if (!silent && (error || success)) app.PlayFeedback(!error);
+    }
     private void Safe(Action action) { try { action(); } catch (Exception error) { app.Log.Record("error.unexpected"); SetStatus(error.Message, true); } }
     public static string Clock(int total) => total >= 3600 ? $"{total / 3600}:{total / 60 % 60:00}:{total % 60:00}" : $"{total / 60:00}:{total % 60:00}";
     public void RenderClock()
@@ -247,7 +244,9 @@ public sealed class MainWindow : Form
         binding = true;
         RenderThemeChoice(state.Theme);
         popupPosition.SelectedIndex = PopupPositionIndex(state.PopupPosition);
-        alertSoundChoice.Text = string.IsNullOrEmpty(state.AlertSoundPath) ? "Default · original extension sound (popup.mp3)" : "Custom MP3 · " + Path.GetFileName(state.AlertSoundPath);
+        var sounds = AudioSettings.From(state); audio.LoadOptions(sounds);
+        lowTime.LoadOptions(state.Timer.LowTime, sounds.LowTimeThresholdSeconds);
+        scheduledLowTime.LoadOptions(scheduledLowTime.Selection, sounds.LowTimeThresholdSeconds);
         if (state.Timer.IsRunning || !duration.Dirty) duration.LoadSeconds(state.Timer.DurationSeconds, true);
         duration.Enabled = !state.Timer.IsRunning; repeat.LoadOptions(state.Timer.AutoRestart, state.Timer.AutoRestartUntil); volume.Value = state.Timer.Volume;
         start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && state.Timer.RemainingSeconds > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Resume" : "Start";
@@ -260,7 +259,8 @@ public sealed class MainWindow : Form
             var selected = SelectedSchedule()?.Id; scheduleGrid.Rows.Clear();
             foreach (var entry in state.Schedules) {
                 var row = scheduleGrid.Rows[scheduleGrid.Rows.Add(DateTimeOffset.FromUnixTimeMilliseconds(entry.StartTime).ToLocalTime().ToString("g"), Clock(entry.DurationSeconds), entry.AutoRestart ? "On" : "Off",
-                    entry.AutoRestartUntil.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(entry.AutoRestartUntil.Value).ToLocalTime().ToString("g") : "—", entry.Volume + "%")];
+                    entry.AutoRestartUntil.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(entry.AutoRestartUntil.Value).ToLocalTime().ToString("g") : "—", entry.Volume + "%",
+                    entry.LowTime.Enabled ? entry.LowTime.ThresholdSeconds is { } seconds ? Clock(seconds) : "Default" : "Off")];
                 row.Tag = entry.Id; if (entry.Id == selected) row.Selected = true;
             }
             scheduleSignature = signature;
@@ -285,11 +285,13 @@ public sealed class MainWindow : Form
         if (SelectedSchedule() is not { } entry) return;
         editing = entry.Id; scheduledStart.Value = DateTimeOffset.FromUnixTimeMilliseconds(entry.StartTime).LocalDateTime;
         scheduledDuration.LoadSeconds(entry.DurationSeconds); scheduledRepeat.LoadOptions(entry.AutoRestart, entry.AutoRestartUntil, true); scheduledVolume.Value = entry.Volume;
+        scheduledLowTime.LoadOptions(entry.LowTime, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds, true);
         scheduleHeading.Text = "Edit scheduled session"; saveSchedule.Text = "Save changes"; scheduledStart.Focus();
     }
     private void ResetScheduleEditor()
     {
         editing = null; scheduledStart.Value = DateTime.Now.AddHours(1); scheduledDuration.LoadSeconds(1500, true); scheduledRepeat.LoadOptions(false, null, true); scheduledVolume.Value = 50;
+        scheduledLowTime.LoadOptions(new(), AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds, true);
         scheduleHeading.Text = "Add a scheduled session"; saveSchedule.Text = "Add session";
     }
     private void SaveTimerPreferences()
@@ -297,7 +299,7 @@ public sealed class MainWindow : Form
         if (binding) return;
         Safe(() => {
             app.Engine.SetPreferences(repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
-            SetStatus("Timer preferences saved.");
+            SetStatus("Timer preferences saved.", success: true);
         });
     }
     private bool SaveSettings()
@@ -306,7 +308,8 @@ public sealed class MainWindow : Form
             var connection = new ConnectionSettings { SheetUrl = sheetUrl.Text.Trim(), WebAppUrl = webAppUrl.Text.Trim(), ApiToken = token.Text.Trim(), SheetMode = mode.SelectedIndex == 1 ? "fixed" : "date", SheetName = sheetName.Text.Trim() };
             app.Engine.SaveSettings(connection, logging.Checked, login.Checked, disabledExtension.Checked);
             StartupRegistration.Set(login.Checked);
-            SetStatus(SheetsClient.Validate(connection) is { } missing ? "Settings saved locally. " + missing : "Settings saved.");
+            var missing = SheetsClient.Validate(connection);
+            SetStatus(missing is not null ? "Settings saved locally. " + missing : "Settings saved.", error: missing is not null, success: missing is null);
             _ = app.Sync(); return true;
         } catch (Exception error) { SetStatus("Could not save settings: " + error.Message, true); return false; }
     }
@@ -325,7 +328,7 @@ public sealed class MainWindow : Form
     {
         using var dialog = new SaveFileDialog { Filter = "JSON report|*.json", FileName = "reflection-timer-desktop-diagnostics-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".json" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        Safe(() => { File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(app.Log.Report(app.Engine.Snapshot), DataJson.Options)); SetStatus("Diagnostic report exported. Review its activity times before sharing."); });
+        Safe(() => { File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(app.Log.Report(app.Engine.Snapshot), DataJson.Options)); SetStatus("Diagnostic report exported. Review its activity times before sharing.", success: true); });
     }
     private void ImportSchedules()
     {
@@ -336,7 +339,7 @@ public sealed class MainWindow : Form
             var list = json.RootElement.GetProperty("snapshot").GetProperty("scheduledSessions");
             var imported = list.EnumerateArray().Select(x => new ScheduledSession(Guid.NewGuid(), x.GetProperty("targetTime").GetInt64(),
                 x.GetProperty("requestedDurationSeconds").GetInt32(), x.GetProperty("autoRestart").GetBoolean(), x.GetProperty("sfxVolume").GetInt32())).ToList();
-            app.Engine.ImportSchedules(imported); SetStatus("Future schedules imported. Past appointments and duplicate start times were skipped.");
+            app.Engine.ImportSchedules(imported); SetStatus("Future schedules imported. Past appointments and duplicate start times were skipped.", success: true);
         });
     }
 }

@@ -17,3 +17,6 @@ Thumbs.db
 desktop/**/bin/
 desktop/**/obj/
 desktop/artifacts/
+
+# User-provided soundtrack copies are local assets, not public redistribution.
+desktop/Sounds/*.mp3

@@ -11,6 +11,7 @@ public sealed class TimerEngine
     private AppState state;
     public event Action? Changed;
     public event Action<Activity>? ActivityRecorded;
+    public event Action<TimerState>? LowTimeReached;
     public AppState Snapshot { get { lock (gate) return DataJson.Clone(state); } }
     public long Now => clock().ToUnixTimeMilliseconds();
 
@@ -58,20 +59,21 @@ public sealed class TimerEngine
     {
         if (CutoffDue(state.Timer, now)) state.Timer = state.Timer with { AutoRestart = false, AutoRestartUntil = null };
     }
-    private static TimerState Started(int seconds, bool repeat, int volume, long now, long? until = null) => new()
+    private static TimerState Started(int seconds, bool repeat, int volume, long now, long? until = null, LowTimeOptions? lowTime = null) => new()
     {
         IsRunning = true, DurationSeconds = seconds, RemainingSeconds = seconds,
         EndTime = now + seconds * 1000L, AutoRestart = (repeat || until.HasValue) && !(until <= now),
-        AutoRestartUntil = until > now ? until : null, Volume = Math.Clamp(volume, 0, 100)
+        AutoRestartUntil = until > now ? until : null, Volume = Math.Clamp(volume, 0, 100), LowTime = lowTime ?? new()
     };
 
-    public void Start(int seconds, bool repeat, int volume, long? autoRestartUntil = null)
+    public void Start(int seconds, bool repeat, int volume, long? autoRestartUntil = null, LowTimeOptions? lowTime = null)
     {
         ValidateDuration(seconds);
         Change("timer.started", s => {
             var now = Now;
             ValidateCutoff(autoRestartUntil, now);
-            s.Timer = Started(seconds, repeat, volume, now, autoRestartUntil);
+            var options = lowTime ?? s.Timer.LowTime; AudioSettings.Validate(options);
+            s.Timer = Started(seconds, repeat, volume, now, autoRestartUntil, options);
         }, value: seconds);
     }
     public void Pause() => Change("timer.paused", s => {
@@ -96,7 +98,7 @@ public sealed class TimerEngine
         ExpireAutoRestart(s, Now);
         var seconds = duration ?? s.Timer.DurationSeconds;
         ValidateDuration(seconds);
-        s.Timer = s.Timer with { IsRunning = false, DurationSeconds = seconds, RemainingSeconds = seconds, EndTime = null };
+        s.Timer = s.Timer with { IsRunning = false, DurationSeconds = seconds, RemainingSeconds = seconds, EndTime = null, LowTimePlayed = false };
     });
     public void SetPreferences(bool repeat, int volume, long? autoRestartUntil = null) => Change("timer.preferences", s => {
         ValidateCutoff(autoRestartUntil, Now);
@@ -106,16 +108,21 @@ public sealed class TimerEngine
 
     public void Advance()
     {
+        TimerState? lowTimeAlert = null;
         lock (gate)
         {
             var now = Now;
             var deadlineDue = state.Schedules.Any(x => x.StartTime <= now) || (state.Timer.IsRunning && state.Timer.EndTime <= now);
             var cutoffDue = CutoffDue(state.Timer, now);
-            if (!deadlineDue && !cutoffDue) return;
-            Change(cutoffDue ? "timer.autoRestartDisabled" : "timer.deadline", s => {
+            var lowTimeDue = !deadlineDue && state.Timer.IsRunning && state.Timer.LowTime.Enabled && !state.Timer.LowTimePlayed
+                && Remaining(state.Timer, now) > 0
+                && Remaining(state.Timer, now) <= (state.Timer.LowTime.ThresholdSeconds ?? AudioSettings.From(state).LowTimeThresholdSeconds);
+            if (!deadlineDue && !cutoffDue && !lowTimeDue) return;
+            Change(cutoffDue ? "timer.autoRestartDisabled" : deadlineDue ? "timer.deadline" : "timer.lowTime", s => {
                 // A cutoff is independent of the countdown, including while paused.
                 // Expire before completion so no extra repeat starts at the boundary.
                 ExpireAutoRestart(s, now);
+                if (lowTimeDue) s.Timer = s.Timer with { LowTimePlayed = true };
                 if (!deadlineDue) return;
                 var due = s.Schedules.Where(x => x.StartTime <= now).OrderBy(x => x.StartTime).ToList();
                 var latest = due.LastOrDefault();
@@ -126,19 +133,22 @@ public sealed class TimerEngine
                 if (latest is not null)
                 {
                     s.Schedules.RemoveAll(x => x.StartTime <= now);
-                    s.Timer = Started(latest.DurationSeconds, latest.AutoRestart, latest.Volume, now, latest.AutoRestartUntil);
+                    s.Timer = Started(latest.DurationSeconds, latest.AutoRestart, latest.Volume, now, latest.AutoRestartUntil, latest.LowTime);
                 }
                 else if (s.Timer.AutoRestart)
-                    s.Timer = Started(s.Timer.DurationSeconds, true, s.Timer.Volume, now, s.Timer.AutoRestartUntil);
+                    s.Timer = Started(s.Timer.DurationSeconds, true, s.Timer.Volume, now, s.Timer.AutoRestartUntil, s.Timer.LowTime);
                 else s.Timer = s.Timer with { IsRunning = false, RemainingSeconds = 0, EndTime = null };
             }, value: dueCount(state, now));
+            if (lowTimeDue) lowTimeAlert = state.Timer;
         }
+        if (lowTimeAlert is not null) LowTimeReached?.Invoke(lowTimeAlert);
         static long dueCount(AppState value, long now) => value.Schedules.Count(x => x.StartTime <= now);
     }
 
-    public Guid SaveSchedule(Guid? id, DateTimeOffset start, int seconds, bool repeat, int volume, long? autoRestartUntil = null)
+    public Guid SaveSchedule(Guid? id, DateTimeOffset start, int seconds, bool repeat, int volume, long? autoRestartUntil = null, LowTimeOptions? lowTime = null)
     {
         ValidateDuration(seconds);
+        lowTime ??= new(); AudioSettings.Validate(lowTime);
         var itemId = id ?? Guid.NewGuid();
         Change("schedule.saved", s => {
             if (start.ToUnixTimeMilliseconds() <= Now) throw new ArgumentException("Choose a future session start date and time.");
@@ -147,7 +157,7 @@ public sealed class TimerEngine
             if (!id.HasValue && s.Schedules.Count >= 50) throw new ArgumentException("You can schedule up to 50 sessions.");
             if (s.Schedules.Any(x => x.Id != itemId && x.StartTime == start.ToUnixTimeMilliseconds())) throw new ArgumentException("Another session already starts at that time.");
             s.Schedules.RemoveAll(x => x.Id == itemId);
-            s.Schedules.Add(new(itemId, start.ToUnixTimeMilliseconds(), seconds, repeat || autoRestartUntil.HasValue, Math.Clamp(volume, 0, 100), autoRestartUntil));
+            s.Schedules.Add(new(itemId, start.ToUnixTimeMilliseconds(), seconds, repeat || autoRestartUntil.HasValue, Math.Clamp(volume, 0, 100), autoRestartUntil) { LowTime = lowTime });
             s.Schedules = s.Schedules.OrderBy(x => x.StartTime).ToList();
         }, itemId);
         return itemId;
@@ -156,6 +166,7 @@ public sealed class TimerEngine
     public void ImportSchedules(IEnumerable<ScheduledSession> entries) => Change("schedule.saved", s => {
         foreach (var entry in entries) {
             ValidateDuration(entry.DurationSeconds);
+            AudioSettings.Validate(entry.LowTime);
             if (entry.StartTime <= Now || s.Schedules.Any(x => x.StartTime == entry.StartTime)) continue;
             ValidateCutoff(entry.AutoRestartUntil, entry.StartTime);
             if (s.Schedules.Count >= 50) throw new ArgumentException("The import would exceed 50 scheduled sessions. No entries were imported.");
@@ -224,11 +235,19 @@ public sealed class TimerEngine
         if (!Enum.IsDefined(theme)) throw new ArgumentException("Choose a theme from the list.");
         s.Theme = theme;
     }, value: (int)theme);
-    public void SetAlertSound(string path) => Change("sound.changed", s => {
-        if (path.Length > 0 && (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".mp3", StringComparison.OrdinalIgnoreCase)))
-            throw new ArgumentException("Choose a local MP3 file.");
-        s.AlertSoundPath = path;
-    }, value: path.Length == 0 ? 0 : 1);
+    public void SetAlertSound(string path) => SetSound(SoundEvent.SessionEnd,
+        AudioSettings.From(Snapshot).SessionEnd with { Mp3Path = path, Track = LibrarySound.Default });
+    public void SetSound(SoundEvent kind, SoundSetting setting) => Change("sound.changed", s => {
+        AudioSettings.Validate(setting);
+        s.Audio = AudioSettings.From(s).With(kind, setting);
+        if (kind == SoundEvent.SessionEnd) s.AlertSoundPath = setting.Mp3Path;
+    }, value: (int)kind);
+    public void SetLowTimeDefault(int seconds) => Change("sound.thresholdChanged", s => {
+        ValidateDuration(seconds); s.Audio = AudioSettings.From(s) with { LowTimeThresholdSeconds = seconds };
+    }, value: seconds);
+    public void SetLowTime(LowTimeOptions options) => Change("timer.lowTimeOptions", s => {
+        AudioSettings.Validate(options); s.Timer = s.Timer with { LowTime = options };
+    });
     public void SaveSettings(ConnectionSettings connection, bool logging, bool startAtLogin, bool extensionDisabled) => Change("settings.saved", s => {
         s.Connection = connection; s.LoggingEnabled = logging; s.StartAtLogin = startAtLogin; s.ExtensionDisabledConfirmed = extensionDisabled;
     });
