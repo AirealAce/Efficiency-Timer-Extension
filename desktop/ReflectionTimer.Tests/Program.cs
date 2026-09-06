@@ -69,12 +69,42 @@ internal static class Program
         TestAutoRestartCutoff();
         TestDisplayPlacement();
         TestThemePreferences();
+        TestGlobalShortcut();
         Task.Run(TestAlertSounds).GetAwaiter().GetResult();
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
         TestTheme();
         Console.WriteLine($"\n{passed} passed; {failed} failed.");
         return failed == 0 ? 0 : 1;
+    }
+
+    private static void TestGlobalShortcut()
+    {
+        Test("global shortcut registers exactly Ctrl Alt T with repeat suppression", () => {
+            var api = new FakeHotKey(); using var shortcut = new GlobalShortcut(() => { }, api);
+            Is(shortcut.IsRegistered); Equal(1, api.Registrations.Count);
+            var call = api.Registrations.Single(); Is(call.Window != 0); Equal(0x5254, call.Id);
+            Equal(0x4003u, call.Modifiers); Equal(0x54u, call.Key);
+        });
+        Test("global shortcut routes only its own message and id", () => {
+            var count = 0; using var shortcut = new GlobalShortcut(() => count++, new FakeHotKey());
+            Is(!shortcut.Dispatch(0x0100, GlobalShortcut.HotKeyId));
+            Is(!shortcut.Dispatch(GlobalShortcut.HotKeyMessage, GlobalShortcut.HotKeyId + 1));
+            Equal(0, count); Is(shortcut.Dispatch(GlobalShortcut.HotKeyMessage, GlobalShortcut.HotKeyId)); Equal(1, count);
+        });
+        Test("shortcut conflict is nonfatal and cannot trigger the callback", () => {
+            var api = new FakeHotKey { Available = false }; var count = 0;
+            using var shortcut = new GlobalShortcut(() => count++, api); Is(!shortcut.IsRegistered);
+            Is(!shortcut.Dispatch(GlobalShortcut.HotKeyMessage, GlobalShortcut.HotKeyId)); Equal(0, count);
+            shortcut.Dispose(); Equal(0, api.Unregistrations.Count);
+        });
+        Test("disposing releases the shortcut once and ignores queued messages", () => {
+            var api = new FakeHotKey(); var count = 0; var shortcut = new GlobalShortcut(() => count++, api);
+            var handle = shortcut.Handle; shortcut.Dispose(); shortcut.Dispose();
+            Equal((handle, GlobalShortcut.HotKeyId), api.Unregistrations.Single());
+            Is(!shortcut.IsRegistered); Equal(nint.Zero, shortcut.Handle);
+            Is(!shortcut.Dispatch(GlobalShortcut.HotKeyMessage, GlobalShortcut.HotKeyId)); Equal(0, count);
+        });
     }
 
     private static void TestThemePreferences()
@@ -413,6 +443,36 @@ internal static class Program
         var root = Path.Combine(Path.GetTempPath(), "ReflectionTimer-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try {
+            Test("focusing restores hidden minimized and maximized windows without state changes", () => {
+                var directory = Path.Combine(root, "focus");
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
+                app.Open(); var main = Application.OpenForms.OfType<MainWindow>().Single();
+                var tabs = Descendants(main).OfType<TabControl>().Single(); tabs.SelectedIndex = 3;
+                var before = JsonSerializer.Serialize(app.Engine.Snapshot);
+                main.Hide(); app.Open(); Is(main.Visible); Equal(3, tabs.SelectedIndex);
+                main.WindowState = FormWindowState.Minimized; app.Open(); Is(main.WindowState != FormWindowState.Minimized);
+                main.WindowState = FormWindowState.Maximized; app.Open(); Equal(FormWindowState.Maximized, main.WindowState);
+                main.WindowState = FormWindowState.Minimized; app.Open(); Equal(FormWindowState.Maximized, main.WindowState);
+                Equal(before, JsonSerializer.Serialize(app.Engine.Snapshot));
+            });
+            Test("app shortcut registration is opt in for tests and released on quit", () => {
+                var directory = Path.Combine(root, "shortcut-lifetime");
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
+                var api = new FakeHotKey(); app.EnableGlobalShortcut(api); app.EnableGlobalShortcut(api);
+                Equal(1, api.Registrations.Count); Is(app.Log.Recent().Any(x => x.Event == "shortcut.registered"));
+                app.Quit(); Equal(1, api.Unregistrations.Count);
+            });
+            Test("shortcut conflict reports status and leaves app usable", () => {
+                var directory = Path.Combine(root, "shortcut-conflict");
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
+                app.EnableGlobalShortcut(new FakeHotKey { Available = false }); app.Open();
+                var main = Application.OpenForms.OfType<MainWindow>().Single();
+                Is(Descendants(main).OfType<Label>().Any(x => x.Text.StartsWith("Ctrl+Alt+T is unavailable")));
+                Is(app.Log.Recent().Any(x => x.Event == "shortcut.unavailable")); Is(!app.Engine.Snapshot.Timer.IsRunning);
+            });
             Test("theme saves encrypted and logs only its enum", () => {
                 var directory = Path.Combine(root, "theme"); var store = new EncryptedStore(directory);
                 store.Save(new AppState { Theme = AppColorTheme.Glamour }); Equal(AppColorTheme.Glamour, store.Load().Theme);
@@ -587,6 +647,16 @@ internal static class Program
         public AppState Data = new(); public int Writes; public bool Fail;
         public AppState Load() => DataJson.Clone(Data);
         public void Save(AppState state) { if (Fail) throw new IOException("Simulated disk failure"); Data = DataJson.Clone(state); Writes++; }
+    }
+    private sealed class FakeHotKey : IHotKeyRegistration
+    {
+        public bool Available = true;
+        public readonly List<(nint Window, int Id, uint Modifiers, uint Key)> Registrations = [];
+        public readonly List<(nint Window, int Id)> Unregistrations = [];
+        public bool Register(nint window, int id, uint modifiers, uint key) {
+            Registrations.Add((window, id, modifiers, key)); return Available;
+        }
+        public bool Unregister(nint window, int id) { Unregistrations.Add((window, id)); return true; }
     }
     private sealed class Fixture
     {

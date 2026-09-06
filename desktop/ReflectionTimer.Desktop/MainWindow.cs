@@ -35,6 +35,7 @@ public sealed class MainWindow : Form
     private readonly ComboBox themeChoice = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "App theme" };
     private readonly ThemePreview themePreview = new();
     private readonly Label themeNotice = Widgets.Text("");
+    private readonly Label shortcutNotice = Widgets.Text("Ctrl+Alt+T is disabled in this isolated test session.");
     private readonly ComboBox mode = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox sheetName = new() { Width = 350 };
     private readonly CheckBox logging = new() { Text = "Record local diagnostic events", AutoSize = true };
@@ -116,6 +117,7 @@ public sealed class MainWindow : Form
 
         var settings = Widgets.Page(tabs, "Settings");
         settings.Controls.Add(Widgets.Text("Display"));
+        settings.Controls.Add(Widgets.Text("Keyboard shortcut")); settings.Controls.Add(shortcutNotice);
         settings.Controls.Add(Widgets.Text("App theme"));
         themeChoice.Items.AddRange(["Dark", "Light", "High Contrast", "Glamour"]);
         settings.Controls.Add(themeChoice); settings.Controls.Add(themePreview); settings.Controls.Add(themeNotice);
@@ -208,6 +210,13 @@ public sealed class MainWindow : Form
         AppTheme.Apply(this);
     }
     public void FocusHours() { if (tabs.SelectedIndex == 0) duration.FocusHours(); }
+    public void SetShortcutStatus(bool available)
+    {
+        shortcutNotice.Text = available ? "Ctrl+Alt+T · focus Reflection Timer from any app, including when minimized or hidden in the tray. The app must be running."
+            : "Ctrl+Alt+T is unavailable. Another app may have reserved it. Close that app and reopen Reflection Timer to try again. The timer still works normally.";
+        shortcutNotice.ForeColor = available ? Widgets.Muted : AppTheme.Warning;
+        if (!available) SetStatus("Ctrl+Alt+T could not be registered. See Settings → Keyboard shortcut.", true);
+    }
     private static int PopupPositionIndex(ReflectionPopupPosition position) => Enum.IsDefined(position) ? (int)position : 0;
     private void RenderThemeChoice(AppColorTheme theme)
     {

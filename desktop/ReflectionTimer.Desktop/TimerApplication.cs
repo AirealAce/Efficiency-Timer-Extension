@@ -16,6 +16,7 @@ public sealed class TimerApplication : ApplicationContext
     private readonly EventWaitHandle showRequest;
     private readonly HashSet<Guid> postponed = [];
     private ReflectionWindow? reflection;
+    private GlobalShortcut? focusShortcut;
     private int syncing;
     private long lastSync;
     private bool quitting;
@@ -48,7 +49,26 @@ public sealed class TimerApplication : ApplicationContext
         if (store.RecoveryNotice is not null) ShowError(store.RecoveryNotice);
     }
     public void OpenUnlessTray(bool trayOnly) { if (!trayOnly || !Engine.Snapshot.ExtensionDisabledConfirmed) Open(); }
-    public void Open() { main.Show(); main.WindowState = FormWindowState.Normal; main.BringToFront(); main.Activate(); main.FocusHours(); }
+    public void Open()
+    {
+        if (quitting || main.IsDisposed) return;
+        WindowActivation.Focus(main);
+        if (main.Enabled) main.FocusHours();
+    }
+    public void EnableGlobalShortcut(IHotKeyRegistration? registration = null)
+    {
+        if (quitting || focusShortcut is not null) return;
+        try {
+            focusShortcut = new GlobalShortcut(() => {
+                if (quitting) return;
+                Log.Record("shortcut.used"); Open();
+            }, registration);
+        }
+        catch { Log.Record("error.unexpected"); }
+        var available = focusShortcut?.IsRegistered == true;
+        Log.Record(available ? "shortcut.registered" : "shortcut.unavailable");
+        main.SetShortcutStatus(available);
+    }
     public void Ui(Action action)
     {
         if (quitting || main.IsDisposed) return;
@@ -133,7 +153,7 @@ public sealed class TimerApplication : ApplicationContext
             "Quit Reflection Timer", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         if (reflection is not null && !reflection.PersistDraft()) return;
         Log.Record("app.exiting");
-        quitting = true; pulse.Stop(); tray.Visible = false;
+        quitting = true; focusShortcut?.Dispose(); pulse.Stop(); tray.Visible = false;
         reflection?.Dispose(); main.AllowExit = true; main.Close(); ExitThread();
     }
     public async Task PlayAlertSound(int volume, bool preview = false)
@@ -154,7 +174,7 @@ public sealed class TimerApplication : ApplicationContext
     {
         if (disposing) {
             quitting = true; SystemEvents.PowerModeChanged -= PowerChanged; SystemEvents.SessionSwitch -= SessionChanged;
-            pulse.Dispose(); tray.Dispose(); reflection?.Dispose(); main.Dispose(); Sheets.Dispose(); Sounds.Dispose();
+            focusShortcut?.Dispose(); pulse.Dispose(); tray.Dispose(); reflection?.Dispose(); main.Dispose(); Sheets.Dispose(); Sounds.Dispose();
         }
         base.Dispose(disposing);
     }

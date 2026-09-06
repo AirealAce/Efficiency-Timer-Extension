@@ -63,7 +63,8 @@ public sealed class DiagnosticLog
         "schedule.saved", "schedule.removed", "prompt.test", "prompt.shown", "prompt.later", "prompt.draftSaved", "prompt.skipped",
         "reflection.queued", "upload.started", "upload.sent", "upload.needsReview", "upload.recovered", "upload.retryRequested",
         "upload.confirmedByUser", "settings.saved", "connection.checked", "issue.marked", "error.storage", "error.unexpected",
-        "sound.changed", "sound.preview", "sound.played", "sound.fallback", "sound.muted", "sound.stopped", "sound.failed", "display.changed", "theme.changed"
+        "sound.changed", "sound.preview", "sound.played", "sound.fallback", "sound.muted", "sound.stopped", "sound.failed", "display.changed", "theme.changed",
+        "shortcut.registered", "shortcut.unavailable", "shortcut.used"
     };
     public bool Enabled { get; set; } = true;
     public bool StorageAvailable { get; private set; } = true;
@@ -91,7 +92,7 @@ public sealed class DiagnosticLog
     public IReadOnlyList<Activity> Recent() { lock (gate) { Prune(); return events.ToArray(); } }
     public void Clear() { lock (gate) { EncryptedStore.Write(path, new List<Activity>()); events = []; StorageAvailable = true; } }
     public object Report(AppState state) => new {
-        FormatVersion = 1, AppVersion = "3.4.0", ExportedAt = DateTimeOffset.Now,
+        FormatVersion = 1, AppVersion = "3.5.0", ExportedAt = DateTimeOffset.Now,
         Privacy = "No reflection text, drafts, connection credentials, browsing URLs, window titles, audio filenames/paths, or other-app activity.",
         CustomAlertSound = !string.IsNullOrEmpty(state.AlertSoundPath),
         PopupPosition = state.PopupPosition.ToString(),

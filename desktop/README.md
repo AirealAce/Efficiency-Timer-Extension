@@ -1,4 +1,4 @@
-# Reflection Timer Desktop 3.4.0
+# Reflection Timer Desktop 3.5.0
 
 A native Windows tray app for focus sessions, standalone reflection prompts, and the existing Google Sheets receiver. It does not need Chrome to stay open and does not collect browser activity. The extension source remains available as a fallback.
 
@@ -30,6 +30,7 @@ The installer runs tests, publishes a framework-dependent build, installs under 
 ## Using the app
 
 - Opening the Timer tab selects the Hours field. Typing hours clears the untouched 25-minute preset; minutes you explicitly edit are preserved.
+- **Ctrl+Alt+T** is a global shortcut that brings the running app's existing main window forward, including from the tray or a minimized state. It preserves the selected tab, maximized state, timer, and drafts; it does not start a session. On the Timer tab, Hours is selected as usual. An active modal dialog remains in front of its owner. The shortcut is released on Quit and does not launch a closed app. **Settings → Display → Keyboard shortcut** reports registration conflicts; close the conflicting app and reopen Reflection Timer to retry. It uses Windows' [RegisterHotKey API](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey) with repeat suppression, not a keyboard hook or keystroke logger.
 - Start, pause/resume, reset, auto-start next session, and sound level are available on the regular timer.
 - **Settings → Display → App theme** previews and saves Dark, Light, High Contrast, or Glamour for the next launch. Theme selection is independent of connection settings and does not upload anything.
 - **Settings → Display → Reflection popup position** offers Center (the default), Top left, Top right, Bottom left, and Bottom right. Changes save immediately and apply when a regular, scheduled, or test reflection window opens. The popup uses the monitor containing the mouse pointer at opening, respects its taskbar working area and display scaling, and leaves a small corner margin. An already-open reflection does not move while you type. Close it with **Later**, then reopen **Pending reflections** to apply a new position without losing its draft.
@@ -73,6 +74,8 @@ dotnet run --project ReflectionTimer.Tests -c Release
 dotnet build ReflectionTimer.Desktop -c Release
 dotnet run --project ReflectionTimer.Desktop -- --data-dir 'C:\path\to\isolated-test-data'
 ```
+
+Use `--no-global-shortcut` with an isolated `--data-dir` preview when testing alongside the installed app, so it does not compete for Ctrl+Alt+T. Routine tests use a fake hotkey registration and do not reserve a system shortcut. They verify the chord, repeat suppression, message routing, conflict handling, cleanup, and hidden/minimized/maximized window restoration.
 
 The Windows test runner covers deadlines, auto-start cutoffs (including exact-boundary and paused expiration), restart/sleep catch-up, independent schedules, transaction failures, draft/queue durability, ambiguous delivery, safe HTTP redirects, request contracts, encrypted storage recovery, diagnostic privacy, duration editing, shared repeat/cutoff controls, MP3 decoding/validation, default/custom sound selection, mute, cancellation, and fallback. Display tests cover all five placements, negative monitor coordinates, working-area margins, scaled geometry, small displays, legacy defaults, persistence, failed saves, and real reflection windows without moving open drafts. Theme tests cover all four palettes, text contrast, Windows accessibility priority, encrypted persistence, invalid/failed saves, passive previews, and preserving active windows and drafts. Run `dotnet run --project ReflectionTimer.Tests -c Release -- --theme-smoke Glamour` (or `Light` / `HighContrast`) for an isolated startup/control check under each native color mode. Routine tests do not emit audio or contact Google; audio output and HTTP are mocked. The existing extension/receiver tests remain runnable with `npm test` and `npm run check` at the repository root.
 
