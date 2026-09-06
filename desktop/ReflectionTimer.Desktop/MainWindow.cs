@@ -85,6 +85,9 @@ public sealed class MainWindow : Form
             else app.Engine.Start(duration.CommitSeconds(), repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil, lowTime.Selection);
             duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true);
         }), true);
+        // Enter in the regular duration editor starts/resumes through the same
+        // validation and options as Start. Repeated Enter must not pause it.
+        duration.SubmitRequested += () => { if (!app.Engine.Snapshot.Timer.IsRunning) start.PerformClick(); };
         timer.Controls.Add(Widgets.Row(start, Widgets.Button("Reset", (_, _) => Safe(() => { app.Engine.Reset(duration.Dirty ? duration.CommitSeconds() : null); duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true); }))));
         timer.Controls.Add(repeat); timer.Controls.Add(lowTime); timer.Controls.Add(volume);
         lowTime.UserChanged += () => {

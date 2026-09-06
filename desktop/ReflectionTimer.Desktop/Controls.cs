@@ -84,6 +84,7 @@ public sealed class DurationControl : UserControl
     private bool assigning, untouched;
     public bool Dirty { get; private set; }
     public event Action? UserChanged;
+    public event Action? SubmitRequested;
     private static DurationPartInput Number() => new() { Width = 120, Font = new("Segoe UI", 15), TextAlign = HorizontalAlignment.Center };
     public DurationControl()
     {
@@ -149,6 +150,7 @@ public sealed class DurationControl : UserControl
     {
         if (keyData != Keys.Enter) return base.ProcessCmdKey(ref msg, keyData);
         Normalize();
+        SubmitRequested?.Invoke();
         foreach (var input in new[] { hours, minutes, seconds }) if (input.ContainsFocus) input.Select(0, input.Text.Length);
         return true;
     }

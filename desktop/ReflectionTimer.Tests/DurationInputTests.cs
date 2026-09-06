@@ -6,6 +6,7 @@ internal static partial class Program
 {
     private static void TestDurationInputs()
     {
+        TestDurationEnter();
         foreach (var (h, m, s, total, nh, nm, ns) in new[] {
             (1, 20, 100, 4900, 1, 21, 40), (1, 61, 59, 7319, 2, 1, 59),
             (0, 120, 120, 7320, 2, 2, 0), (0, 0, 3600, 3600, 1, 0, 0),
@@ -66,6 +67,77 @@ internal static partial class Program
             Descendants(main).OfType<Button>().Single(x => x.Text == "Add session").PerformClick();
             Equal(7320, app.Engine.Snapshot.Schedules.Single().DurationSeconds);
             tabs.SelectedIndex = 0; regular[0].Text = new string('9', 100); main.RenderClock(); // No exception or clipped preview.
+        });
+    }
+
+    private static void TestDurationEnter()
+    {
+        // Exercise keyboard preprocessing on each native field, including the
+        // themed wrappers, so Enter must actually bubble to the duration editor.
+        static void Enter(DurationPartInput input)
+        {
+            input.Focus();
+            var message = Message.Create(input.Handle, 0x0100, (nint)Keys.Enter, 0);
+            Is(input.PreProcessMessage(ref message));
+        }
+        static void WithWindow(TimerState timer, Action<TimerApplication, MainWindow, DurationControl[]> test)
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ReflectionTimer-QA-enter-" + Guid.NewGuid().ToString("N"));
+            var store = new EncryptedStore(directory);
+            store.Save(new AppState { ExtensionDisabledConfirmed = true, Timer = timer });
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var app = new TimerApplication(store, directory, show, updateStartup: _ => { });
+            using var main = new MainWindow(app, _ => { }); main.Render(app.Engine.Snapshot); main.Show();
+            Descendants(main).OfType<TabControl>().Single().SelectedIndex = 0;
+            test(app, main, Descendants(main).OfType<DurationControl>().ToArray());
+        }
+        foreach (var field in new[] { 0, 1, 2 })
+            Test($"Enter in duration field {field} normalizes and starts with current options", () => {
+                var timer = new TimerState { DurationSeconds = 15, RemainingSeconds = 15, Volume = 0, AutoRestart = true,
+                    AutoRestartUntil = DateTimeOffset.Now.AddHours(3).ToUnixTimeMilliseconds() / 60000 * 60000,
+                    LowTime = new() { Enabled = true, ThresholdSeconds = 30 } };
+                WithWindow(timer, (app, main, editors) => {
+                    var parts = Descendants(editors[0]).OfType<DurationPartInput>().ToArray();
+                    parts[0].Text = "1"; parts[1].Text = "20"; parts[2].Text = "100";
+                    Enter(parts[field]);
+                    var started = app.Engine.Snapshot.Timer;
+                    Is(started.IsRunning); Equal(4900, started.DurationSeconds);
+                    Equal("1", parts[0].Text); Equal("21", parts[1].Text); Equal("40", parts[2].Text);
+                    Is(started.AutoRestart); Equal(timer.AutoRestartUntil, started.AutoRestartUntil);
+                    Equal(0, started.Volume); Equal(timer.LowTime, started.LowTime);
+                    Enter(parts[field]); // A duplicate duration submission must not toggle Pause.
+                    Is(app.Engine.Snapshot.Timer.IsRunning); Equal(started.EndTime, app.Engine.Snapshot.Timer.EndTime);
+                });
+            });
+        Test("duration Enter resumes unchanged paused time and starts an edited duration", () => {
+            WithWindow(new() { DurationSeconds = 600, RemainingSeconds = 30, Volume = 0 }, (app, main, editors) => {
+                var parts = Descendants(editors[0]).OfType<DurationPartInput>().ToArray();
+                Enter(parts[0]); Is(app.Engine.Snapshot.Timer.IsRunning);
+                Equal(600, app.Engine.Snapshot.Timer.DurationSeconds); Equal(30, TimerEngine.Remaining(app.Engine.Snapshot.Timer, app.Engine.Now));
+                app.Engine.Pause(); main.Render(app.Engine.Snapshot);
+                parts[1].Text = "0"; parts[2].Text = "100"; Enter(parts[2]);
+                Is(app.Engine.Snapshot.Timer.IsRunning); Equal(100, app.Engine.Snapshot.Timer.DurationSeconds);
+            });
+        });
+        Test("duration Enter reports invalid values without starting or losing the draft", () => {
+            WithWindow(new() { DurationSeconds = 15, RemainingSeconds = 15, Volume = 0 }, (app, main, editors) => {
+                var parts = Descendants(editors[0]).OfType<DurationPartInput>().ToArray();
+                foreach (var invalid in new[] { "0", "31536001", "-1", new string('9', 120) }) {
+                    parts[2].Text = invalid; var revision = main.StatusRevision; Enter(parts[2]);
+                    Is(!app.Engine.Snapshot.Timer.IsRunning); Equal(15, app.Engine.Snapshot.Timer.DurationSeconds);
+                    Is(main.StatusRevision > revision); Equal(invalid, parts[2].Text);
+                }
+            });
+        });
+        Test("Enter in scheduling normalizes without saving or starting a future session", () => {
+            WithWindow(new() { DurationSeconds = 15, RemainingSeconds = 15, Volume = 0 }, (app, main, editors) => {
+                Descendants(main).OfType<TabControl>().Single().SelectedIndex = 1;
+                var parts = Descendants(editors[1]).OfType<DurationPartInput>().ToArray();
+                parts[0].Text = "0"; parts[1].Text = "120"; parts[2].Text = "100"; Enter(parts[2]);
+                Equal(7300, editors[1].Seconds); Equal("2", parts[0].Text); Equal("1", parts[1].Text); Equal("40", parts[2].Text);
+                Is(!app.Engine.Snapshot.Timer.IsRunning); Equal(15, app.Engine.Snapshot.Timer.DurationSeconds);
+                Equal(0, app.Engine.Snapshot.Schedules.Count);
+            });
         });
     }
 }
