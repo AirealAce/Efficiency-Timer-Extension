@@ -57,11 +57,150 @@ internal static class Program
         Test("unknown data version not overwritten", () => { var f = new Fixture(); f.Store.Data = new AppState { FormatVersion = 99 }; Throws<InvalidDataException>(() => f.Restart()); Equal(0, f.Store.Writes); });
         foreach (var url in new[] { "https://script.google.com/home/projects/abc/edit", "http://script.google.com/macros/s/a/exec", "https://evil.test/macros/s/a/exec", "https://user@script.google.com/macros/s/a/exec", "https://script.google.com:444/macros/s/a/exec" }) Test("reject endpoint " + url, () => Is(SheetsClient.Validate(Connection with { WebAppUrl = url }) is not null));
         Test("valid connection and validation failures", () => { Is(SheetsClient.Validate(Connection) is null); Is(SheetsClient.Validate(Connection with { ApiToken = "short" }) is not null); Is(SheetsClient.Validate(Connection with { SheetUrl = "https://evil.test/sheet" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "oops" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "fixed", SheetName = "" }) is not null); });
+        TestAutoRestartCutoff();
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
         TestTheme();
         Console.WriteLine($"\n{passed} passed; {failed} failed.");
         return failed == 0 ? 0 : 1;
+    }
+
+    private static void TestAutoRestartCutoff()
+    {
+        Test("cutoff enables repeat and survives a restart", () => {
+            var f = new Fixture(); var until = f.Engine.Now + 60000;
+            f.Engine.Start(20, false, 35, until);
+            Is(f.Engine.Snapshot.Timer.AutoRestart); Equal<long?>(until, f.Restart().Snapshot.Timer.AutoRestartUntil);
+            f.Engine.SetPreferences(false, 40, until); Is(f.Engine.Snapshot.Timer.AutoRestart);
+        });
+        Test("mid-session cutoff disables repeat without changing countdown", () => {
+            var f = new Fixture(); f.Engine.Start(100, true, 0, f.Engine.Now + 20000);
+            var deadline = f.Engine.Snapshot.Timer.EndTime; var events = new List<Activity>(); f.Engine.ActivityRecorded += events.Add;
+            f.Move(20); f.Engine.Advance(); var t = f.Engine.Snapshot.Timer;
+            Is(t.IsRunning); Is(!t.AutoRestart); Is(t.AutoRestartUntil is null); Equal(deadline, t.EndTime);
+            Equal(80, TimerEngine.Remaining(t, f.Engine.Now)); Equal(0, f.Engine.Snapshot.Prompts.Count);
+            Equal("timer.autoRestartDisabled", events.Single().Event);
+            var writes = f.Store.Writes; f.Engine.Advance(); Equal(writes, f.Store.Writes);
+            f.Move(80); f.Engine.Advance(); Is(!f.Engine.Snapshot.Timer.IsRunning); Equal(1, f.Engine.Snapshot.Prompts.Count);
+        });
+        Test("completion exactly at cutoff does not start another session", () => {
+            var f = new Fixture(); f.Engine.Start(10, true, 0, f.Engine.Now + 10000);
+            f.Move(10); f.Engine.Advance(); f.Engine.Advance(); Is(!f.Engine.Snapshot.Timer.IsRunning);
+            Is(!f.Engine.Snapshot.Timer.AutoRestart); Equal(1, f.Engine.Snapshot.Prompts.Count);
+        });
+        Test("repeating retains absolute cutoff across cycles", () => {
+            var f = new Fixture(); var until = f.Engine.Now + 25000; f.Engine.Start(10, true, 17, until);
+            f.Move(10); f.Engine.Advance(); Equal<long?>(until, f.Engine.Snapshot.Timer.AutoRestartUntil);
+            f.Move(10); f.Engine.Advance(); Equal<long?>(until, f.Engine.Snapshot.Timer.AutoRestartUntil);
+            f.Move(5); f.Engine.Advance(); Is(f.Engine.Snapshot.Timer.IsRunning); Is(!f.Engine.Snapshot.Timer.AutoRestart);
+            f.Move(5); f.Engine.Advance(); Equal(3, f.Engine.Snapshot.Prompts.Count); Is(!f.Engine.Snapshot.Timer.IsRunning);
+        });
+        Test("paused and idle cutoffs expire without starting a session", () => {
+            foreach (var paused in new[] { false, true }) {
+                var f = new Fixture(); var until = f.Engine.Now + 10000;
+                if (paused) { f.Engine.Start(60, true, 0, until); f.Move(2); f.Engine.Pause(); }
+                else f.Engine.SetPreferences(false, 0, until);
+                var remainder = f.Engine.Snapshot.Timer.RemainingSeconds;
+                f.Move(10); f.Engine.Advance(); Is(!f.Engine.Snapshot.Timer.AutoRestart); Is(!f.Engine.Snapshot.Timer.IsRunning);
+                Equal(remainder, f.Engine.Snapshot.Timer.RemainingSeconds); Equal(0, f.Engine.Snapshot.Prompts.Count);
+            }
+        });
+        Test("pause resume and reset cannot revive an expired cutoff before tick", () => {
+            foreach (var action in new[] { "pause", "resume", "reset" }) {
+                var f = new Fixture(); f.Engine.Start(60, true, 0, f.Engine.Now + 10000);
+                if (action == "resume") f.Engine.Pause();
+                f.Move(10);
+                if (action == "pause") f.Engine.Pause(); else if (action == "resume") f.Engine.Resume(); else f.Engine.Reset();
+                Is(!f.Engine.Snapshot.Timer.AutoRestart); Is(f.Engine.Snapshot.Timer.AutoRestartUntil is null);
+            }
+        });
+        Test("pause and resume before cutoff retain same absolute deadline", () => {
+            var f = new Fixture(); var until = f.Engine.Now + 120000;
+            f.Engine.Start(60, true, 0, until); f.Move(10); f.Engine.Pause(); f.Move(10); f.Engine.Resume();
+            Equal<long?>(until, f.Engine.Snapshot.Timer.AutoRestartUntil); Equal(50, TimerEngine.Remaining(f.Engine.Snapshot.Timer, f.Engine.Now));
+        });
+        Test("sleep and process restart after cutoff do not repeat", () => {
+            var f = new Fixture(); f.Engine.Start(10, true, 0, f.Engine.Now + 60000);
+            f.Move(86400); var engine = f.Restart(); engine.Advance();
+            Is(!engine.Snapshot.Timer.AutoRestart); Is(!engine.Snapshot.Timer.IsRunning); Equal(1, engine.Snapshot.Prompts.Count);
+        });
+        Test("schedule saves edits restores and applies its own cutoff", () => {
+            var f = new Fixture(); var until = f.Engine.Now + 120000;
+            var id = f.Engine.SaveSchedule(null, f.Time.AddSeconds(10), 30, false, 27, until);
+            Is(f.Engine.Snapshot.Schedules[0].AutoRestart);
+            f.Engine.SaveSchedule(id, f.Time.AddSeconds(20), 40, false, 37, until + 1000);
+            var saved = f.Restart().Snapshot.Schedules.Single(); Equal(id, saved.Id); Equal<long?>(until + 1000, saved.AutoRestartUntil);
+            f.Move(20); f.Engine.Advance(); var t = f.Engine.Snapshot.Timer;
+            Equal<long?>(saved.AutoRestartUntil, t.AutoRestartUntil); Is(t.AutoRestart); Equal(40, t.DurationSeconds); Equal(37, t.Volume);
+        });
+        Test("late scheduled start runs once when its cutoff already passed", () => {
+            var f = new Fixture(); f.Engine.SaveSchedule(null, f.Time.AddSeconds(10), 30, true, 0, f.Engine.Now + 20000);
+            f.Move(25); f.Engine.Advance(); Is(f.Engine.Snapshot.Timer.IsRunning); Is(!f.Engine.Snapshot.Timer.AutoRestart);
+            Is(f.Engine.Snapshot.Timer.AutoRestartUntil is null); Equal(30, TimerEngine.Remaining(f.Engine.Snapshot.Timer, f.Engine.Now));
+            f.Move(30); f.Engine.Advance(); Is(!f.Engine.Snapshot.Timer.IsRunning); Equal(1, f.Engine.Snapshot.Prompts.Count);
+        });
+        Test("live cutoff leaves independent future scheduled repeat intact", () => {
+            var f = new Fixture(); f.Engine.Start(10, true, 0, f.Engine.Now + 10000);
+            var until = f.Engine.Now + 50000; f.Engine.SaveSchedule(null, f.Time.AddSeconds(20), 30, true, 0, until);
+            f.Move(10); f.Engine.Advance(); Equal(1, f.Engine.Snapshot.Schedules.Count);
+            f.Move(10); f.Engine.Advance(); Is(f.Engine.Snapshot.Timer.AutoRestart); Equal<long?>(until, f.Engine.Snapshot.Timer.AutoRestartUntil);
+        });
+        Test("scheduled takeover at old cutoff applies new appointment options", () => {
+            var f = new Fixture(); f.Engine.Start(10, true, 0, f.Engine.Now + 10000);
+            f.Add(10, 30, true); f.Move(10); f.Engine.Advance();
+            Is(f.Engine.Snapshot.Timer.AutoRestart); Is(f.Engine.Snapshot.Timer.AutoRestartUntil is null);
+            Equal(30, f.Engine.Snapshot.Timer.DurationSeconds); Equal(1, f.Engine.Snapshot.Prompts.Count);
+        });
+        Test("removing cutoff keeps repeat while disabling repeat clears cutoff", () => {
+            var f = new Fixture(); f.Engine.Start(10, true, 0, f.Engine.Now + 60000);
+            f.Engine.SetPreferences(true, 0); Is(f.Engine.Snapshot.Timer.AutoRestart); Is(f.Engine.Snapshot.Timer.AutoRestartUntil is null);
+            f.Engine.SetPreferences(false, 0); Is(!f.Engine.Snapshot.Timer.AutoRestart);
+        });
+        Test("invalid past and out of range cutoffs reject atomically", () => {
+            var f = new Fixture();
+            foreach (var until in new[] { f.Engine.Now - 1, f.Engine.Now, long.MaxValue }) {
+                Throws<ArgumentException>(() => f.Engine.Start(10, true, 0, until));
+                Throws<ArgumentException>(() => f.Engine.SetPreferences(true, 0, until));
+                Throws<ArgumentException>(() => f.Engine.SaveSchedule(null, f.Time.AddSeconds(10), 10, true, 0, until));
+            }
+            Throws<ArgumentException>(() => f.Engine.SaveSchedule(null, f.Time.AddSeconds(10), 10, true, 0, f.Engine.Now + 10000));
+            Equal(0, f.Store.Writes);
+        });
+        Test("cutoff import normalizes repeat and invalid batch is atomic", () => {
+            var f = new Fixture(); var start = f.Engine.Now + 10000; var until = start + 60000;
+            f.Engine.ImportSchedules([new(Guid.NewGuid(), start, 30, false, 0, until)]);
+            Is(f.Engine.Snapshot.Schedules[0].AutoRestart); Equal<long?>(until, f.Engine.Snapshot.Schedules[0].AutoRestartUntil);
+            Throws<ArgumentException>(() => f.Engine.ImportSchedules([new(Guid.NewGuid(), start + 1000, 30, true, 0), new(Guid.NewGuid(), start + 2000, 30, true, 0, start)]));
+            Equal(1, f.Engine.Snapshot.Schedules.Count);
+        });
+        Test("failed cutoff save stays atomic and next tick retries", () => {
+            var f = new Fixture(); f.Engine.Start(10, true, 0, f.Engine.Now + 10000); f.Move(10);
+            f.Store.Fail = true; Throws<IOException>(() => f.Engine.Advance());
+            Is(f.Engine.Snapshot.Timer.AutoRestart); Equal(0, f.Engine.Snapshot.Prompts.Count);
+            f.Store.Fail = false; f.Engine.Advance(); Is(!f.Engine.Snapshot.Timer.AutoRestart); Equal(1, f.Engine.Snapshot.Prompts.Count);
+        });
+        Test("old JSON defaults to unlimited repeat without data migration", () => {
+            var old = JsonSerializer.Deserialize<AppState>("""{"Timer":{"AutoRestart":true},"Schedules":[{"Id":"00000000-0000-0000-0000-000000000001","StartTime":2000000000000,"DurationSeconds":10,"AutoRestart":true,"Volume":10}]}""", DataJson.Options)!;
+            Is(old.Timer.AutoRestart); Is(old.Timer.AutoRestartUntil is null); Is(old.Schedules[0].AutoRestartUntil is null); Equal(1, old.FormatVersion);
+        });
+        Test("cutoff checkbox enables repeat in one event and can be cleared independently", () => {
+            using var control = new AutoRestartOptions(); var boxes = Descendants(control).OfType<CheckBox>().ToArray();
+            var input = Descendants(control).OfType<SessionStartInput>().Single(); var changed = 0; control.UserChanged += () => changed++;
+            boxes[1].Checked = true; Is(control.AutoRestart); Is(control.AutoRestartUntil > DateTimeOffset.Now.ToUnixTimeMilliseconds()); Is(input.Enabled); Equal(1, changed);
+            boxes[1].Checked = false; Is(control.AutoRestart); Is(control.AutoRestartUntil is null); Is(!input.Enabled); Equal(2, changed);
+            boxes[1].Checked = true; boxes[0].Checked = false;
+            Is(!boxes[1].Checked); Is(!control.AutoRestart); Is(control.AutoRestartUntil is null); Equal(4, changed);
+        });
+        Test("schedule cutoff default follows future start and model load is quiet", () => {
+            var start = DateTime.Now.AddDays(3); using var control = new AutoRestartOptions(() => start);
+            var changed = 0; control.UserChanged += () => changed++;
+            Descendants(control).OfType<CheckBox>().Last().Checked = true;
+            Is(control.AutoRestartUntil > new DateTimeOffset(start).ToUnixTimeMilliseconds()); Equal(1, changed);
+            var until = control.AutoRestartUntil; control.LoadOptions(true, until, true); Equal(1, changed); Equal(until, control.AutoRestartUntil);
+            var input = Descendants(control).OfType<SessionStartInput>().Single(); input.Text = "draft";
+            control.LoadOptions(true, until); Equal("draft", input.Text); Throws<ArgumentException>(() => _ = control.AutoRestartUntil);
+            control.LoadOptions(false, null); Is(!control.AutoRestart); Is(control.AutoRestartUntil is null); Equal(1, changed);
+        });
     }
 
     private static async Task RunHttpTests()
@@ -82,6 +221,13 @@ internal static class Program
         var root = Path.Combine(Path.GetTempPath(), "ReflectionTimer-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try {
+            Test("desktop startup constructs both timer and scheduling forms", () => {
+                var directory = Path.Combine(root, "startup");
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
+                app.OpenUnlessTray(false);
+                Is(!app.Engine.Snapshot.Timer.IsRunning);
+            });
             Test("encrypted state round-trip without plaintext credentials", () => {
                 var store = new EncryptedStore(Path.Combine(root, "roundtrip")); var state = new AppState { Connection = Connection };
                 state.Prompts.Add(new(Guid.NewGuid(), 0, 1, 0, true, "private-draft-sentinel")); store.Save(state);

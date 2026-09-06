@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ReflectionTimer</AssemblyName>
-    <Version>3.0.1</Version>
+    <Version>3.1.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>../../favicon.ico</ApplicationIcon>
   </PropertyGroup>

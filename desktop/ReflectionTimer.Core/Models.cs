@@ -15,10 +15,11 @@ public record TimerState
     public int RemainingSeconds { get; init; } = 1500;
     public long? EndTime { get; init; }
     public bool AutoRestart { get; init; }
+    public long? AutoRestartUntil { get; init; }
     public int Volume { get; init; } = 50;
 }
 
-public record ScheduledSession(Guid Id, long StartTime, int DurationSeconds, bool AutoRestart, int Volume);
+public record ScheduledSession(Guid Id, long StartTime, int DurationSeconds, bool AutoRestart, int Volume, long? AutoRestartUntil = null);
 public record ReflectionPrompt(Guid Id, long CompletedAt, int DurationSeconds, int Volume, bool IsTest, string Draft = "");
 
 public record ConnectionSettings

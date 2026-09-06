@@ -1,4 +1,4 @@
-# Reflection Timer Desktop 3.0.1
+# Reflection Timer Desktop 3.1.0
 
 A native Windows tray app for focus sessions, standalone reflection prompts, and the existing Google Sheets receiver. It does not need Chrome to stay open and does not collect browser activity. The extension source remains available as a fallback.
 
@@ -32,6 +32,8 @@ The installer runs tests, publishes a framework-dependent build, installs under 
 - Each scheduled session has its own local start date/time (minute precision), duration, repeat option, and sound level. Up to 50 one-time appointments are retained. A due appointment takes over the current timer. Pausing/resetting does not cancel future appointments.
 - After sleep or downtime, only the latest missed appointment starts with its full duration. Earlier missed appointments are skipped, and future ones remain. A completed live session retains its reflection; an unfinished timer replaced by a scheduled appointment does not generate one.
 - Auto-start repeats the duration immediately after completion, independently of the reflection window. After a long sleep it resumes once, rather than generating a flood of missed sessions.
+- **Disable auto-start at** sits below the auto-start option on both the Timer and scheduled-session forms. Checking it automatically enables auto-start. Enter a local cutoff date/time (minute precision); on the Timer, edits save when you leave the field or press Enter. The cutoff disables repeating, but lets the current session finish and show its reflection. It is an absolute, one-time cutoff that survives pause/resume, sleep, and app restarts, not a daily recurring rule. Unchecking the cutoff leaves auto-start on indefinitely; turning off auto-start also clears its cutoff.
+- Each scheduled appointment has its own optional cutoff, which must be after its start. A cutoff does not cancel independent future appointments. If a missed appointment starts after its own cutoff, its initial session still runs once, with repeating disabled. Existing timers and schedules keep their current settings without a cutoff until you choose one.
 - The window X hides the app to the tray. Double-click the tray icon to reopen it; right-click for pending reflections, an issue marker, or Quit. Quitting stops alerts until the app is opened again. Windows sleep, shutdown, lock-screen restrictions, and notification settings can delay alerts; this app does not wake a sleeping computer.
 - A reflection is a separate Windows window, not injected into a webpage. Drafts save locally after a short pause while typing and on close. **Later** retains the draft. **Skip** discards that prompt. **Save & send** first commits locally and then attempts Sheets delivery. Ctrl+Enter saves.
 - **Test reflection prompt** always sends to the existing tab named **test**, never `Temp`, `Template`, or a dated tab. The receiver reports an error if `test` is missing.
@@ -66,7 +68,7 @@ dotnet build ReflectionTimer.Desktop -c Release
 dotnet run --project ReflectionTimer.Desktop -- --data-dir 'C:\path\to\isolated-test-data'
 ```
 
-The package-free Windows test runner covers deadlines, restart/sleep catch-up, independent schedules, transaction failures, draft/queue durability, ambiguous delivery, safe HTTP redirects, request contracts, encrypted storage recovery, diagnostic privacy, and duration editing. It never contacts Google; HTTP is mocked. The existing extension/receiver tests remain runnable with `npm test` and `npm run check` at the repository root.
+The package-free Windows test runner covers deadlines, auto-start cutoffs (including exact-boundary and paused expiration), restart/sleep catch-up, independent schedules, transaction failures, draft/queue durability, ambiguous delivery, safe HTTP redirects, request contracts, encrypted storage recovery, diagnostic privacy, duration editing, and shared repeat/cutoff controls. It never contacts Google; HTTP is mocked. The existing extension/receiver tests remain runnable with `npm test` and `npm run check` at the repository root.
 
 For explicit connection provisioning, with the app closed, the executable accepts `--import-connection` with a `ConnectionSettings` JSON object through **stdin**. It validates and encrypts the settings without logging the token. Never pass secrets as command-line arguments or commit a provisioning file. `--check-connection` performs a read-only ping and prints a credential-free result. Invoke the DLL with `dotnet ReflectionTimer.dll ...` for reliable console piping. `--tray` starts without the main window once migration is confirmed.
 

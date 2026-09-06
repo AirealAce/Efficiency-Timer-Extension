@@ -59,7 +59,7 @@ public sealed class DiagnosticLog
     private List<Activity> events = [];
     private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal) {
         "app.started", "app.exiting", "app.activated", "app.deactivated", "app.hidden", "system.resume", "system.session",
-        "timer.started", "timer.paused", "timer.resumed", "timer.reset", "timer.preferences", "timer.deadline",
+        "timer.started", "timer.paused", "timer.resumed", "timer.reset", "timer.preferences", "timer.deadline", "timer.autoRestartDisabled",
         "schedule.saved", "schedule.removed", "prompt.test", "prompt.shown", "prompt.later", "prompt.draftSaved", "prompt.skipped",
         "reflection.queued", "upload.started", "upload.sent", "upload.needsReview", "upload.recovered", "upload.retryRequested",
         "upload.confirmedByUser", "settings.saved", "connection.checked", "issue.marked", "error.storage", "error.unexpected"
@@ -90,7 +90,7 @@ public sealed class DiagnosticLog
     public IReadOnlyList<Activity> Recent() { lock (gate) { Prune(); return events.ToArray(); } }
     public void Clear() { lock (gate) { EncryptedStore.Write(path, new List<Activity>()); events = []; StorageAvailable = true; } }
     public object Report(AppState state) => new {
-        FormatVersion = 1, AppVersion = "3.0.1", ExportedAt = DateTimeOffset.Now,
+        FormatVersion = 1, AppVersion = "3.1.0", ExportedAt = DateTimeOffset.Now,
         Privacy = "No reflection text, drafts, connection credentials, browsing URLs, window titles, or other-app activity.",
         Enabled, StorageAvailable, Events = Recent(), Timer = state.Timer,
         Schedules = state.Schedules, PendingPrompts = state.Prompts.Count,

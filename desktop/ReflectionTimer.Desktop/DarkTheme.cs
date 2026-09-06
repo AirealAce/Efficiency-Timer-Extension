@@ -19,6 +19,11 @@ public static class DarkTheme
 
     public static void Initialize()
     {
+        // Bootstrap once before querying accessibility colors: that query can
+        // create a WinForms helper window, after which these setup calls fail.
+        // Tests use this same startup sequence to catch ordering regressions.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        ApplicationConfiguration.Initialize();
         // The .NET 10 API is still marked experimental. Opt in only here, before
         // any controls exist, without altering the user's Windows theme settings.
 #pragma warning disable WFO5001

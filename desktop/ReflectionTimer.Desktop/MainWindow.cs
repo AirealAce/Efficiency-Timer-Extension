@@ -14,13 +14,13 @@ public sealed class MainWindow : Form
     private readonly Label migration = Widgets.Text("");
     private readonly Label pending = Widgets.Text("");
     private readonly DurationControl duration = new();
-    private readonly CheckBox repeat = new() { Text = "Auto-start next session", AutoSize = true, Margin = new(0, 8, 0, 8) };
+    private readonly AutoRestartOptions repeat = new();
     private readonly VolumeControl volume = new();
     private readonly Button start;
-    private readonly DataGridView scheduleGrid = Widgets.Grid("Start time", "Duration", "Auto-start next", "Sound");
+    private readonly DataGridView scheduleGrid = Widgets.Grid("Start time", "Duration", "Auto-start", "Auto-start cutoff", "Sound");
     private readonly SessionStartInput scheduledStart = new() { Width = 300, Value = DateTime.Now.AddHours(1) };
     private readonly DurationControl scheduledDuration = new();
-    private readonly CheckBox scheduledRepeat = new() { Text = "Auto-start next session", AutoSize = true };
+    private readonly AutoRestartOptions scheduledRepeat;
     private readonly VolumeControl scheduledVolume = new();
     private readonly Label scheduleHeading = Widgets.Text("Add a scheduled session");
     private readonly Button saveSchedule;
@@ -45,6 +45,7 @@ public sealed class MainWindow : Form
     public MainWindow(TimerApplication app)
     {
         this.app = app;
+        scheduledRepeat = new(() => scheduledStart.Value);
         Text = "Reflection Timer Desktop"; Size = new(940, 810); MinimumSize = new(880, 700);
         StartPosition = FormStartPosition.CenterScreen; Font = new("Segoe UI", 10); BackColor = DarkTheme.Background;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information;
@@ -57,14 +58,17 @@ public sealed class MainWindow : Form
             if (!app.Engine.Snapshot.ExtensionDisabledConfirmed) throw new InvalidOperationException("Turn off the Chrome extension, then confirm the switch in Settings.");
             var current = app.Engine.Snapshot.Timer;
             if (current.IsRunning) app.Engine.Pause();
-            else if (!duration.Dirty && current.RemainingSeconds > 0 && current.RemainingSeconds < current.DurationSeconds) app.Engine.Resume();
-            else app.Engine.Start(duration.Seconds, repeat.Checked, volume.Value);
+            else if (!duration.Dirty && current.RemainingSeconds > 0 && current.RemainingSeconds < current.DurationSeconds) {
+                app.Engine.SetPreferences(repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
+                app.Engine.Resume();
+            }
+            else app.Engine.Start(duration.Seconds, repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
             duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true);
         }), true);
         timer.Controls.Add(Widgets.Row(start, Widgets.Button("Reset", (_, _) => Safe(() => { app.Engine.Reset(duration.Dirty ? duration.Seconds : null); duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true); }))));
         timer.Controls.Add(repeat); timer.Controls.Add(volume);
-        repeat.CheckedChanged += (_, _) => { if (!binding) Safe(() => app.Engine.SetPreferences(repeat.Checked, volume.Value)); };
-        volume.UserChanged += () => { if (!binding) Safe(() => app.Engine.SetPreferences(repeat.Checked, volume.Value)); };
+        repeat.UserChanged += SaveTimerPreferences;
+        volume.UserChanged += SaveTimerPreferences;
         duration.UserChanged += RenderClock;
         timer.Controls.Add(Widgets.Row(Widgets.Button("Test reflection prompt", (_, _) => Safe(() => app.Engine.TestPrompt())),
             Widgets.Button("Pending reflections", (_, _) => app.ShowReflections()), Widgets.Button("Mark issue", (_, _) => app.MarkIssue())));
@@ -73,7 +77,10 @@ public sealed class MainWindow : Form
         timer.Controls.Add(Widgets.Button("Quit desktop app", (_, _) => app.Quit()));
 
         var schedule = Widgets.Page(tabs, "Scheduling session times");
-        schedule.Controls.Add(Widgets.Text("Each one-time appointment has its own duration, repeat setting, and sound level. A scheduled start takes over the current timer. After downtime, only the latest missed appointment starts; future appointments remain queued."));
+        schedule.Controls.Add(Widgets.Text("Each one-time appointment has its own duration, repeat setting, auto-start cutoff, and sound level. A scheduled start takes over the current timer. After downtime, only the latest missed appointment starts; future appointments remain queued."));
+        scheduleGrid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+        scheduleGrid.Columns[0].FillWeight = 160; scheduleGrid.Columns[1].FillWeight = 85;
+        scheduleGrid.Columns[2].FillWeight = 90; scheduleGrid.Columns[3].FillWeight = 160; scheduleGrid.Columns[4].FillWeight = 55;
         schedule.Controls.Add(scheduleGrid);
         schedule.Controls.Add(Widgets.Row(Widgets.Button("Edit selected", (_, _) => EditSelectedSchedule()), Widgets.Button("Remove selected", (_, _) => Safe(() => {
             if (SelectedSchedule() is { } selected) { app.Engine.RemoveSchedule(selected.Id); if (editing == selected.Id) ResetScheduleEditor(); }
@@ -83,11 +90,11 @@ public sealed class MainWindow : Form
         saveSchedule = Widgets.Button("Add session", (_, _) => Safe(() => {
             var picked = scheduledStart.Value;
             var minute = new DateTime(picked.Year, picked.Month, picked.Day, picked.Hour, picked.Minute, 0, DateTimeKind.Local);
-            app.Engine.SaveSchedule(editing, new DateTimeOffset(minute), scheduledDuration.Seconds, scheduledRepeat.Checked, scheduledVolume.Value);
+            app.Engine.SaveSchedule(editing, new DateTimeOffset(minute), scheduledDuration.Seconds, scheduledRepeat.AutoRestart, scheduledVolume.Value, scheduledRepeat.AutoRestartUntil);
             ResetScheduleEditor(); SetStatus("Schedule saved.");
         }), true);
         schedule.Controls.Add(Widgets.Row(saveSchedule, Widgets.Button("Cancel edit / new session", (_, _) => ResetScheduleEditor())));
-        schedule.Controls.Add(Widgets.Text("Auto-start next session repeats this duration immediately after completion; it does not move the next scheduled appointment earlier. Pausing or resetting the live timer does not remove future appointments."));
+        schedule.Controls.Add(Widgets.Text("Auto-start repeats this duration until its optional cutoff; it does not move the next appointment earlier. Cutoffs must follow the scheduled start. Pausing, resetting, or reaching a cutoff does not remove future appointments."));
 
         var outbox = Widgets.Page(tabs, "Outbox");
         outbox.Controls.Add(Widgets.Text("Reflections are saved locally before sending. Pending entries send when a valid connection is available. A timeout or interrupted upload is held for review—not silently retried—because the current Apps Script receiver may already have written it."));
@@ -157,7 +164,7 @@ public sealed class MainWindow : Form
     {
         binding = true;
         if (state.Timer.IsRunning || !duration.Dirty) duration.LoadSeconds(state.Timer.DurationSeconds, true);
-        duration.Enabled = !state.Timer.IsRunning; repeat.Checked = state.Timer.AutoRestart; volume.Value = state.Timer.Volume;
+        duration.Enabled = !state.Timer.IsRunning; repeat.LoadOptions(state.Timer.AutoRestart, state.Timer.AutoRestartUntil); volume.Value = state.Timer.Volume;
         start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && state.Timer.RemainingSeconds > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Resume" : "Start";
         start.Enabled = state.ExtensionDisabledConfirmed;
         migration.Text = state.ExtensionDisabledConfirmed ? "Desktop timer active · Chrome extension should remain off"
@@ -167,7 +174,8 @@ public sealed class MainWindow : Form
         if (signature != scheduleSignature) {
             var selected = SelectedSchedule()?.Id; scheduleGrid.Rows.Clear();
             foreach (var entry in state.Schedules) {
-                var row = scheduleGrid.Rows[scheduleGrid.Rows.Add(DateTimeOffset.FromUnixTimeMilliseconds(entry.StartTime).ToLocalTime().ToString("g"), Clock(entry.DurationSeconds), entry.AutoRestart ? "On" : "Off", entry.Volume + "%")];
+                var row = scheduleGrid.Rows[scheduleGrid.Rows.Add(DateTimeOffset.FromUnixTimeMilliseconds(entry.StartTime).ToLocalTime().ToString("g"), Clock(entry.DurationSeconds), entry.AutoRestart ? "On" : "Off",
+                    entry.AutoRestartUntil.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(entry.AutoRestartUntil.Value).ToLocalTime().ToString("g") : "—", entry.Volume + "%")];
                 row.Tag = entry.Id; if (entry.Id == selected) row.Selected = true;
             }
             scheduleSignature = signature;
@@ -191,13 +199,21 @@ public sealed class MainWindow : Form
     {
         if (SelectedSchedule() is not { } entry) return;
         editing = entry.Id; scheduledStart.Value = DateTimeOffset.FromUnixTimeMilliseconds(entry.StartTime).LocalDateTime;
-        scheduledDuration.LoadSeconds(entry.DurationSeconds); scheduledRepeat.Checked = entry.AutoRestart; scheduledVolume.Value = entry.Volume;
+        scheduledDuration.LoadSeconds(entry.DurationSeconds); scheduledRepeat.LoadOptions(entry.AutoRestart, entry.AutoRestartUntil, true); scheduledVolume.Value = entry.Volume;
         scheduleHeading.Text = "Edit scheduled session"; saveSchedule.Text = "Save changes"; scheduledStart.Focus();
     }
     private void ResetScheduleEditor()
     {
-        editing = null; scheduledStart.Value = DateTime.Now.AddHours(1); scheduledDuration.LoadSeconds(1500, true); scheduledRepeat.Checked = false; scheduledVolume.Value = 50;
+        editing = null; scheduledStart.Value = DateTime.Now.AddHours(1); scheduledDuration.LoadSeconds(1500, true); scheduledRepeat.LoadOptions(false, null, true); scheduledVolume.Value = 50;
         scheduleHeading.Text = "Add a scheduled session"; saveSchedule.Text = "Add session";
+    }
+    private void SaveTimerPreferences()
+    {
+        if (binding) return;
+        Safe(() => {
+            app.Engine.SetPreferences(repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
+            SetStatus("Timer preferences saved.");
+        });
     }
     private bool SaveSettings()
     {

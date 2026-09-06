@@ -91,6 +91,73 @@ public sealed class VolumeControl : UserControl
     }
 }
 
+// Shared by the live timer and schedule editor so their repeat/cutoff behavior
+// cannot drift. Model refreshes with unchanged options preserve date/time drafts.
+public sealed class AutoRestartOptions : UserControl
+{
+    private readonly CheckBox repeat = new() { Text = "Auto-start next session", AutoSize = true, Margin = new(0, 4, 0, 8) };
+    private readonly CheckBox disableAt = new() { Text = "Disable auto-start at", AutoSize = true, Margin = new(0, 6, 12, 0) };
+    private readonly SessionStartInput cutoff = new() { Width = 300, Enabled = false, AccessibleName = "Auto-start cutoff date and time" };
+    private readonly Func<DateTime> suggestAfter;
+    private bool assigning, loaded, loadedRepeat;
+    private long? loadedUntil;
+    public event Action? UserChanged;
+    public bool AutoRestart => repeat.Checked;
+    public long? AutoRestartUntil
+    {
+        get {
+            if (!disableAt.Checked) return null;
+            try { return new DateTimeOffset(cutoff.Value).ToUnixTimeMilliseconds(); }
+            catch (ArgumentException) { throw new ArgumentException("Enter the auto-start cutoff as MM/DD/YYYY hh:mm AM/PM."); }
+        }
+    }
+    public AutoRestartOptions() : this(() => DateTime.Now) { }
+    public AutoRestartOptions(Func<DateTime> suggestAfter)
+    {
+        this.suggestAfter = suggestAfter;
+        Width = 750; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; Margin = new(0, 6, 0, 4);
+        var flow = new FlowLayoutPanel { Width = 750, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
+        flow.Controls.Add(repeat); flow.Controls.Add(Widgets.Row(disableAt, cutoff));
+        flow.Controls.Add(Widgets.Text("Local date/time · MM/DD/YYYY hh:mm AM/PM. The current session still finishes."));
+        Controls.Add(flow);
+        repeat.CheckedChanged += (_, _) => {
+            if (assigning) return;
+            assigning = true;
+            if (!repeat.Checked) { disableAt.Checked = false; cutoff.Enabled = false; }
+            assigning = false; UserChanged?.Invoke();
+        };
+        disableAt.CheckedChanged += (_, _) => {
+            if (assigning) return;
+            assigning = true;
+            cutoff.Enabled = disableAt.Checked;
+            if (disableAt.Checked) {
+                repeat.Checked = true;
+                var after = DateTime.Now;
+                try { if (suggestAfter() > after) after = suggestAfter(); } catch (ArgumentException) { }
+                try { if (cutoff.Value <= after) cutoff.Value = after.AddHours(1); }
+                catch (ArgumentException) { cutoff.Value = after.AddHours(1); }
+            }
+            assigning = false; UserChanged?.Invoke();
+        };
+        cutoff.Validated += (_, _) => { if (!assigning && disableAt.Checked) UserChanged?.Invoke(); };
+        cutoff.KeyDown += (_, e) => {
+            if (e.KeyCode != Keys.Enter) return;
+            e.SuppressKeyPress = true;
+            if (!assigning && disableAt.Checked) UserChanged?.Invoke();
+        };
+    }
+    public void LoadOptions(bool autoRestart, long? until, bool force = false)
+    {
+        if (!force && loaded && loadedRepeat == autoRestart && loadedUntil == until) return;
+        assigning = true;
+        repeat.Checked = autoRestart || until.HasValue;
+        disableAt.Checked = until.HasValue; cutoff.Enabled = until.HasValue;
+        cutoff.Text = until.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(until.Value).LocalDateTime.ToString("MM/dd/yyyy hh:mm tt", CultureInfo.InvariantCulture) : "";
+        loaded = true; loadedRepeat = autoRestart; loadedUntil = until;
+        assigning = false;
+    }
+}
+
 // The Win32 date picker still paints a white edit area in native dark mode.
 // A themed text field keeps date/time editing readable without custom native
 // painting or changing the persisted schedule format and local-time behavior.

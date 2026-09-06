@@ -47,19 +47,36 @@ public sealed class TimerEngine
     {
         if (seconds is < 1 or > MaxDuration) throw new ArgumentException("Choose a duration greater than zero (up to one year).");
     }
-    private static TimerState Started(int seconds, bool repeat, int volume, long now) => new()
+    private static void ValidateCutoff(long? until, long after)
+    {
+        if (!until.HasValue) return;
+        if (until <= after) throw new ArgumentException("Choose an auto-start cutoff after the session start (and in the future for the regular timer).");
+        _ = DateTimeOffset.FromUnixTimeMilliseconds(until.Value);
+    }
+    private static bool CutoffDue(TimerState timer, long now) => timer.AutoRestartUntil <= now;
+    private static void ExpireAutoRestart(AppState state, long now)
+    {
+        if (CutoffDue(state.Timer, now)) state.Timer = state.Timer with { AutoRestart = false, AutoRestartUntil = null };
+    }
+    private static TimerState Started(int seconds, bool repeat, int volume, long now, long? until = null) => new()
     {
         IsRunning = true, DurationSeconds = seconds, RemainingSeconds = seconds,
-        EndTime = now + seconds * 1000L, AutoRestart = repeat, Volume = Math.Clamp(volume, 0, 100)
+        EndTime = now + seconds * 1000L, AutoRestart = (repeat || until.HasValue) && !(until <= now),
+        AutoRestartUntil = until > now ? until : null, Volume = Math.Clamp(volume, 0, 100)
     };
 
-    public void Start(int seconds, bool repeat, int volume)
+    public void Start(int seconds, bool repeat, int volume, long? autoRestartUntil = null)
     {
         ValidateDuration(seconds);
-        Change("timer.started", s => s.Timer = Started(seconds, repeat, volume, Now), value: seconds);
+        Change("timer.started", s => {
+            var now = Now;
+            ValidateCutoff(autoRestartUntil, now);
+            s.Timer = Started(seconds, repeat, volume, now, autoRestartUntil);
+        }, value: seconds);
     }
     public void Pause() => Change("timer.paused", s => {
         var now = Now;
+        ExpireAutoRestart(s, now);
         // A click can arrive after the deadline but before the one-second UI tick.
         // Pausing must not silently discard that completed session's reflection.
         if (s.Timer.IsRunning && s.Timer.EndTime <= now)
@@ -69,26 +86,37 @@ public sealed class TimerEngine
     public void Resume()
     {
         Change("timer.resumed", s => {
+            ExpireAutoRestart(s, Now);
             if (s.Timer.IsRunning) return;
             ValidateDuration(s.Timer.RemainingSeconds);
             s.Timer = s.Timer with { IsRunning = true, EndTime = Now + s.Timer.RemainingSeconds * 1000L };
         });
     }
     public void Reset(int? duration = null) => Change("timer.reset", s => {
+        ExpireAutoRestart(s, Now);
         var seconds = duration ?? s.Timer.DurationSeconds;
         ValidateDuration(seconds);
         s.Timer = s.Timer with { IsRunning = false, DurationSeconds = seconds, RemainingSeconds = seconds, EndTime = null };
     });
-    public void SetPreferences(bool repeat, int volume) => Change("timer.preferences", s =>
-        s.Timer = s.Timer with { AutoRestart = repeat, Volume = Math.Clamp(volume, 0, 100) });
+    public void SetPreferences(bool repeat, int volume, long? autoRestartUntil = null) => Change("timer.preferences", s => {
+        ValidateCutoff(autoRestartUntil, Now);
+        s.Timer = s.Timer with { AutoRestart = repeat || autoRestartUntil.HasValue,
+            AutoRestartUntil = autoRestartUntil, Volume = Math.Clamp(volume, 0, 100) };
+    });
 
     public void Advance()
     {
         lock (gate)
         {
             var now = Now;
-            if (!state.Schedules.Any(x => x.StartTime <= now) && !(state.Timer.IsRunning && state.Timer.EndTime <= now)) return;
-            Change("timer.deadline", s => {
+            var deadlineDue = state.Schedules.Any(x => x.StartTime <= now) || (state.Timer.IsRunning && state.Timer.EndTime <= now);
+            var cutoffDue = CutoffDue(state.Timer, now);
+            if (!deadlineDue && !cutoffDue) return;
+            Change(cutoffDue ? "timer.autoRestartDisabled" : "timer.deadline", s => {
+                // A cutoff is independent of the countdown, including while paused.
+                // Expire before completion so no extra repeat starts at the boundary.
+                ExpireAutoRestart(s, now);
+                if (!deadlineDue) return;
                 var due = s.Schedules.Where(x => x.StartTime <= now).OrderBy(x => x.StartTime).ToList();
                 var latest = due.LastOrDefault();
                 // Preserve a completed session's reflection, even if a scheduled
@@ -98,27 +126,28 @@ public sealed class TimerEngine
                 if (latest is not null)
                 {
                     s.Schedules.RemoveAll(x => x.StartTime <= now);
-                    s.Timer = Started(latest.DurationSeconds, latest.AutoRestart, latest.Volume, now);
+                    s.Timer = Started(latest.DurationSeconds, latest.AutoRestart, latest.Volume, now, latest.AutoRestartUntil);
                 }
                 else if (s.Timer.AutoRestart)
-                    s.Timer = Started(s.Timer.DurationSeconds, true, s.Timer.Volume, now);
+                    s.Timer = Started(s.Timer.DurationSeconds, true, s.Timer.Volume, now, s.Timer.AutoRestartUntil);
                 else s.Timer = s.Timer with { IsRunning = false, RemainingSeconds = 0, EndTime = null };
             }, value: dueCount(state, now));
         }
         static long dueCount(AppState value, long now) => value.Schedules.Count(x => x.StartTime <= now);
     }
 
-    public Guid SaveSchedule(Guid? id, DateTimeOffset start, int seconds, bool repeat, int volume)
+    public Guid SaveSchedule(Guid? id, DateTimeOffset start, int seconds, bool repeat, int volume, long? autoRestartUntil = null)
     {
         ValidateDuration(seconds);
         var itemId = id ?? Guid.NewGuid();
         Change("schedule.saved", s => {
             if (start.ToUnixTimeMilliseconds() <= Now) throw new ArgumentException("Choose a future session start date and time.");
+            ValidateCutoff(autoRestartUntil, start.ToUnixTimeMilliseconds());
             if (id.HasValue && !s.Schedules.Any(x => x.Id == id)) throw new ArgumentException("This session already started or was removed.");
             if (!id.HasValue && s.Schedules.Count >= 50) throw new ArgumentException("You can schedule up to 50 sessions.");
             if (s.Schedules.Any(x => x.Id != itemId && x.StartTime == start.ToUnixTimeMilliseconds())) throw new ArgumentException("Another session already starts at that time.");
             s.Schedules.RemoveAll(x => x.Id == itemId);
-            s.Schedules.Add(new(itemId, start.ToUnixTimeMilliseconds(), seconds, repeat, Math.Clamp(volume, 0, 100)));
+            s.Schedules.Add(new(itemId, start.ToUnixTimeMilliseconds(), seconds, repeat || autoRestartUntil.HasValue, Math.Clamp(volume, 0, 100), autoRestartUntil));
             s.Schedules = s.Schedules.OrderBy(x => x.StartTime).ToList();
         }, itemId);
         return itemId;
@@ -128,8 +157,9 @@ public sealed class TimerEngine
         foreach (var entry in entries) {
             ValidateDuration(entry.DurationSeconds);
             if (entry.StartTime <= Now || s.Schedules.Any(x => x.StartTime == entry.StartTime)) continue;
+            ValidateCutoff(entry.AutoRestartUntil, entry.StartTime);
             if (s.Schedules.Count >= 50) throw new ArgumentException("The import would exceed 50 scheduled sessions. No entries were imported.");
-            s.Schedules.Add(entry with { Id = Guid.NewGuid(), Volume = Math.Clamp(entry.Volume, 0, 100) });
+            s.Schedules.Add(entry with { Id = Guid.NewGuid(), AutoRestart = entry.AutoRestart || entry.AutoRestartUntil.HasValue, Volume = Math.Clamp(entry.Volume, 0, 100) });
         }
         s.Schedules = s.Schedules.OrderBy(x => x.StartTime).ToList();
     });
