@@ -1,10 +1,12 @@
-# Reflection Timer Desktop 3.5.0
+# Reflection Timer Desktop 3.5.1
 
 A native Windows tray app for focus sessions, standalone reflection prompts, and the existing Google Sheets receiver. It does not need Chrome to stay open and does not collect browser activity. The extension source remains available as a fallback.
 
 Choose **Dark, Light, High Contrast, or Glamour** under **Settings → Display → App theme**. Dark remains the default for existing and new installations. Glamour is a feminine blush-and-pearl theme with raspberry buttons, plum text, rose-gold bow accents, and italic Georgia headings, across the timer, schedules, outbox, settings, and reflection window. Light uses pale surfaces and forest-green accents; High Contrast uses black, white, and yellow. Text contrast is checked in automated tests.
 
 The theme picker saves immediately and shows a passive preview. The full theme applies after you **Quit desktop app** and reopen it; the window X only hides it. Save unfinished schedule edits before quitting. Changing the selection does not restart your timer, move an open reflection, or discard its draft. Native title bars, menus, and controls are initialized alongside the palette, as required by [.NET's color-mode API](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.application.setcolormode?view=windowsdesktop-10.0). Windows-owned dialogs may vary by OS version. Nothing changes your Windows-wide theme; Windows high-contrast accessibility colors take priority over all four choices at launch, while retaining your saved preference.
+
+Tabs have spaced, outlined headers in all four themes. The active tab uses the theme's strong accent fill, a bold label, and a thick underline that stays visible when focus moves into a field. Native tab keyboard navigation and accessibility remain intact.
 
 ## Install and switch over
 

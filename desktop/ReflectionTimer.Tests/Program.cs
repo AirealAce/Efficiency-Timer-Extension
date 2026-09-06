@@ -581,6 +581,44 @@ internal static class Program
     }
     private static void TestTheme()
     {
+        Test("tab selection and separators contrast in every theme", () => {
+            foreach (var theme in Enum.GetValues<AppColorTheme>()) {
+                var p = AppTheme.PaletteFor(theme);
+                Is(Contrast(p.PrimaryButton, p.AccentText) >= 4.5);
+                Is(Contrast(p.Raised, p.Text) >= 4.5);
+                Is(Contrast(p.Raised, p.Muted) >= 3);
+                Is(Contrast(p.Raised, p.PrimaryButton) >= 3);
+            }
+        });
+        Test("themed native tabs retain pages, drafts, selection and scalable header space", () => {
+            using var form = new Form { ClientSize = new(880, 600), Font = new("Segoe UI", 10) };
+            using var tabs = new ThemeTabs { Dock = DockStyle.Fill };
+            form.Controls.Add(tabs);
+            foreach (var name in new[] { "Timer", "Scheduling session times", "Outbox", "Settings", "Diagnostics" }) tabs.TabPages.Add(name);
+            var draft = new TextBox { Text = "unsaved draft" }; tabs.TabPages[0].Controls.Add(draft);
+            AppTheme.Apply(form); form.Show();
+            Equal(TabDrawMode.OwnerDrawFixed, tabs.DrawMode); Equal(TabAppearance.FlatButtons, tabs.Appearance);
+            Equal("App sections", tabs.AccessibleName);
+            Is(tabs.ItemSize.Height > tabs.Font.Height + 10);
+            using var bold = new Font(tabs.Font, FontStyle.Bold);
+            for (var i = 0; i < tabs.TabCount; i++) {
+                tabs.SelectedIndex = i; tabs.Refresh();
+                Equal(i, tabs.SelectedIndex);
+                var bounds = tabs.GetTabRect(i);
+                Is(bounds.Width > 40); Is(bounds.Right <= tabs.ClientSize.Width);
+                Is(bounds.Width - 16 * tabs.DeviceDpi / 96 >= TextRenderer.MeasureText(tabs.TabPages[i].Text, bold).Width);
+                if (i > 0) Is(bounds.Left >= tabs.GetTabRect(i - 1).Right);
+            }
+            tabs.SelectedIndex = 0; draft.Focus();
+            Equal(0, tabs.SelectedIndex); Equal("unsaved draft", draft.Text); Is(!draft.IsDisposed);
+            using var bitmap = new Bitmap(tabs.Width, tabs.Height); tabs.DrawToBitmap(bitmap, tabs.ClientRectangle);
+            var selected = tabs.GetTabRect(0); var inactive = tabs.GetTabRect(1);
+            Equal(AppTheme.Palette.PrimaryButton.ToArgb(), bitmap.GetPixel(selected.X + 8, selected.Y + 8).ToArgb());
+            Equal(AppTheme.Raised.ToArgb(), bitmap.GetPixel(inactive.X + 8, inactive.Y + 8).ToArgb());
+            var previousHeight = tabs.ItemSize.Height;
+            using var larger = new Font("Segoe UI", 24); tabs.Font = larger;
+            Is(tabs.ItemSize.Height > previousHeight);
+        });
         Test("dark date/time editor preserves local time and validates input", () => {
             using var input = new SessionStartInput { Value = new DateTime(2026, 9, 5, 18, 30, 45, DateTimeKind.Local) };
             Equal("09/05/2026 06:30 PM", input.Text); Equal(18, input.Value.Hour); Equal(30, input.Value.Minute);

@@ -7,7 +7,7 @@ namespace ReflectionTimer.Desktop;
 public sealed class MainWindow : Form
 {
     private readonly TimerApplication app;
-    private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
+    private readonly ThemeTabs tabs = new() { Dock = DockStyle.Fill };
     private readonly Label status = new() { Dock = DockStyle.Bottom, Height = 56, Padding = new(20, 8, 20, 8), ForeColor = Widgets.Muted };
     private readonly Label display = new() { Width = 750, Height = 90, TextAlign = ContentAlignment.MiddleCenter, Font = new("Consolas", 48, FontStyle.Bold), ForeColor = Widgets.Ink };
     private readonly Label timerStatus = Widgets.Text("");
