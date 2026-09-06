@@ -7,6 +7,7 @@ namespace ReflectionTimer.Desktop;
 public sealed class MainWindow : Form
 {
     private readonly TimerApplication app;
+    private readonly Action<bool> updateStartup;
     private readonly ThemeTabs tabs = new() { Dock = DockStyle.Fill };
     private readonly Label status = new() { Dock = DockStyle.Bottom, Height = 56, Padding = new(20, 8, 20, 8), ForeColor = Widgets.Muted };
     private readonly Label display = new() { Width = 750, Height = 90, TextAlign = ContentAlignment.MiddleCenter, Font = new("Consolas", 48, FontStyle.Bold), ForeColor = Widgets.Ink };
@@ -50,9 +51,10 @@ public sealed class MainWindow : Form
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool AllowExit { get; set; }
 
-    public MainWindow(TimerApplication app)
+    public MainWindow(TimerApplication app, Action<bool>? updateStartup = null)
     {
         this.app = app;
+        this.updateStartup = updateStartup ?? StartupRegistration.Set;
         scheduledRepeat = new(() => scheduledStart.Value);
         Text = "Reflection Timer Desktop"; Size = new(940, 810); MinimumSize = new(880, 700);
         StartPosition = FormStartPosition.CenterScreen; Font = new("Segoe UI", 10); BackColor = AppTheme.Background;
@@ -126,7 +128,7 @@ public sealed class MainWindow : Form
         })), Widgets.Button("Open Google Sheet", (_, _) => OpenSheet())));
 
         var settings = Widgets.Page(tabs, "Settings");
-        settings.Controls.Add(Widgets.Text("Display"));
+        settings.Controls.Add(new SettingsSection("Display") { Margin = new(0, 0, 0, 14) });
         settings.Controls.Add(Widgets.Text("Keyboard shortcut")); settings.Controls.Add(shortcutNotice);
         settings.Controls.Add(Widgets.Text("App theme"));
         themeChoice.Items.AddRange(["Dark", "Light", "High Contrast", "Glamour"]);
@@ -163,8 +165,10 @@ public sealed class MainWindow : Form
         audio = new AudioSettingsControl(app);
         audio.Status += (text, error) => SetStatus(text, error, success: text == "Audio settings saved.");
         settings.Controls.Add(audio);
+        settings.Controls.Add(new SettingsSection("Chrome extension switch-over"));
         settings.Controls.Add(Widgets.Text("Switch over: open chrome://extensions, turn off Reflection Timer (leave it installed as a fallback), then check the confirmation below. This app does not read Chrome profile files or collect browser activity."));
         settings.Controls.Add(disabledExtension);
+        settings.Controls.Add(new SettingsSection("Google Sheets connection"));
         settings.Controls.Add(Widgets.Text("Google Sheets URL")); settings.Controls.Add(sheetUrl);
         settings.Controls.Add(Widgets.Text("Apps Script deployment URL (must end in /exec)")); settings.Controls.Add(webAppUrl);
         settings.Controls.Add(Widgets.Text("Reflection API token — reuse the value from the extension")); settings.Controls.Add(token);
@@ -172,7 +176,9 @@ public sealed class MainWindow : Form
         settings.Controls.Add(Widgets.Text("Destination tab")); settings.Controls.Add(mode); settings.Controls.Add(sheetName);
         mode.SelectedIndexChanged += (_, _) => sheetName.Enabled = mode.SelectedIndex == 1;
         settings.Controls.Add(Widgets.Text("Date routing, new daily tabs from Temp, row borders, alternating timestamps, and hour themes remain handled by your existing Apps Script. Offline entries retain their original save date. Test prompts always use test."));
+        settings.Controls.Add(new SettingsSection("Startup & diagnostics"));
         settings.Controls.Add(login); settings.Controls.Add(logging);
+        settings.Controls.Add(new SettingsSection("Save settings"));
         settings.Controls.Add(Widgets.Row(Widgets.Button("Save settings", (_, _) => SaveSettings(), true), Widgets.Button("Save & test connection", async (_, _) => {
             if (!SaveSettings()) return;
             SetStatus("Checking the Sheets connection…");
@@ -306,8 +312,8 @@ public sealed class MainWindow : Form
     {
         try {
             var connection = new ConnectionSettings { SheetUrl = sheetUrl.Text.Trim(), WebAppUrl = webAppUrl.Text.Trim(), ApiToken = token.Text.Trim(), SheetMode = mode.SelectedIndex == 1 ? "fixed" : "date", SheetName = sheetName.Text.Trim() };
-            app.Engine.SaveSettings(connection, logging.Checked, login.Checked, disabledExtension.Checked);
-            StartupRegistration.Set(login.Checked);
+            app.Engine.SaveSettings(connection, logging.Checked, login.Checked, disabledExtension.Checked, audio.DefaultThresholdSeconds);
+            updateStartup(login.Checked);
             var missing = SheetsClient.Validate(connection);
             SetStatus(missing is not null ? "Settings saved locally. " + missing : "Settings saved.", error: missing is not null, success: missing is null);
             _ = app.Sync(); return true;

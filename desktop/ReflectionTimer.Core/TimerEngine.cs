@@ -248,7 +248,11 @@ public sealed class TimerEngine
     public void SetLowTime(LowTimeOptions options) => Change("timer.lowTimeOptions", s => {
         AudioSettings.Validate(options); s.Timer = s.Timer with { LowTime = options };
     });
-    public void SaveSettings(ConnectionSettings connection, bool logging, bool startAtLogin, bool extensionDisabled) => Change("settings.saved", s => {
+    public void SaveSettings(ConnectionSettings connection, bool logging, bool startAtLogin, bool extensionDisabled, int? lowTimeThresholdSeconds = null) => Change("settings.saved", s => {
+        if (lowTimeThresholdSeconds is { } seconds) {
+            ValidateDuration(seconds);
+            s.Audio = AudioSettings.From(s) with { LowTimeThresholdSeconds = seconds };
+        }
         s.Connection = connection; s.LoggingEnabled = logging; s.StartAtLogin = startAtLogin; s.ExtensionDisabledConfirmed = extensionDisabled;
     });
     public static string SafeError(string kind) => new[] { "timeout", "network", "rejected", "invalid_response", "settings_required", "interrupted", "storage", "unknown" }.Contains(kind) ? kind : "unknown";

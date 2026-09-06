@@ -20,7 +20,7 @@ public sealed class SoundSourceControl : UserControl
     public event Action<string>? Error;
     public SoundSetting Selection => value;
 
-    public SoundSourceControl(SoundEvent kind, bool inherit = false)
+    public SoundSourceControl(SoundEvent kind, bool inherit = false, ComboBox? playback = null)
     {
         Width = 750; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
         choice.AccessibleName = (inherit ? "Session low-time" : kind.ToString()) + " sound";
@@ -46,7 +46,11 @@ public sealed class SoundSourceControl : UserControl
             catch { if (!IsDisposed && version == selectionVersion) Error?.Invoke("Could not select that MP3. Choose readable audio under 50 MB; your saved setting is unchanged."); }
             finally { if (!IsDisposed) button.Enabled = true; }
         });
-        Controls.Add(AudioLayout.Row(choice, choose));
+        if (playback is not null) {
+            choice.Width = 350;
+            Controls.Add(AudioLayout.Row(choice, playback, choose));
+        }
+        else Controls.Add(AudioLayout.Row(choice, choose));
     }
     public void LoadSelection(SoundSetting setting)
     {
@@ -117,6 +121,8 @@ public sealed class AudioSettingsControl : UserControl
     private readonly Dictionary<SoundEvent, (SoundSourceControl Source, ComboBox Behavior)> editors = [];
     private readonly NumericUpDown threshold = new() { Minimum = 1, Maximum = TimerEngine.MaxDuration, Value = 60, Width = 140, AccessibleName = "Default low-time threshold in seconds" };
     private bool binding;
+    private int? loadedThreshold;
+    public int DefaultThresholdSeconds => (int)threshold.Value;
     public event Action<string, bool>? Status;
     public AudioSettingsControl(TimerApplication app)
     {
@@ -124,23 +130,23 @@ public sealed class AudioSettingsControl : UserControl
         Width = 750; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
         var flow = new FlowLayoutPanel { Width = 750, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         Controls.Add(flow);
-        flow.Controls.Add(Widgets.Text("Audio", 750));
+        flow.Controls.Add(new SettingsSection("Audio"));
         flow.Controls.Add(Widgets.Text("Disruptive stops other app audio. Assertive lowers other app audio to 25% until it finishes. Polite plays alongside other app audio. The latest Assertive sound takes priority; earlier sounds recover when it finishes. Other apps are unaffected."));
-        flow.Controls.Add(Widgets.Text("Default Low on time threshold"));
-        flow.Controls.Add(AudioLayout.Row(threshold, Widgets.Text("seconds remaining", 180), Widgets.Button("Save threshold", (_, _) => Save(() => app.Engine.SetLowTimeDefault((int)threshold.Value)))));
+        flow.Controls.Add(Widgets.Text("Default low-time warning"));
+        flow.Controls.Add(AudioLayout.Row(threshold, Widgets.Text("seconds remaining", 180)));
+        flow.Controls.Add(Widgets.Text("Use Save settings below to save this default."));
         flow.Controls.Add(Widgets.Text("A timer/session can follow this default or set its own threshold. Low on time is off until checked, plays once per session, and never plays a stale warning after the session ends. If a session starts within its threshold, it alerts on its first tick."));
         foreach (var kind in new[] { SoundEvent.Success, SoundEvent.Failure, SoundEvent.LowTime, SoundEvent.SessionEnd }) {
             var heading = Widgets.Text(kind switch { SoundEvent.SessionEnd => "Session end · time limit reached", SoundEvent.LowTime => "Low on time", _ => kind + " messages" });
             heading.Font = new Font("Segoe UI", 10, FontStyle.Bold); heading.ForeColor = AppTheme.Text; flow.Controls.Add(heading);
-            var source = new SoundSourceControl(kind);
-            var behavior = new ComboBox { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = kind + " playback behavior" };
+            var behavior = new ComboBox { Width = 160, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = kind + " playback behavior" };
             behavior.Items.AddRange(["Disruptive", "Assertive", "Polite"]); behavior.SelectedIndex = 0;
+            var source = new SoundSourceControl(kind, playback: behavior);
             editors.Add(kind, (source, behavior));
             void Store() { if (!binding) Save(() => app.Engine.SetSound(kind, source.Selection with { Behavior = (SoundBehavior)behavior.SelectedIndex })); }
             source.UserChanged += Store; behavior.SelectedIndexChanged += (_, _) => Store(); source.Error += text => { LoadOptions(AudioSettings.From(app.Engine.Snapshot)); Status?.Invoke(text, true); };
             flow.Controls.Add(source);
-            flow.Controls.Add(AudioLayout.Row(Widgets.Text("Playback", 80), behavior,
-                Widgets.Button("Preview " + (kind == SoundEvent.SessionEnd ? "session end" : kind == SoundEvent.LowTime ? "low time" : kind.ToString().ToLowerInvariant()), async (_, _) => await app.PlaySound(kind, app.Engine.Snapshot.Timer.Volume, preview: true))));
+            flow.Controls.Add(AudioLayout.Row(Widgets.Button("Preview " + (kind == SoundEvent.SessionEnd ? "session end" : kind == SoundEvent.LowTime ? "low time" : kind.ToString().ToLowerInvariant()), async (_, _) => await app.PlaySound(kind, app.Engine.Snapshot.Timer.Volume, preview: true))));
         }
         flow.Controls.Add(AudioLayout.Row(Widgets.Button("Stop all app audio", (_, _) => { app.Sounds.Stop(); Status?.Invoke("App audio stopped.", false); })));
         flow.Controls.Add(Widgets.Text("Sound selections and playback modes save immediately. Preview and message sounds use the Timer volume; session alerts use that session's volume. A missing MP3 falls back to the event default, then the original extension sound when local library assets are absent. Custom files stay at their selected location; audio paths are never uploaded."));
@@ -154,8 +160,11 @@ public sealed class AudioSettingsControl : UserControl
     {
         binding = true;
         try {
-            // Leave an in-progress numeric edit alone until Save threshold is clicked.
-            if (!threshold.ContainsFocus) threshold.Value = Math.Clamp(settings.LowTimeThresholdSeconds, 1, TimerEngine.MaxDuration);
+            // Sound choices save immediately and refresh this view. They must
+            // not discard a threshold draft waiting for the main Save settings.
+            if (loadedThreshold != settings.LowTimeThresholdSeconds)
+                threshold.Value = Math.Clamp(settings.LowTimeThresholdSeconds, 1, TimerEngine.MaxDuration);
+            loadedThreshold = settings.LowTimeThresholdSeconds;
             foreach (var (kind, editor) in editors) {
                 var setting = settings.For(kind); editor.Source.LoadSelection(setting);
                 editor.Behavior.SelectedIndex = Enum.IsDefined(setting.Behavior) ? (int)setting.Behavior : 0;

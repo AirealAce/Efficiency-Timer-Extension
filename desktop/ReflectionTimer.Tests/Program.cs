@@ -36,11 +36,12 @@ internal static partial class Program
             return 0;
         }
         if (args is ["--theme-smoke", _]) {
-            TestTheme(); TestStorage();
+            TestTheme(); TestStorage(); TestInputLayout();
             Console.WriteLine($"\n{passed} passed; {failed} failed. Theme: {AppTheme.Preference}");
             return failed == 0 ? 0 : 1;
         }
         Test("default and detached snapshots", () => { var f = new Fixture(); Equal(1500, f.Engine.Snapshot.Timer.DurationSeconds); f.Engine.Snapshot.Prompts.Add(new(Guid.NewGuid(), 0, 30, 0, true)); Equal(0, f.Engine.Snapshot.Prompts.Count); });
+        TestInputLayout();
         Test("absolute deadline and ceiling", () => { var f = new Fixture(); f.Engine.Start(60, false, 500); f.Move(10.2); Equal(50, TimerEngine.Remaining(f.Engine.Snapshot.Timer, f.Engine.Now)); Equal(100, f.Engine.Snapshot.Timer.Volume); });
         Test("pause/resume retains remainder", () => { var f = new Fixture(); f.Engine.Start(60, false, 50); f.Move(20); f.Engine.Pause(); f.Move(100); Equal(40, f.Engine.Snapshot.Timer.RemainingSeconds); f.Engine.Resume(); f.Move(10); Equal(30, TimerEngine.Remaining(f.Engine.Snapshot.Timer, f.Engine.Now)); });
         Test("reset keeps independent future schedules", () => { var f = new Fixture(); f.Add(10, 30); f.Engine.Start(60, true, 10); f.Engine.Reset(100); Equal(100, f.Engine.Snapshot.Timer.RemainingSeconds); Equal(1, f.Engine.Snapshot.Schedules.Count); Is(!f.Engine.Snapshot.Timer.IsRunning); });
@@ -575,9 +576,10 @@ internal static partial class Program
                 var directory = Path.Combine(root, "audio-ui");
                 using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
                 using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
-                using var main = new MainWindow(app); main.Render(app.Engine.Snapshot); main.Show();
+                using var main = new MainWindow(app, _ => { }); main.Render(app.Engine.Snapshot); main.Show();
                 Descendants(main).OfType<TabControl>().Single().SelectedIndex = 3;
                 var control = Descendants(main).OfType<AudioSettingsControl>().Single();
+                var threshold = Descendants(control).OfType<NumericUpDown>().Single(); threshold.Value = 120;
                 foreach (var kind in Enum.GetValues<SoundEvent>()) {
                     var behavior = Descendants(control).OfType<ComboBox>().Single(x => x.AccessibleName == kind + " playback behavior");
                     Equal(0, behavior.SelectedIndex); behavior.SelectedIndex = 1;
@@ -586,9 +588,15 @@ internal static partial class Program
                     source.SelectedIndex = (int)LibrarySound.ChampionBattle;
                     Equal(LibrarySound.ChampionBattle, AudioSettings.From(app.Engine.Snapshot).For(kind).Track);
                     Equal(SoundBehavior.Assertive, AudioSettings.From(app.Engine.Snapshot).For(kind).Behavior);
+                    Equal(source.Parent!.Parent, behavior.Parent!.Parent);
+                    Equal(source.Parent.Height, behavior.Parent.Height);
+                    Equal(source.Parent.Top, behavior.Parent.Top);
+                    control.LoadOptions(AudioSettings.From(app.Engine.Snapshot));
+                    Equal(120, control.DefaultThresholdSeconds);
                 }
-                var threshold = Descendants(control).OfType<NumericUpDown>().Single(); threshold.Value = 120;
-                Descendants(control).OfType<Button>().Single(x => x.Text == "Save threshold").PerformClick();
+                Is(!Descendants(control).OfType<Button>().Any(x => x.Text == "Save threshold"));
+                Equal(60, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
+                Descendants(main).OfType<Button>().Single(x => x.Text == "Save settings").PerformClick();
                 Equal(120, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
                 Equal(2, Descendants(main).OfType<LowTimeControl>().Count());
                 Is(!app.Engine.Snapshot.Timer.LowTime.Enabled); Is(!app.Engine.Snapshot.Timer.IsRunning);

@@ -8,16 +8,17 @@ public static class Widgets
     public static Color Ink => AppTheme.Text;
     public static Color Muted => AppTheme.Muted;
     public static Color Green => AppTheme.Accent;
+    public static int FieldHeight(Control control) => Math.Max(38 * control.DeviceDpi / 96, control.Font.Height + 14 * control.DeviceDpi / 96);
     public static Label Text(string text, int width = 750) => new() { Text = text, AutoSize = true, MaximumSize = new(width, 0), ForeColor = Muted, Margin = new(0, 6, 0, 10) };
     public static Button Button(string text, EventHandler action, bool primary = false)
     {
-        var button = new Button { Text = text, UseMnemonic = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(110, 36), Padding = new(10, 4, 10, 4), Margin = new(0, 4, 10, 4) };
+        var button = new Button { Text = text, UseMnemonic = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(110, 38), Padding = new(10, 4, 10, 4), Margin = new(0, 4, 10, 4) };
         AppTheme.ApplyButton(button, primary);
         button.Click += action; return button;
     }
     public static FlowLayoutPanel Row(params Control[] controls)
     {
-        var row = new FlowLayoutPanel { Width = 750, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Margin = new(0, 4, 0, 6) };
+        var row = new FlowLayoutPanel { Width = 750, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Margin = new(0, 4, 0, 6) };
         row.Controls.AddRange(controls); return row;
     }
     public static FlowLayoutPanel Page(TabControl tabs, string title)

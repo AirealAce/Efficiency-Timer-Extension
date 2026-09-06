@@ -43,7 +43,7 @@ public static class AppTheme
                 C(0x12603E), C(0xFFFFFF), C(0x794600), C(0xA51F38), C(0xC8DFD4), C(0x143F2D), C(0x6F7C8D)),
             AppColorTheme.HighContrast => new(Color.Black, Color.Black, Color.Black, Color.White, Color.White, Color.White,
                 Color.Yellow, Color.Black, Color.Yellow, C(0xFFB3B3), Color.Yellow, Color.Black, Color.White),
-            AppColorTheme.Glamour => new(C(0xFFF1F7), C(0xFFFBFD), C(0xF9D6E5), C(0xA85E7F), C(0x4A1934), C(0x6E3B55),
+            AppColorTheme.Glamour => new(C(0xFFF1F7), C(0xEADCF5), C(0xF9D6E5), C(0x965172), C(0x4A1934), C(0x6E3B55),
                 C(0xA51D5C), C(0xFFFFFF), C(0x714014), C(0xA21438), C(0xE9D5F4), C(0x4A1934), C(0xB77964), IsGlamour: true),
             _ => new(C(0x161A22), C(0x232A36), C(0x2C3543), C(0x4E5B70), C(0xEFF4FA), C(0xB5C1D2),
                 C(0x69DFB0), C(0x09261D), C(0xF9C978), C(0xFF979F), C(0x30594D), C(0xEFF4FA), C(0x4E5B70))
@@ -69,9 +69,16 @@ public static class AppTheme
 
     public static void Apply(Control control)
     {
-        if (control is ThemePreview or ThemeHeader) return; // These paint their own palette.
+        if (control is ThemePreview or ThemeHeader or SettingsSection) return; // These paint their own palette.
         if (control is DataGridView grid) { ApplyGrid(grid); return; }
-        if (control is Button) return; // Widgets.Button already applies semantic primary/secondary colors.
+        if (control is Button button) {
+            // Match the shared field surface even after inherited font/DPI changes.
+            button.AutoSize = false;
+            button.Width = Math.Max(button.MinimumSize.Width, button.GetPreferredSize(Size.Empty).Width);
+            button.Height = Widgets.FieldHeight(button);
+            return; // Widgets.Button already applies semantic primary/secondary colors.
+        }
+        if (control is InputFrame frame) { Apply(frame.Editor); return; }
         control.BackColor = Background;
         if (control is not Label || control.ForeColor == SystemColors.ControlText) control.ForeColor = Text;
 
@@ -80,17 +87,20 @@ public static class AppTheme
             case TextBox text:
                 text.BackColor = Field;
                 text.ForeColor = Palette.IsSystemContrast ? SystemColors.WindowText : Text;
-                text.BorderStyle = BorderStyle.FixedSingle;
+                text.BorderStyle = text.Parent is InputFrame ? BorderStyle.None : BorderStyle.FixedSingle;
+                if (!text.Multiline) InputFrame.Wrap(text);
                 return;
             case NumericUpDown number:
                 number.BackColor = Field;
                 number.ForeColor = Palette.IsSystemContrast ? SystemColors.WindowText : Text;
-                number.BorderStyle = BorderStyle.FixedSingle;
+                number.BorderStyle = number.Parent is InputFrame ? BorderStyle.None : BorderStyle.FixedSingle;
+                InputFrame.Wrap(number);
                 return;
             case ComboBox combo:
                 combo.BackColor = Field;
                 combo.ForeColor = Palette.IsSystemContrast ? SystemColors.WindowText : Text;
                 combo.FlatStyle = FlatStyle.Flat;
+                InputFrame.Wrap(combo);
                 return;
             case CheckBox check:
                 check.UseVisualStyleBackColor = false;
@@ -99,7 +109,7 @@ public static class AppTheme
                 page.UseVisualStyleBackColor = false;
                 break;
         }
-        foreach (Control child in control.Controls) Apply(child);
+        foreach (var child in control.Controls.Cast<Control>().ToArray()) Apply(child);
     }
 
     public static void ApplyButton(Button button, bool primary)
