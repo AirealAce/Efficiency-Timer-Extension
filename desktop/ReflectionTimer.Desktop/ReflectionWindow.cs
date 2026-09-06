@@ -18,9 +18,9 @@ public sealed class ReflectionWindow : Form
         popupPosition = app.Engine.Snapshot.PopupPosition;
         Text = prompt.IsTest ? "Reflection Timer — test prompt" : "Reflection Timer — session complete";
         Size = new(560, 440); MinimumSize = new(480, 360); StartPosition = FormStartPosition.Manual;
-        Font = new("Segoe UI", 11); Padding = new(20); BackColor = DarkTheme.Background;
+        Font = new("Segoe UI", 11); Padding = new(20); BackColor = AppTheme.Background;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information;
-        var heading = new Label { Text = "How did you spend your time?", Dock = DockStyle.Top, Height = 45, Font = new("Segoe UI", 19, FontStyle.Bold), ForeColor = Widgets.Ink };
+        var heading = new ThemeHeader("How did you spend your time?", compact: true);
         var context = new Label { Text = prompt.IsTest ? "TEST MODE · saves only to the test tab" : $"{MainWindow.Clock(prompt.DurationSeconds)} session · saved locally before sending", Dock = DockStyle.Top, Height = 42, ForeColor = Widgets.Green };
         var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 53, FlowDirection = FlowDirection.RightToLeft };
         actions.Controls.Add(Widgets.Button("Save & send", (_, _) => Save(), true));
@@ -36,7 +36,7 @@ public sealed class ReflectionWindow : Form
         Shown += (_, _) => { PlaceOnOpeningScreen(); response.Focus(); response.SelectionStart = response.TextLength; };
         FormClosing += (_, e) => { if (!saving && !PersistDraft()) e.Cancel = true; };
         FormClosed += (_, _) => draftDelay.Dispose();
-        DarkTheme.Apply(this);
+        AppTheme.Apply(this);
         PlaceOnOpeningScreen(); // Pick the target monitor before the native handle and DPI scaling.
     }
     protected override void OnLoad(EventArgs e)
@@ -60,6 +60,6 @@ public sealed class ReflectionWindow : Form
         if (saving) return;
         try {
             app.Engine.QueueReflection(prompt.Id, response.Text); saving = true; draftDelay.Stop(); Close(); _ = app.Sync();
-        } catch (Exception error) { status.Text = error.Message; status.ForeColor = DarkTheme.Error; response.Focus(); }
+        } catch (Exception error) { status.Text = error.Message; status.ForeColor = AppTheme.Error; response.Focus(); }
     }
 }

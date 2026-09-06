@@ -10,7 +10,6 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        DarkTheme.Initialize();
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReflectionTimerDesktop");
         var index = Array.IndexOf(args, "--data-dir");
         if (index >= 0 && index + 1 < args.Length) directory = Path.GetFullPath(args[index + 1]);
@@ -38,6 +37,7 @@ internal static class Program
                 Environment.ExitCode = reply.Success ? 0 : 1;
                 return;
             }
+            AppTheme.Initialize(() => store.Load().Theme);
             using var app = new TimerApplication(store, directory, show);
             Application.ThreadException += (_, _) => app.ShowError("An unexpected app error occurred. Your last committed state is retained. Export diagnostics if this repeats.");
             app.OpenUnlessTray(args.Contains("--tray"));

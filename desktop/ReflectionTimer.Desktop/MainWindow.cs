@@ -32,6 +32,9 @@ public sealed class MainWindow : Form
     private readonly TextBox token = new() { Width = 750, UseSystemPasswordChar = true };
     private readonly Label alertSoundChoice = Widgets.Text("");
     private readonly ComboBox popupPosition = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Reflection popup position" };
+    private readonly ComboBox themeChoice = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "App theme" };
+    private readonly ThemePreview themePreview = new();
+    private readonly Label themeNotice = Widgets.Text("");
     private readonly ComboBox mode = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox sheetName = new() { Width = 350 };
     private readonly CheckBox logging = new() { Text = "Record local diagnostic events", AutoSize = true };
@@ -50,12 +53,12 @@ public sealed class MainWindow : Form
         this.app = app;
         scheduledRepeat = new(() => scheduledStart.Value);
         Text = "Reflection Timer Desktop"; Size = new(940, 810); MinimumSize = new(880, 700);
-        StartPosition = FormStartPosition.CenterScreen; Font = new("Segoe UI", 10); BackColor = DarkTheme.Background;
+        StartPosition = FormStartPosition.CenterScreen; Font = new("Segoe UI", 10); BackColor = AppTheme.Background;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information;
-        var header = new Label { Text = "Reflection Timer", Dock = DockStyle.Top, Height = 72, Font = new("Segoe UI", 26, FontStyle.Bold), ForeColor = Widgets.Green, Padding = new(20, 12, 0, 0) };
+        var header = new ThemeHeader("Reflection Timer");
         Controls.Add(tabs); Controls.Add(status); Controls.Add(header);
         var timer = Widgets.Page(tabs, "Timer");
-        migration.ForeColor = DarkTheme.Warning;
+        migration.ForeColor = AppTheme.Warning;
         timer.Controls.Add(migration); timer.Controls.Add(display); timer.Controls.Add(timerStatus); timer.Controls.Add(duration);
         start = Widgets.Button("Start", (_, _) => Safe(() => {
             if (!app.Engine.Snapshot.ExtensionDisabledConfirmed) throw new InvalidOperationException("Turn off the Chrome extension, then confirm the switch in Settings.");
@@ -113,6 +116,21 @@ public sealed class MainWindow : Form
 
         var settings = Widgets.Page(tabs, "Settings");
         settings.Controls.Add(Widgets.Text("Display"));
+        settings.Controls.Add(Widgets.Text("App theme"));
+        themeChoice.Items.AddRange(["Dark", "Light", "High Contrast", "Glamour"]);
+        settings.Controls.Add(themeChoice); settings.Controls.Add(themePreview); settings.Controls.Add(themeNotice);
+        themeChoice.SelectedIndexChanged += (_, _) => {
+            if (binding || themeChoice.SelectedIndex < 0) return;
+            try {
+                app.Engine.SetTheme((AppColorTheme)themeChoice.SelectedIndex);
+                RenderThemeChoice(app.Engine.Snapshot.Theme);
+                SetStatus("Theme saved. " + themeNotice.Text);
+            }
+            catch {
+                RenderThemeChoice(app.Engine.Snapshot.Theme);
+                SetStatus("Could not save the theme. Your previous choice is unchanged.", true);
+            }
+        };
         settings.Controls.Add(Widgets.Text("Reflection popup position"));
         popupPosition.Items.AddRange(["Center", "Top left", "Top right", "Bottom left", "Bottom right"]);
         settings.Controls.Add(popupPosition);
@@ -187,11 +205,24 @@ public sealed class MainWindow : Form
         FormClosing += (_, e) => {
             if (!AllowExit && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); app.Log.Record("app.hidden"); }
         };
-        DarkTheme.Apply(this);
+        AppTheme.Apply(this);
     }
     public void FocusHours() { if (tabs.SelectedIndex == 0) duration.FocusHours(); }
     private static int PopupPositionIndex(ReflectionPopupPosition position) => Enum.IsDefined(position) ? (int)position : 0;
-    public void SetStatus(string text, bool error = false) { status.Text = text; status.ForeColor = error ? DarkTheme.Error : Widgets.Green; }
+    private void RenderThemeChoice(AppColorTheme theme)
+    {
+        var wasBinding = binding; binding = true;
+        try {
+            theme = AppTheme.Normalize(theme);
+            themeChoice.SelectedIndex = (int)theme; themePreview.ShowTheme(theme);
+            themeNotice.Text = AppTheme.Palette.IsSystemContrast
+                ? "Windows high-contrast colors take priority. Your chosen theme is saved for the next launch without Windows high contrast."
+                : theme == AppTheme.Preference ? "Active theme. Changes save immediately and apply after you quit and reopen the app."
+                : $"{AppTheme.Name(theme)} is saved for next launch. When ready, use Quit desktop app (not X), then reopen it. Save any unfinished schedule edits first.";
+        }
+        finally { binding = wasBinding; }
+    }
+    public void SetStatus(string text, bool error = false) { status.Text = text; status.ForeColor = error ? AppTheme.Error : Widgets.Green; }
     private void Safe(Action action) { try { action(); } catch (Exception error) { app.Log.Record("error.unexpected"); SetStatus(error.Message, true); } }
     public static string Clock(int total) => total >= 3600 ? $"{total / 3600}:{total / 60 % 60:00}:{total % 60:00}" : $"{total / 60:00}:{total % 60:00}";
     public void RenderClock()
@@ -205,6 +236,7 @@ public sealed class MainWindow : Form
     public void Render(AppState state)
     {
         binding = true;
+        RenderThemeChoice(state.Theme);
         popupPosition.SelectedIndex = PopupPositionIndex(state.PopupPosition);
         alertSoundChoice.Text = string.IsNullOrEmpty(state.AlertSoundPath) ? "Default · original extension sound (popup.mp3)" : "Custom MP3 · " + Path.GetFileName(state.AlertSoundPath);
         if (state.Timer.IsRunning || !duration.Dirty) duration.LoadSeconds(state.Timer.DurationSeconds, true);

@@ -12,13 +12,22 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        DarkTheme.Initialize();
-        if (args is ["--seed-ui", var path]) {
+        var smokeTheme = args is ["--theme-smoke", var selected] ? Enum.Parse<AppColorTheme>(selected) : AppColorTheme.Dark;
+        AppTheme.Initialize(() => smokeTheme);
+        if (args.Length >= 2 && args[0] == "--seed-ui") {
+            var path = args[1];
+            var theme = args.Length == 3 ? Enum.Parse<AppColorTheme>(args[2]) : AppColorTheme.Dark;
+            if (!Enum.IsDefined(theme)) throw new ArgumentException("Choose a valid QA theme.");
             // An isolated, unconnected fixture; never changes the production data or Chrome.
             if (!Path.GetFileName(path).StartsWith("ReflectionTimer-QA-", StringComparison.Ordinal)) throw new ArgumentException("Use a dedicated ReflectionTimer-QA-* directory.");
             if (Directory.Exists(path)) throw new ArgumentException("The QA directory must be new.");
-            new EncryptedStore(path).Save(new AppState { ExtensionDisabledConfirmed = true, Timer = new TimerState { Volume = 0, DurationSeconds = 10, RemainingSeconds = 10 } });
+            new EncryptedStore(path).Save(new AppState { Theme = theme, ExtensionDisabledConfirmed = true, Timer = new TimerState { Volume = 0, DurationSeconds = 10, RemainingSeconds = 10 } });
             return 0;
+        }
+        if (args is ["--theme-smoke", _]) {
+            TestTheme(); TestStorage();
+            Console.WriteLine($"\n{passed} passed; {failed} failed. Theme: {AppTheme.Preference}");
+            return failed == 0 ? 0 : 1;
         }
         Test("default and detached snapshots", () => { var f = new Fixture(); Equal(1500, f.Engine.Snapshot.Timer.DurationSeconds); f.Engine.Snapshot.Prompts.Add(new(Guid.NewGuid(), 0, 30, 0, true)); Equal(0, f.Engine.Snapshot.Prompts.Count); });
         Test("absolute deadline and ceiling", () => { var f = new Fixture(); f.Engine.Start(60, false, 500); f.Move(10.2); Equal(50, TimerEngine.Remaining(f.Engine.Snapshot.Timer, f.Engine.Now)); Equal(100, f.Engine.Snapshot.Timer.Volume); });
@@ -59,12 +68,58 @@ internal static class Program
         Test("valid connection and validation failures", () => { Is(SheetsClient.Validate(Connection) is null); Is(SheetsClient.Validate(Connection with { ApiToken = "short" }) is not null); Is(SheetsClient.Validate(Connection with { SheetUrl = "https://evil.test/sheet" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "oops" }) is not null); Is(SheetsClient.Validate(Connection with { SheetMode = "fixed", SheetName = "" }) is not null); });
         TestAutoRestartCutoff();
         TestDisplayPlacement();
+        TestThemePreferences();
         Task.Run(TestAlertSounds).GetAwaiter().GetResult();
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
         TestTheme();
         Console.WriteLine($"\n{passed} passed; {failed} failed.");
         return failed == 0 ? 0 : 1;
+    }
+
+    private static void TestThemePreferences()
+    {
+        Test("theme migration and unknown values fall back to dark", () => {
+            Equal(AppColorTheme.Dark, new AppState().Theme);
+            Equal(AppColorTheme.Dark, JsonSerializer.Deserialize<AppState>("{}", DataJson.Options)!.Theme);
+            Equal(AppColorTheme.Dark, AppTheme.Normalize((AppColorTheme)99));
+            Equal(AppTheme.PaletteFor(AppColorTheme.Dark), AppTheme.PaletteFor((AppColorTheme)99));
+        });
+        foreach (var theme in Enum.GetValues<AppColorTheme>()) Test("theme persists without changing timer or drafts: " + theme, () => {
+            var f = new Fixture(); f.Engine.Start(30, true, 37); f.Add(100, 60);
+            var id = f.Engine.TestPrompt(); f.Engine.SaveDraft(id, "theme test draft");
+            f.Engine.SetPopupPosition(ReflectionPopupPosition.BottomLeft);
+            var before = f.Engine.Snapshot; f.Engine.SetTheme(theme);
+            f.Engine.SaveSettings(Connection, true, false, true); f.Engine.SetAlertSound("");
+            var saved = f.Restart().Snapshot; Equal(theme, saved.Theme);
+            Equal(before.Timer, saved.Timer); Equal(before.Schedules.Single(), saved.Schedules.Single());
+            Equal(before.Prompts.Single(), saved.Prompts.Single()); Equal(before.PopupPosition, saved.PopupPosition);
+        });
+        Test("invalid theme and failed save are atomic", () => {
+            var f = new Fixture(); var changes = 0; f.Engine.Changed += () => changes++;
+            Throws<ArgumentException>(() => f.Engine.SetTheme((AppColorTheme)99)); Equal(0, f.Store.Writes);
+            f.Engine.SetTheme(AppColorTheme.Glamour); changes = 0; f.Store.Fail = true;
+            Throws<IOException>(() => f.Engine.SetTheme(AppColorTheme.Light)); Equal(0, changes);
+            Equal(AppColorTheme.Glamour, f.Engine.Snapshot.Theme);
+        });
+        foreach (var theme in Enum.GetValues<AppColorTheme>()) Test("readable theme palette: " + theme, () => {
+            var p = AppTheme.PaletteFor(theme);
+            foreach (var background in new[] { p.Background, p.Field, p.Raised })
+                foreach (var foreground in new[] { p.Text, p.Muted, p.Warning, p.Error, p.Accent })
+                    Is(Contrast(background, foreground) >= 4.5);
+            Is(Contrast(p.PrimaryButton, p.AccentText) >= 4.5);
+            Is(Contrast(p.Selection, p.SelectionText) >= 4.5);
+            if (theme == AppColorTheme.HighContrast) {
+                Is(Contrast(p.Background, p.Text) >= 7); Is(Contrast(p.Field, p.Border) >= 7);
+            }
+        });
+        Test("Windows contrast colors override every theme without decorations", () => {
+            foreach (var theme in Enum.GetValues<AppColorTheme>()) {
+                var p = AppTheme.PaletteFor(theme, true); Is(p.IsSystemContrast); Is(!p.IsGlamour);
+                Equal(SystemColors.Control, p.Background); Equal(SystemColors.Window, p.Field);
+                Equal(SystemColors.ControlText, p.Text); Equal(SystemColors.Highlight, p.PrimaryButton);
+            }
+        });
     }
 
     private static void TestDisplayPlacement()
@@ -358,6 +413,37 @@ internal static class Program
         var root = Path.Combine(Path.GetTempPath(), "ReflectionTimer-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try {
+            Test("theme saves encrypted and logs only its enum", () => {
+                var directory = Path.Combine(root, "theme"); var store = new EncryptedStore(directory);
+                store.Save(new AppState { Theme = AppColorTheme.Glamour }); Equal(AppColorTheme.Glamour, store.Load().Theme);
+                var log = new DiagnosticLog(directory); log.Record("theme.changed", value: 3);
+                Is(JsonSerializer.Serialize(log.Report(store.Load())).Contains("Glamour")); Equal(1, log.Recent().Count);
+            });
+            Test("theme selector saves immediately and preview never changes active windows", () => {
+                var directory = Path.Combine(root, "theme-ui"); var store = new EncryptedStore(directory);
+                store.Save(new AppState { Theme = AppTheme.Preference });
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var app = new TimerApplication(store, directory, show);
+                using var main = new MainWindow(app); main.Render(app.Engine.Snapshot);
+                var selector = Descendants(main).OfType<ComboBox>().Single(x => x.AccessibleName == "App theme");
+                var preview = Descendants(main).OfType<ThemePreview>().Single();
+                Equal(4, selector.Items.Count); Equal((int)AppTheme.Preference, selector.SelectedIndex);
+                var original = main.BackColor;
+                foreach (var theme in Enum.GetValues<AppColorTheme>()) {
+                    selector.SelectedIndex = (int)theme; Equal(theme, store.Load().Theme);
+                    Equal(original, main.BackColor); Is(preview.AccessibleName!.StartsWith(AppTheme.Name(theme)));
+                    Equal(0, Descendants(preview).OfType<Button>().Count()); Is(!preview.TabStop);
+                }
+                main.Show();
+                using var bitmap = new Bitmap(main.Width, main.Height); main.DrawToBitmap(bitmap, main.ClientRectangle);
+                using var prompt = new ReflectionWindow(app, new(Guid.NewGuid(), 0, 10, 0, true, "theme draft"));
+                prompt.Show(); Equal(AppTheme.Background, prompt.BackColor);
+                var editor = Descendants(prompt).OfType<TextBox>().Single(); Equal("theme draft", editor.Text);
+                Equal(AppTheme.Field, editor.BackColor);
+                var header = Descendants(prompt).OfType<ThemeHeader>().Single();
+                Equal(AppTheme.Palette.IsGlamour ? "Georgia" : "Segoe UI", header.Font.Name);
+                prompt.Close();
+            });
             Test("display preference is encrypted and included in safe diagnostics", () => {
                 var directory = Path.Combine(root, "display"); var store = new EncryptedStore(directory);
                 var state = new AppState { PopupPosition = ReflectionPopupPosition.BottomLeft }; store.Save(state);
@@ -443,42 +529,42 @@ internal static class Program
             Equal(12, SessionStartInput.Parse("9/5/2026 12:00 PM").Hour);
             Throws<ArgumentException>(() => SessionStartInput.Parse("02/30/2026 01:00 PM"));
             Throws<ArgumentException>(() => SessionStartInput.Parse("not a date"));
-            DarkTheme.Apply(input); Equal(DarkTheme.Field, input.BackColor);
+            AppTheme.Apply(input); Equal(AppTheme.Field, input.BackColor);
         });
         Test("dark theme text and semantic colors have readable contrast", () => {
             if (SystemInformation.HighContrast) return; // The user's accessibility palette takes precedence.
-            foreach (var background in new[] { DarkTheme.Background, DarkTheme.Field, DarkTheme.Raised })
-                foreach (var foreground in new[] { DarkTheme.Text, DarkTheme.Muted, DarkTheme.Warning, DarkTheme.Error, DarkTheme.Accent })
+            foreach (var background in new[] { AppTheme.Background, AppTheme.Field, AppTheme.Raised })
+                foreach (var foreground in new[] { AppTheme.Text, AppTheme.Muted, AppTheme.Warning, AppTheme.Error, AppTheme.Accent })
                     Is(Contrast(background, foreground) >= 4.5);
-            Is(Contrast(DarkTheme.Accent, DarkTheme.AccentText) >= 4.5);
-            Is(Contrast(DarkTheme.Selection, DarkTheme.SelectionText) >= 4.5);
+            Is(Contrast(AppTheme.Accent, AppTheme.AccentText) >= 4.5);
+            Is(Contrast(AppTheme.Selection, AppTheme.SelectionText) >= 4.5);
         });
         Test("theme styles nested inputs without changing values or masking", () => {
             using var form = new Form(); var panel = new FlowLayoutPanel(); form.Controls.Add(panel);
             var input = new TextBox { Text = "unchanged", UseSystemPasswordChar = true };
             var number = new NumericUpDown { Value = 12 }; var check = new CheckBox { Checked = true };
-            var warning = new Label { Text = "Warning", ForeColor = DarkTheme.Warning };
-            panel.Controls.AddRange([input, number, check, warning]); DarkTheme.Apply(form); DarkTheme.Apply(form);
-            Equal(DarkTheme.Background, form.BackColor); Equal(DarkTheme.Background, panel.BackColor);
-            Equal(DarkTheme.Field, input.BackColor); Equal(DarkTheme.Field, number.BackColor);
+            var warning = new Label { Text = "Warning", ForeColor = AppTheme.Warning };
+            panel.Controls.AddRange([input, number, check, warning]); AppTheme.Apply(form); AppTheme.Apply(form);
+            Equal(AppTheme.Background, form.BackColor); Equal(AppTheme.Background, panel.BackColor);
+            Equal(AppTheme.Field, input.BackColor); Equal(AppTheme.Field, number.BackColor);
             Equal("unchanged", input.Text); Is(input.UseSystemPasswordChar); Equal(12m, number.Value); Is(check.Checked);
-            Equal(DarkTheme.Warning, warning.ForeColor);
+            Equal(AppTheme.Warning, warning.ForeColor);
         });
         Test("dark table theme covers headers, rows and selected cells", () => {
             using var grid = Widgets.Grid("Entry", "Status"); grid.Rows.Add("example", "Pending");
-            Equal(DarkTheme.Field, grid.BackgroundColor); Is(!grid.EnableHeadersVisualStyles);
-            Equal(DarkTheme.Raised, grid.ColumnHeadersDefaultCellStyle.BackColor);
-            Equal(DarkTheme.Selection, grid.DefaultCellStyle.SelectionBackColor);
-            Equal(DarkTheme.SelectionText, grid.DefaultCellStyle.SelectionForeColor);
+            Equal(AppTheme.Field, grid.BackgroundColor); Is(!grid.EnableHeadersVisualStyles);
+            Equal(AppTheme.Raised, grid.ColumnHeadersDefaultCellStyle.BackColor);
+            Equal(AppTheme.Selection, grid.DefaultCellStyle.SelectionBackColor);
+            Equal(AppTheme.SelectionText, grid.DefaultCellStyle.SelectionForeColor);
             Equal("example", grid.Rows[0].Cells[0].Value);
         });
         Test("primary and secondary buttons retain their dark-theme roles", () => {
             using var primary = Widgets.Button("Save & send", (_, _) => { }, true);
             using var secondary = Widgets.Button("Later", (_, _) => { });
             using var form = new Form(); form.Controls.AddRange([primary, secondary]);
-            var original = primary.BackColor; DarkTheme.Apply(form);
-            Equal(original, primary.BackColor); Equal(DarkTheme.AccentText, primary.ForeColor);
-            Equal(DarkTheme.Raised, secondary.BackColor); Equal(DarkTheme.Text, secondary.ForeColor);
+            var original = primary.BackColor; AppTheme.Apply(form);
+            Equal(original, primary.BackColor); Equal(AppTheme.AccentText, primary.ForeColor);
+            Equal(AppTheme.Raised, secondary.BackColor); Equal(AppTheme.Text, secondary.ForeColor);
             Is(!primary.UseMnemonic); Equal(FlatStyle.Flat, secondary.FlatStyle);
         });
     }

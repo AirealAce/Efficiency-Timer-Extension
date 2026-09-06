@@ -5,14 +5,14 @@ namespace ReflectionTimer.Desktop;
 
 public static class Widgets
 {
-    public static Color Ink => DarkTheme.Text;
-    public static Color Muted => DarkTheme.Muted;
-    public static Color Green => DarkTheme.Accent;
+    public static Color Ink => AppTheme.Text;
+    public static Color Muted => AppTheme.Muted;
+    public static Color Green => AppTheme.Accent;
     public static Label Text(string text, int width = 750) => new() { Text = text, AutoSize = true, MaximumSize = new(width, 0), ForeColor = Muted, Margin = new(0, 6, 0, 10) };
     public static Button Button(string text, EventHandler action, bool primary = false)
     {
         var button = new Button { Text = text, UseMnemonic = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(110, 36), Padding = new(10, 4, 10, 4), Margin = new(0, 4, 10, 4) };
-        DarkTheme.ApplyButton(button, primary);
+        AppTheme.ApplyButton(button, primary);
         button.Click += action; return button;
     }
     public static FlowLayoutPanel Row(params Control[] controls)
@@ -22,7 +22,7 @@ public static class Widgets
     }
     public static FlowLayoutPanel Page(TabControl tabs, string title)
     {
-        var tab = new TabPage(title) { BackColor = DarkTheme.Background, Padding = new(18) };
+        var tab = new TabPage(title) { BackColor = AppTheme.Background, Padding = new(18) };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         tab.Controls.Add(flow); tabs.TabPages.Add(tab); return flow;
     }
@@ -31,7 +31,7 @@ public static class Widgets
         var grid = new DataGridView { Width = 750, Height = 230, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
             MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
             RowHeadersVisible = false, BorderStyle = BorderStyle.FixedSingle, Margin = new(0, 6, 0, 8) };
-        DarkTheme.ApplyGrid(grid);
+        AppTheme.ApplyGrid(grid);
         foreach (var name in columns) grid.Columns.Add(name.Replace(" ", ""), name);
         return grid;
     }

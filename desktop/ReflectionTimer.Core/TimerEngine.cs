@@ -220,6 +220,10 @@ public sealed class TimerEngine
         if (!Enum.IsDefined(position)) throw new ArgumentException("Choose a reflection popup position from the list.");
         s.PopupPosition = position;
     }, value: (int)position);
+    public void SetTheme(AppColorTheme theme) => Change("theme.changed", s => {
+        if (!Enum.IsDefined(theme)) throw new ArgumentException("Choose a theme from the list.");
+        s.Theme = theme;
+    }, value: (int)theme);
     public void SetAlertSound(string path) => Change("sound.changed", s => {
         if (path.Length > 0 && (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".mp3", StringComparison.OrdinalIgnoreCase)))
             throw new ArgumentException("Choose a local MP3 file.");
