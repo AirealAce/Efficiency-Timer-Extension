@@ -2,7 +2,8 @@ namespace ReflectionTimer.Core;
 
 public enum SoundEvent { SessionEnd, Success, Failure, LowTime }
 public enum SoundBehavior { Disruptive = 0, Assertive = 1, Polite = 2 }
-public enum LibrarySound { Default, SessionEnd, ObtainedItem, LevelUp, PokemonHealed, KeyItem, TrainerBattle, ChampionBattle, OutOfHealth }
+// Append new values: existing encrypted selections use these stable IDs.
+public enum LibrarySound { Default, SessionEnd, ObtainedItem, LevelUp, PokemonHealed, KeyItem, TrainerBattle, ChampionBattle, OutOfHealth, None }
 
 public record SoundSetting
 {

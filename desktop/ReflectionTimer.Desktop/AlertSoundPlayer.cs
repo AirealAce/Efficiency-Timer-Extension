@@ -3,7 +3,7 @@ using ReflectionTimer.Core;
 
 namespace ReflectionTimer.Desktop;
 
-public enum AlertSoundResult { Played, DefaultFallback, Muted, Cancelled, Failed }
+public enum AlertSoundResult { Played, DefaultFallback, Muted, Cancelled, Failed, PreviewFinished }
 
 public interface IAlertAudioBackend
 {
@@ -77,39 +77,47 @@ public sealed class AlertSoundPlayer : IDisposable
     public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "popup.mp3");
     private readonly IAlertAudioBackend backend;
     private readonly string defaultPath;
+    private readonly TimeProvider timeProvider;
+    public static TimeSpan PreviewDuration => TimeSpan.FromSeconds(5);
     private readonly object gate = new();
     private readonly List<Voice> voices = [];
     private Task stopping = Task.CompletedTask;
     private bool disposed;
 
-    private sealed class Voice(int volume, SoundBehavior behavior, SoundEvent kind)
+    private sealed class Voice(int volume, SoundBehavior behavior, SoundEvent kind, bool preview)
     {
         public readonly CancellationTokenSource Cancellation = new();
         public readonly TaskCompletionSource Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public readonly AudioLevel Level = new(volume);
         public readonly SoundBehavior Behavior = behavior;
         public readonly SoundEvent Kind = kind;
+        public readonly bool Preview = preview;
         public bool Running;
     }
 
-    public AlertSoundPlayer(IAlertAudioBackend? backend = null, string? defaultPath = null)
+    public AlertSoundPlayer(IAlertAudioBackend? backend = null, string? defaultPath = null, TimeProvider? timeProvider = null)
     {
         this.backend = backend ?? new Mp3AudioBackend();
         this.defaultPath = defaultPath ?? BundledPath;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public Task<AlertSoundResult> PlayAsync(string customPath, int volume) =>
         PlayAsync(customPath, volume, SoundBehavior.Disruptive, SoundEvent.SessionEnd);
 
-    public Task<AlertSoundResult> PlayAsync(string path, int volume, SoundBehavior behavior, SoundEvent kind, string? fallback = null)
+    public Task<AlertSoundResult> PlayAsync(string? path, int volume, SoundBehavior behavior, SoundEvent kind, string? fallback = null, bool preview = false)
     {
         lock (gate) {
             if (disposed) return Task.FromResult(AlertSoundResult.Cancelled);
+            // Even None replaces the previous preview, but never stops a real
+            // session sound or falls back to a bundled file.
+            if (preview) CancelVoices(voices.Where(x => x.Preview).ToArray());
+            if (path is null) return Task.FromResult(AlertSoundResult.Muted);
             if (volume <= 0) return Task.FromResult(AlertSoundResult.Muted); // Muted events cannot interrupt audible ones.
             if (!Enum.IsDefined(behavior)) behavior = SoundBehavior.Disruptive;
             if (behavior == SoundBehavior.Disruptive) CancelVoices(voices.ToArray());
             if (voices.Count >= 32) return Task.FromResult(AlertSoundResult.Cancelled);
-            var request = new Voice(volume, behavior, kind); voices.Add(request);
+            var request = new Voice(volume, behavior, kind, preview); voices.Add(request);
             var waitForStops = stopping;
             return Task.Run(() => RunAsync(path, fallback ?? defaultPath, request, waitForStops));
         }
@@ -117,10 +125,13 @@ public sealed class AlertSoundPlayer : IDisposable
 
     private async Task<AlertSoundResult> RunAsync(string path, string fallback, Voice request, Task waitForStops)
     {
-        var token = request.Cancellation.Token;
+        using var limit = request.Preview ? new CancellationTokenSource(Timeout.InfiniteTimeSpan, timeProvider) : null;
+        using var linked = limit is null ? null : CancellationTokenSource.CreateLinkedTokenSource(request.Cancellation.Token, limit.Token);
+        var token = linked?.Token ?? request.Cancellation.Token;
         try {
             await waitForStops.WaitAsync(token).ConfigureAwait(false);
             lock (gate) { token.ThrowIfCancellationRequested(); request.Running = true; UpdateGains(); }
+            limit?.CancelAfter(PreviewDuration); // One budget shared by the selected file and any fallback.
             if (!string.IsNullOrEmpty(path)) {
                 try {
                     await backend.PlayAsync(path, request.Level, token).ConfigureAwait(false);
@@ -136,7 +147,8 @@ public sealed class AlertSoundPlayer : IDisposable
             await backend.PlayAsync(fallback, request.Level, token).ConfigureAwait(false);
             return AlertSoundResult.Played;
         }
-        catch (OperationCanceledException) { return AlertSoundResult.Cancelled; }
+        catch (OperationCanceledException) { return limit?.IsCancellationRequested == true && !request.Cancellation.IsCancellationRequested
+            ? AlertSoundResult.PreviewFinished : AlertSoundResult.Cancelled; }
         catch (Exception) { return AlertSoundResult.Failed; }
         finally {
             lock (gate) {

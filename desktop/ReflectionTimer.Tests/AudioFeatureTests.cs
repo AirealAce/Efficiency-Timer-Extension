@@ -110,17 +110,18 @@ internal static partial class Program
             control.LoadOptions(control.Selection, 100); Equal(300, control.Selection.ThresholdSeconds);
         });
         Test("all available library copies decode, and every event resolves its default", () => {
-            foreach (var track in Enum.GetValues<LibrarySound>().Skip(1)) {
+            foreach (var track in SoundLibrary.Tracks) {
                 var path = Path.Combine(AppContext.BaseDirectory, SoundLibrary.FileName(track));
                 if (File.Exists(path)) Equal(path, Mp3AudioBackend.ValidateCustomFile(path));
             }
             foreach (var kind in Enum.GetValues<SoundEvent>())
-                Is(SoundLibrary.Resolve(kind, new()).EndsWith(SoundLibrary.FileName(SoundLibrary.DefaultFor(kind))));
+                Is(SoundLibrary.Resolve(kind, new())!.EndsWith(SoundLibrary.FileName(SoundLibrary.DefaultFor(kind))));
         });
     }
 
     private static async Task TestAudioPolicies()
     {
+        await TestPreviewAudio();
         await TestAsync("Polite voices overlap without changing each other's volumes", async () => {
             var backend = new ControlledAudio(); using var player = new AlertSoundPlayer(backend);
             var first = player.PlayAsync("a", 80, SoundBehavior.Polite, SoundEvent.LowTime); var a = await backend.Wait("a");

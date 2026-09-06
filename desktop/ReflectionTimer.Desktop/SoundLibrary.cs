@@ -4,6 +4,7 @@ namespace ReflectionTimer.Desktop;
 
 public static class SoundLibrary
 {
+    public static IEnumerable<LibrarySound> Tracks => Enum.GetValues<LibrarySound>().Where(x => x is not (LibrarySound.Default or LibrarySound.None));
     public static LibrarySound DefaultFor(SoundEvent kind) => kind switch {
         SoundEvent.Success => LibrarySound.LevelUp, SoundEvent.Failure => LibrarySound.OutOfHealth,
         SoundEvent.LowTime => LibrarySound.TrainerBattle, _ => LibrarySound.SessionEnd
@@ -13,15 +14,15 @@ public static class SoundLibrary
         LibrarySound.LevelUp => "Level Up — Pokémon", LibrarySound.PokemonHealed => "Pokémon Healed",
         LibrarySound.KeyItem => "Obtained a Key Item — Pokémon", LibrarySound.TrainerBattle => "Battle (Trainer) — Pokémon",
         LibrarySound.ChampionBattle => "Battle (Champion) — Pokémon", LibrarySound.OutOfHealth => "Out of Health — Kirby",
-        _ => "Default"
+        LibrarySound.None => "None", _ => "Default"
     };
     public static string FileName(LibrarySound track) => track switch {
         LibrarySound.ObtainedItem => "pokemon-obtained-item.mp3", LibrarySound.LevelUp => "pokemon-level-up.mp3",
         LibrarySound.PokemonHealed => "pokemon-healed.mp3", LibrarySound.KeyItem => "pokemon-key-item.mp3",
         LibrarySound.TrainerBattle => "pokemon-battle-trainer.mp3", LibrarySound.ChampionBattle => "pokemon-battle-champion.mp3",
-        LibrarySound.OutOfHealth => "kirby-out-of-health.mp3", _ => "popup.mp3"
+        LibrarySound.OutOfHealth => "kirby-out-of-health.mp3", LibrarySound.None => throw new ArgumentException("None has no audio file."), _ => "popup.mp3"
     };
-    public static string Resolve(SoundEvent kind, SoundSetting setting) => setting.Mp3Path.Length > 0 ? setting.Mp3Path
+    public static string? Resolve(SoundEvent kind, SoundSetting setting) => setting.Track == LibrarySound.None ? null : setting.Mp3Path.Length > 0 ? setting.Mp3Path
         : Path.Combine(AppContext.BaseDirectory, FileName(setting.Track == LibrarySound.Default ? DefaultFor(kind) : setting.Track));
     public static string Fallback(SoundEvent kind)
     {

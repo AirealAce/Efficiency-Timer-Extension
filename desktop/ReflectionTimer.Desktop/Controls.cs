@@ -10,6 +10,8 @@ public static class Widgets
     public static Color Green => AppTheme.Accent;
     public static int FieldHeight(Control control) => Math.Max(38 * control.DeviceDpi / 96, control.Font.Height + 14 * control.DeviceDpi / 96);
     public static Label Text(string text, int width = 750) => new() { Text = text, AutoSize = true, MaximumSize = new(width, 0), ForeColor = Muted, Margin = new(0, 6, 0, 10) };
+    public static Label RowText(string text, int width) => new RowLabel { Text = text, Width = width, Height = 38,
+        TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted, Margin = new(0, 4, 10, 4) };
     public static Button Button(string text, EventHandler action, bool primary = false)
     {
         var button = new Button { Text = text, UseMnemonic = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(110, 38), Padding = new(10, 4, 10, 4), Margin = new(0, 4, 10, 4) };
@@ -37,6 +39,9 @@ public static class Widgets
         return grid;
     }
 }
+
+// Sized with the native fields after inheriting the form's font and DPI.
+public sealed class RowLabel : Label { }
 
 public sealed class DurationControl : UserControl
 {

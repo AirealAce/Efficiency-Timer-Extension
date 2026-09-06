@@ -84,6 +84,9 @@ public static class AppTheme
 
         switch (control)
         {
+            case RowLabel label:
+                label.Height = Widgets.FieldHeight(label);
+                break;
             case TextBox text:
                 text.BackColor = Field;
                 text.ForeColor = Palette.IsSystemContrast ? SystemColors.WindowText : Text;

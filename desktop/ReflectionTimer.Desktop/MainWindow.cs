@@ -9,7 +9,9 @@ public sealed class MainWindow : Form
     private readonly TimerApplication app;
     private readonly Action<bool> updateStartup;
     private readonly ThemeTabs tabs = new() { Dock = DockStyle.Fill };
-    private readonly Label status = new() { Dock = DockStyle.Bottom, Height = 56, Padding = new(20, 8, 20, 8), ForeColor = Widgets.Muted };
+    private readonly Label status = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true, ForeColor = Widgets.Muted };
+    private readonly Button saveSettingsButton;
+    public long StatusRevision { get; private set; }
     private readonly Label display = new() { Width = 750, Height = 90, TextAlign = ContentAlignment.MiddleCenter, Font = new("Consolas", 48, FontStyle.Bold), ForeColor = Widgets.Ink };
     private readonly Label timerStatus = Widgets.Text("");
     private readonly Label migration = Widgets.Text("");
@@ -60,7 +62,14 @@ public sealed class MainWindow : Form
         StartPosition = FormStartPosition.CenterScreen; Font = new("Segoe UI", 10); BackColor = AppTheme.Background;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information;
         var header = new ThemeHeader("Reflection Timer");
-        Controls.Add(tabs); Controls.Add(status); Controls.Add(header);
+        saveSettingsButton = Widgets.Button("Save settings", (_, _) => SaveSettings(), true);
+        saveSettingsButton.Anchor = AnchorStyles.Right;
+        saveSettingsButton.Margin = new(14, 0, 0, 0);
+        var statusBar = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 64, Padding = new(20, 8, 20, 8), ColumnCount = 2, RowCount = 1 };
+        statusBar.ColumnStyles.Add(new(SizeType.Percent, 100)); statusBar.ColumnStyles.Add(new(SizeType.AutoSize));
+        statusBar.RowStyles.Add(new(SizeType.Percent, 100));
+        statusBar.Controls.Add(status, 0, 0); statusBar.Controls.Add(saveSettingsButton, 1, 0);
+        Controls.Add(tabs); Controls.Add(statusBar); Controls.Add(header);
         var timer = Widgets.Page(tabs, "Timer");
         migration.ForeColor = AppTheme.Warning;
         timer.Controls.Add(migration); timer.Controls.Add(display); timer.Controls.Add(timerStatus); timer.Controls.Add(duration);
@@ -80,11 +89,18 @@ public sealed class MainWindow : Form
         timer.Controls.Add(repeat); timer.Controls.Add(lowTime); timer.Controls.Add(volume);
         lowTime.UserChanged += () => {
             if (binding) return;
-            try { app.Engine.SetLowTime(lowTime.Selection); SetStatus("Low-time options saved.", success: true); }
+            try { app.Engine.SetLowTime(lowTime.Selection); SetStatus("Low-time options saved."); }
             catch (Exception error) { lowTime.LoadOptions(app.Engine.Snapshot.Timer.LowTime, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds, true); SetStatus(error.Message, true); }
         };
         lowTime.Error += text => SetStatus(text, true);
         scheduledLowTime.Error += text => SetStatus(text, true);
+        lowTime.PreviewRequested += (options, automatic) => _ = app.PlaySound(SoundEvent.LowTime, volume.Value,
+            AudioSettings.From(app.Engine.Snapshot).ForLowTime(options), preview: true, announcePreview: !automatic);
+        scheduledLowTime.PreviewRequested += (options, automatic) => {
+            if (automatic) SetStatus("Session audio selected. Save the session to keep this choice.");
+            _ = app.PlaySound(SoundEvent.LowTime, scheduledVolume.Value,
+                AudioSettings.From(app.Engine.Snapshot).ForLowTime(options), preview: true, announcePreview: !automatic);
+        };
         repeat.UserChanged += SaveTimerPreferences;
         volume.UserChanged += SaveTimerPreferences;
         duration.UserChanged += RenderClock;
@@ -138,7 +154,7 @@ public sealed class MainWindow : Form
             try {
                 app.Engine.SetTheme((AppColorTheme)themeChoice.SelectedIndex);
                 RenderThemeChoice(app.Engine.Snapshot.Theme);
-                SetStatus("Theme saved. " + themeNotice.Text, success: true);
+                SetStatus("Theme saved. " + themeNotice.Text);
             }
             catch {
                 RenderThemeChoice(app.Engine.Snapshot.Theme);
@@ -152,7 +168,7 @@ public sealed class MainWindow : Form
             if (binding || popupPosition.SelectedIndex < 0) return;
             try {
                 app.Engine.SetPopupPosition((ReflectionPopupPosition)popupPosition.SelectedIndex);
-                SetStatus("Popup position saved. Applies the next time a reflection window opens.", success: true);
+                SetStatus("Popup position saved. Applies the next time a reflection window opens.");
             }
             catch {
                 binding = true;
@@ -163,7 +179,7 @@ public sealed class MainWindow : Form
         };
         settings.Controls.Add(Widgets.Text("Saves immediately for regular, scheduled, and test reflections. Uses the screen containing your mouse pointer when the popup opens, leaving space for the taskbar. An already-open reflection stays where it is."));
         audio = new AudioSettingsControl(app);
-        audio.Status += (text, error) => SetStatus(text, error, success: text == "Audio settings saved.");
+        audio.Status += (text, error) => SetStatus(text, error);
         settings.Controls.Add(audio);
         settings.Controls.Add(new SettingsSection("Chrome extension switch-over"));
         settings.Controls.Add(Widgets.Text("Switch over: open chrome://extensions, turn off Reflection Timer (leave it installed as a fallback), then check the confirmation below. This app does not read Chrome profile files or collect browser activity."));
@@ -179,8 +195,9 @@ public sealed class MainWindow : Form
         settings.Controls.Add(new SettingsSection("Startup & diagnostics"));
         settings.Controls.Add(login); settings.Controls.Add(logging);
         settings.Controls.Add(new SettingsSection("Save settings"));
-        settings.Controls.Add(Widgets.Row(Widgets.Button("Save settings", (_, _) => SaveSettings(), true), Widgets.Button("Save & test connection", async (_, _) => {
-            if (!SaveSettings()) return;
+        settings.Controls.Add(Widgets.Text("Ctrl+Enter or the bottom-right Save settings button saves your settings from anywhere on this page."));
+        settings.Controls.Add(Widgets.Row(Widgets.Button("Save & test connection", async (_, _) => {
+            if (!SaveSettings(feedback: false)) return;
             SetStatus("Checking the Sheets connection…");
             var result = await app.Sheets.Ping(app.Engine.Snapshot.Connection);
             app.Log.Record("connection.checked", value: result.Success ? 1 : 0);
@@ -196,12 +213,13 @@ public sealed class MainWindow : Form
                 if (MessageBox.Show(this, "Clear the local diagnostic log? Your timer, schedules, and reflections are not changed.", "Clear diagnostics", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                     Safe(() => { app.Log.Clear(); RenderDiagnostics(); });
             })));
-        tabs.SelectedIndexChanged += (_, _) => { if (tabs.SelectedIndex == 4) RenderDiagnostics(); if (tabs.SelectedIndex == 0) BeginInvoke(FocusHours); };
+        tabs.SelectedIndexChanged += (_, _) => { saveSettingsButton.Visible = tabs.SelectedIndex == 3; if (tabs.SelectedIndex == 4) RenderDiagnostics(); if (tabs.SelectedIndex == 0) BeginInvoke(FocusHours); };
         var initial = app.Engine.Snapshot;
         sheetUrl.Text = initial.Connection.SheetUrl; webAppUrl.Text = initial.Connection.WebAppUrl; token.Text = initial.Connection.ApiToken;
         mode.SelectedIndex = initial.Connection.SheetMode == "fixed" ? 1 : 0; sheetName.Text = initial.Connection.SheetName;
         logging.Checked = initial.LoggingEnabled; login.Checked = initial.StartAtLogin; disabledExtension.Checked = initial.ExtensionDisabledConfirmed;
         if (!initial.ExtensionDisabledConfirmed || SheetsClient.Validate(initial.Connection) is not null) tabs.SelectedIndex = 3;
+        saveSettingsButton.Visible = tabs.SelectedIndex == 3;
         Activated += (_, _) => app.Log.Record("app.activated"); Deactivate += (_, _) => app.Log.Record("app.deactivated");
         FormClosing += (_, e) => {
             if (!AllowExit && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); app.Log.Record("app.hidden"); }
@@ -209,6 +227,12 @@ public sealed class MainWindow : Form
         AppTheme.Apply(this);
     }
     public void FocusHours() { if (tabs.SelectedIndex == 0) duration.FocusHours(); }
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (tabs.SelectedIndex == 3 && keyData == (Keys.Control | Keys.Enter)) { SaveSettings(); return true; }
+        if (tabs.SelectedIndex == 3 && keyData == Keys.Enter && audio.ThresholdContainsFocus) { audio.LeaveThreshold(); return true; }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
     public void SetShortcutStatus(bool available)
     {
         shortcutNotice.Text = available ? "Ctrl+Alt+T · focus Reflection Timer from any app, including when minimized or hidden in the tray. The app must be running."
@@ -232,6 +256,7 @@ public sealed class MainWindow : Form
     }
     public void SetStatus(string text, bool error = false, bool success = false, bool silent = false)
     {
+        ++StatusRevision;
         status.Text = text; status.ForeColor = error ? AppTheme.Error : Widgets.Green;
         if (!silent && (error || success)) app.PlayFeedback(!error);
     }
@@ -305,17 +330,17 @@ public sealed class MainWindow : Form
         if (binding) return;
         Safe(() => {
             app.Engine.SetPreferences(repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
-            SetStatus("Timer preferences saved.", success: true);
+            SetStatus("Timer preferences saved.");
         });
     }
-    private bool SaveSettings()
+    private bool SaveSettings(bool feedback = true)
     {
         try {
             var connection = new ConnectionSettings { SheetUrl = sheetUrl.Text.Trim(), WebAppUrl = webAppUrl.Text.Trim(), ApiToken = token.Text.Trim(), SheetMode = mode.SelectedIndex == 1 ? "fixed" : "date", SheetName = sheetName.Text.Trim() };
             app.Engine.SaveSettings(connection, logging.Checked, login.Checked, disabledExtension.Checked, audio.DefaultThresholdSeconds);
             updateStartup(login.Checked);
             var missing = SheetsClient.Validate(connection);
-            SetStatus(missing is not null ? "Settings saved locally. " + missing : "Settings saved.", error: missing is not null, success: missing is null);
+            SetStatus(missing is not null ? "Settings saved locally. " + missing : "Settings saved.", success: feedback);
             _ = app.Sync(); return true;
         } catch (Exception error) { SetStatus("Could not save settings: " + error.Message, true); return false; }
     }

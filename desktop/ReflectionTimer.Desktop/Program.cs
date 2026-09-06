@@ -39,7 +39,8 @@ internal static class Program
             }
             AppTheme.Initialize(() => store.Load().Theme);
             using var wheelGuard = new ClickToScrollInputs();
-            using var app = new TimerApplication(store, directory, show, enableAudio: true);
+            using var app = new TimerApplication(store, directory, show, enableAudio: true,
+                updateStartup: args.Contains("--no-startup-registration") ? _ => { } : null);
             if (!args.Contains("--no-global-shortcut")) app.EnableGlobalShortcut();
             Application.ThreadException += (_, _) => app.ShowError("An unexpected app error occurred. Your last committed state is retained. Export diagnostics if this repeats.");
             app.OpenUnlessTray(args.Contains("--tray"));

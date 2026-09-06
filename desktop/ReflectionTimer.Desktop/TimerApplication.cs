@@ -9,7 +9,7 @@ public sealed class TimerApplication : ApplicationContext
     public TimerEngine Engine { get; }
     public DiagnosticLog Log { get; }
     public SheetsClient Sheets { get; } = new();
-    public AlertSoundPlayer Sounds { get; } = new();
+    public AlertSoundPlayer Sounds { get; }
     private readonly MainWindow main;
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer pulse = new() { Interval = 1000 };
@@ -24,14 +24,17 @@ public sealed class TimerApplication : ApplicationContext
     private readonly HashSet<Guid> soundedPrompts = [];
     private long lastFailureSound;
     private bool timerSaveFailed;
+    private long previewVersion;
 
-    public TimerApplication(EncryptedStore store, string directory, EventWaitHandle showRequest, bool enableAudio = false)
+    public TimerApplication(EncryptedStore store, string directory, EventWaitHandle showRequest, bool enableAudio = false,
+        IAlertAudioBackend? audioBackend = null, TimeProvider? audioTimeProvider = null, Action<bool>? updateStartup = null)
     {
         this.enableAudio = enableAudio; // Tests opt out by default; the desktop entry point opts in.
+        Sounds = new(audioBackend, timeProvider: audioTimeProvider);
         this.showRequest = showRequest;
         Engine = new(store);
         Log = new(directory) { Enabled = Engine.Snapshot.LoggingEnabled };
-        main = new MainWindow(this);
+        main = new MainWindow(this, updateStartup);
         _ = main.Handle; // UI callbacks always have a synchronization target, even in tray mode.
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Reflection Timer", null, (_, _) => Open());
@@ -183,23 +186,30 @@ public sealed class TimerApplication : ApplicationContext
         if (!success) { var now = Environment.TickCount64; if (now - lastFailureSound < 750) return; lastFailureSound = now; }
         _ = PlaySound(success ? SoundEvent.Success : SoundEvent.Failure, Engine.Snapshot.Timer.Volume);
     }
-    public async Task PlaySound(SoundEvent kind, int volume, SoundSetting? setting = null, bool preview = false)
+    public async Task PlaySound(SoundEvent kind, int volume, SoundSetting? setting = null, bool preview = false, bool announcePreview = true)
     {
         if (!enableAudio || quitting) return;
-        if (preview) { Log.Record("sound.preview", value: volume); main.SetStatus("Playing sound preview…"); }
+        var version = preview ? ++previewVersion : 0;
+        if (preview) {
+            Log.Record("sound.preview", value: volume);
+            if (announcePreview) main.SetStatus("Playing sound preview (up to 5 seconds)…");
+        }
+        var statusRevision = main.StatusRevision;
         setting ??= AudioSettings.From(Engine.Snapshot).For(kind);
         Log.Record("sound.requested", value: (int)kind * 10 + (int)setting.Behavior);
-        var result = await Sounds.PlayAsync(SoundLibrary.Resolve(kind, setting), volume, setting.Behavior, kind, SoundLibrary.Fallback(kind));
+        var result = await Sounds.PlayAsync(SoundLibrary.Resolve(kind, setting), volume, setting.Behavior, kind, SoundLibrary.Fallback(kind), preview);
         if (quitting) return;
         Log.Record(result switch {
-            AlertSoundResult.Played => "sound.played", AlertSoundResult.DefaultFallback => "sound.fallback",
+            AlertSoundResult.Played or AlertSoundResult.PreviewFinished => "sound.played", AlertSoundResult.DefaultFallback => "sound.fallback",
             AlertSoundResult.Muted => "sound.muted", AlertSoundResult.Cancelled => "sound.stopped", _ => "sound.failed"
         }, value: volume);
+        if (preview && (version != previewVersion || main.StatusRevision != statusRevision)) return;
         // Audio failures must never trigger their own failure sound recursively.
         if (result == AlertSoundResult.DefaultFallback) main.SetStatus("Selected MP3 unavailable. Played a fallback sound.", true, silent: true);
         else if (result == AlertSoundResult.Failed) main.SetStatus("Could not play the sound. Check your audio output; the timer and reflection are unaffected.", true, silent: true);
-        else if (preview && result == AlertSoundResult.Played) main.SetStatus("Sound preview finished.");
-        else if (preview && result == AlertSoundResult.Muted) main.SetStatus("Sound is muted. Raise the Timer sound level to preview it.");
+        else if (preview && announcePreview && result is AlertSoundResult.Played or AlertSoundResult.PreviewFinished) main.SetStatus("Sound preview finished.");
+        else if (preview && announcePreview && result == AlertSoundResult.Muted) main.SetStatus(setting.Track == LibrarySound.None
+            ? "None selected — this audio is disabled." : "Sound is muted. Raise the Timer sound level to preview it.");
     }
     protected override void Dispose(bool disposing)
     {

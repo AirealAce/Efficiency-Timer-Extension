@@ -580,17 +580,25 @@ internal static partial class Program
                 Descendants(main).OfType<TabControl>().Single().SelectedIndex = 3;
                 var control = Descendants(main).OfType<AudioSettingsControl>().Single();
                 var threshold = Descendants(control).OfType<NumericUpDown>().Single(); threshold.Value = 120;
+                var unitLabel = threshold.Parent!.Parent!.Controls.OfType<Label>().Single(x => x.Text == "seconds remaining");
+                Equal(threshold.Parent.Height, unitLabel.Height); Equal(threshold.Parent.Top, unitLabel.Top);
+                Equal(ContentAlignment.MiddleLeft, unitLabel.TextAlign);
                 foreach (var kind in Enum.GetValues<SoundEvent>()) {
                     var behavior = Descendants(control).OfType<ComboBox>().Single(x => x.AccessibleName == kind + " playback behavior");
                     Equal(0, behavior.SelectedIndex); behavior.SelectedIndex = 1;
                     Equal(SoundBehavior.Assertive, AudioSettings.From(app.Engine.Snapshot).For(kind).Behavior);
                     var source = Descendants(control).OfType<ComboBox>().Single(x => x.AccessibleName == kind + " sound");
-                    source.SelectedIndex = (int)LibrarySound.ChampionBattle;
+                    source.SelectedItem = SoundLibrary.Name(LibrarySound.ChampionBattle);
                     Equal(LibrarySound.ChampionBattle, AudioSettings.From(app.Engine.Snapshot).For(kind).Track);
                     Equal(SoundBehavior.Assertive, AudioSettings.From(app.Engine.Snapshot).For(kind).Behavior);
                     Equal(source.Parent!.Parent, behavior.Parent!.Parent);
                     Equal(source.Parent.Height, behavior.Parent.Height);
                     Equal(source.Parent.Top, behavior.Parent.Top);
+                    var row = source.Parent.Parent!;
+                    var preview = row.Controls.OfType<Button>().Single(x => x.Text == "Preview audio");
+                    var choose = row.Controls.OfType<Button>().Single(x => x.Text == "Choose MP3…");
+                    Equal(preview.Top, choose.Top); Equal(source.Parent.Top, preview.Top);
+                    Is(preview.Right < choose.Left); Is(choose.Right <= row.ClientSize.Width);
                     control.LoadOptions(AudioSettings.From(app.Engine.Snapshot));
                     Equal(120, control.DefaultThresholdSeconds);
                 }
