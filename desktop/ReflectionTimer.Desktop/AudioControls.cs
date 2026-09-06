@@ -13,7 +13,6 @@ internal static class AudioLayout
 public sealed class SoundSourceControl : UserControl
 {
     private readonly ComboBox choice = new() { Width = 450, DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly Button choose;
     private SoundSetting value = new();
     private bool binding;
     private int selectionVersion;
@@ -34,17 +33,18 @@ public sealed class SoundSourceControl : UserControl
             if (choice.SelectedIndex <= (int)LibrarySound.OutOfHealth) value = value with { Mp3Path = "", Track = (LibrarySound)choice.SelectedIndex };
             UserChanged?.Invoke();
         };
-        choose = Widgets.Button("Choose MP3…", async (_, _) => {
+        var choose = Widgets.Button("Choose MP3…", async (sender, _) => {
             using var dialog = new OpenFileDialog { Title = "Choose a sound", Filter = "MP3 audio|*.mp3", CheckFileExists = true, Multiselect = false };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            var version = ++selectionVersion; choose.Enabled = false;
+            var button = (Button)sender!;
+            var version = ++selectionVersion; button.Enabled = false;
             try {
                 var path = await Task.Run(() => Mp3AudioBackend.ValidateCustomFile(dialog.FileName));
                 if (IsDisposed || version != selectionVersion) return;
                 LoadSelection(value with { Mp3Path = path, Track = LibrarySound.Default }); UserChanged?.Invoke();
             }
             catch { if (!IsDisposed && version == selectionVersion) Error?.Invoke("Could not select that MP3. Choose readable audio under 50 MB; your saved setting is unchanged."); }
-            finally { if (!IsDisposed) choose.Enabled = true; }
+            finally { if (!IsDisposed) button.Enabled = true; }
         });
         Controls.Add(AudioLayout.Row(choice, choose));
     }
