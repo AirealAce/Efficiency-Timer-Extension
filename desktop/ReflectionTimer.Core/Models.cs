@@ -90,11 +90,11 @@ public record AppState
     public bool? SetupDraftUsesExistingReceiver { get; set; }
     public string AlertSoundPath { get; set; } = ""; // Empty means the bundled extension sound.
     public AudioSettings? Audio { get; set; } // Null migrates the existing session-end MP3 without changing it.
-    public ReflectionPopupPosition PopupPosition { get; set; } = ReflectionPopupPosition.Center;
+    public ReflectionPopupPosition PopupPosition { get; set; } = ReflectionPopupPosition.BottomRight;
     public bool ShowFloatingTimer { get; set; }
     public int? FloatingTimerLeft { get; set; }
     public int? FloatingTimerTop { get; set; }
-    public FloatingTimerPlacement FloatingPlacement { get; set; }
+    public FloatingTimerPlacement FloatingPlacement { get; set; } = FloatingTimerPlacement.BottomLeft;
     public AppColorTheme Theme { get; set; } = AppColorTheme.Dark;
     public bool LoggingEnabled { get; set; } = true;
     public bool StartAtLogin { get; set; }

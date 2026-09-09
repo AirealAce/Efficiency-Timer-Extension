@@ -281,9 +281,11 @@ internal static partial class Program
 
     private static void TestDisplayPlacement()
     {
-        Test("old state and new installations default to centered reflections", () => {
-            Equal(ReflectionPopupPosition.Center, new AppState().PopupPosition);
-            Equal(ReflectionPopupPosition.Center, JsonSerializer.Deserialize<AppState>("{\"FormatVersion\":1}", DataJson.Options)!.PopupPosition);
+        Test("state without placement preferences defaults to opposite bottom corners", () => {
+            foreach (var state in new[] { new AppState(), JsonSerializer.Deserialize<AppState>("{\"FormatVersion\":1}", DataJson.Options)! }) {
+                Equal(ReflectionPopupPosition.BottomRight, state.PopupPosition);
+                Equal(FloatingTimerPlacement.BottomLeft, state.FloatingPlacement);
+            }
         });
         Test("display preference survives restart and unrelated settings edits", () => {
             var f = new Fixture(); var id = f.Engine.TestPrompt(); f.Engine.SaveDraft(id, "retained draft");
@@ -300,7 +302,7 @@ internal static partial class Program
             var f = new Fixture();
             foreach (var invalid in new[] { -1, 5, int.MaxValue })
                 Throws<ArgumentException>(() => f.Engine.SetPopupPosition((ReflectionPopupPosition)invalid));
-            Equal(0, f.Store.Writes); Equal(ReflectionPopupPosition.Center, f.Engine.Snapshot.PopupPosition);
+            Equal(0, f.Store.Writes); Equal(ReflectionPopupPosition.BottomRight, f.Engine.Snapshot.PopupPosition);
         });
         Test("failed display save retains previous preference and emits no change", () => {
             var f = new Fixture(); f.Engine.SetPopupPosition(ReflectionPopupPosition.TopLeft);
@@ -677,7 +679,7 @@ internal static partial class Program
                 using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
                 using var main = new MainWindow(app);
                 var selector = Descendants(main).OfType<ComboBox>().Single(x => x.AccessibleName == "Reflection popup position");
-                main.Render(app.Engine.Snapshot); Equal(0, selector.SelectedIndex); Equal(5, selector.Items.Count);
+                main.Render(app.Engine.Snapshot); Equal(4, selector.SelectedIndex); Equal(5, selector.Items.Count);
                 foreach (var position in Enum.GetValues<ReflectionPopupPosition>()) {
                     selector.SelectedIndex = (int)position; Equal(position, app.Engine.Snapshot.PopupPosition);
                     var area = Screen.FromPoint(Cursor.Position).WorkingArea;

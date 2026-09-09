@@ -197,6 +197,8 @@ internal static partial class Program
                 var (main, tabs, _, _) = TimerShortcutControls(app); main.Show(); tabs.SelectedIndex = 3;
                 app.SetFloatingTimer(true); Application.DoEvents(); var mini = Application.OpenForms.OfType<FloatingTimerWindow>().Single();
                 var select = Descendants(main).OfType<ComboBox>().Single(x => x.AccessibleName == "Compact timer position"); Equal(8, select.Items.Count);
+                Equal(4, select.SelectedIndex);
+                Equal(FloatingTimerWindow.PresetPosition(Screen.FromControl(mini).WorkingArea, mini.Size, FloatingTimerPlacement.BottomLeft), mini.Location);
                 foreach (var index in new[] { 2, 3, 4, 5, 1, 6, 7 }) {
                     select.SelectedIndex = index; Application.DoEvents();
                     Equal((FloatingTimerPlacement)index, new EncryptedStore(directory).Load().FloatingPlacement);

@@ -239,7 +239,7 @@ public sealed class FloatingTimerWindow : Form
             var point = state.FloatingTimerLeft is { } left && state.FloatingTimerTop is { } top ? new Point(left, top) : placed ? Location : Cursor.Position;
             var area = Screen.FromPoint(point).WorkingArea;
             point = state.FloatingPlacement != FloatingTimerPlacement.Custom ? PresetPosition(area, Size, state.FloatingPlacement)
-                : state.FloatingTimerLeft is null ? PresetPosition(area, Size, FloatingTimerPlacement.BottomRight) : FitToScreen(area, Size, point);
+                : state.FloatingTimerLeft is null ? PresetPosition(area, Size, FloatingTimerPlacement.BottomLeft) : FitToScreen(area, Size, point);
             placing = true;
             try { Location = point; } finally { placing = false; }
             placed = true; applied = desired;
