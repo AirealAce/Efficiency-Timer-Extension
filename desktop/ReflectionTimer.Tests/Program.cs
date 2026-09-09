@@ -21,6 +21,9 @@ internal static partial class Program
         if (args is ["--window-actions-preview", var windowPreviewDirectory]) {
             RenderWindowActionsPreview(windowPreviewDirectory); return 0;
         }
+        if (args is ["--window-actions"]) {
+            TestCompactWindowActions(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
         if (args is ["--transport-preview", var previewPath, _]) {
             WithEndEarlyApp((app, _) => {
                 app.FocusCompactTimer(); Application.DoEvents();

@@ -34,6 +34,14 @@ public sealed class FloatingTimerWindow : Form
     private int layoutDpi, layoutDigits;
     private (int? Left, int? Top, FloatingTimerPlacement Placement)? applied;
     protected override bool ShowWithoutActivation => true;
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        // Only timer content determines the window size. The hover panel is an
+        // overlay, so placing it against the edge must not add extra padding.
+        if (content is null) return base.GetPreferredSize(proposedSize);
+        var size = content.GetPreferredSize(proposedSize);
+        return SizeFromClientSize(new(size.Width + Padding.Horizontal, size.Height + Padding.Vertical));
+    }
     // ShowInTaskbar alone does not express the Alt+Tab contract. Keep the
     // native tool-window style even when the running view has no title bar.
     protected override CreateParams CreateParams
@@ -76,6 +84,7 @@ public sealed class FloatingTimerWindow : Form
             FlowDirection = FlowDirection.TopDown, WrapContents = false, Location = new(10, 10), Margin = Padding.Empty };
         content.Controls.Add(caption); content.Controls.Add(countdown); content.Controls.Add(Duration); content.Controls.Add(actions);
         Controls.Add(content); Controls.Add(hoverActions); AppTheme.Apply(this);
+        ClientSizeChanged += (_, _) => PositionHoverActions();
         pauseMenu = new ToolStripMenuItem("Start", null, (_, _) => app.ToggleTimerPause());
         quickActions.Items.Add(pauseMenu);
         quickActions.Items.Add("App", null, (_, _) => app.Open());
@@ -139,7 +148,10 @@ public sealed class FloatingTimerWindow : Form
         if (IsDisposed || Disposing) return;
         var visible = countdownOnly == true && Visible && (hovering || hoverActions.ContainsFocus);
         if (hoverActions.Visible != visible) hoverActions.Visible = visible;
-        if (visible) hoverActions.BringToFront();
+        if (visible) {
+            // Use the final client size after switching from the editor layout.
+            PositionHoverActions(); hoverActions.BringToFront();
+        }
     }
     private void LayoutWindowActions()
     {
@@ -151,9 +163,14 @@ public sealed class FloatingTimerWindow : Form
             captionButtons[i].Bounds = new(caption.Width - side * (3 - i), 0, side, side);
             hoverButtons[i].Bounds = new(tinySide * i, 0, tinySide, tinySide);
         }
-        var timerBounds = RectangleToClient(countdown.RectangleToScreen(countdown.ClientRectangle));
-        hoverActions.Bounds = new(Math.Max(0, timerBounds.Right - tinySide * 3), timerBounds.Top + (timerBounds.Height - tinySide) / 2, tinySide * 3, tinySide);
+        PositionHoverActions();
         hoverActions.BringToFront();
+    }
+    private void PositionHoverActions()
+    {
+        var side = CompactWindowButton.SideForDpi(DeviceDpi, tiny: true);
+        // Overlay the corner without reserving space or moving the text.
+        hoverActions.Bounds = new(Math.Max(0, ClientSize.Width - side * 3), 0, side * 3, side);
     }
     private void DragCaption(object? sender, MouseEventArgs e)
     {

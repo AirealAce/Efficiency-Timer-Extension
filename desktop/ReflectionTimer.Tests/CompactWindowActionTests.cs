@@ -53,9 +53,18 @@ internal static partial class Program
                 shrink.PerformClick(); Application.DoEvents();
                 Is(mini.Visible && !mini.Duration.Visible); Is(app.Engine.Snapshot.ShowFloatingTimer);
                 var tinyBounds = mini.Bounds; var handle = mini.Handle;
-                mini.SetHoverControls(true);
+                var countdown = Descendants(mini).OfType<Label>().Single(x => x.AccessibleName == "Time remaining");
+                var textBounds = countdown.RectangleToScreen(countdown.ClientRectangle);
+                mini.SetHoverControls(true); Application.DoEvents();
                 var tinyExpand = WindowAction(mini, "TinyWindowExpand");
                 Is(tinyExpand.Visible); Equal(tinyBounds, mini.Bounds); Equal(handle, mini.Handle);
+                Equal(textBounds, countdown.RectangleToScreen(countdown.ClientRectangle));
+                var overlay = tinyExpand.Parent!;
+                Equal(0, overlay.Top); Equal(mini.ClientSize.Width, overlay.Right);
+                for (var i = 0; i < 5; i++) mini.Render(app.Engine.Snapshot, app.Engine.Now);
+                Application.DoEvents();
+                Equal(tinyBounds, mini.Bounds); Equal(textBounds, countdown.RectangleToScreen(countdown.ClientRectangle));
+                Equal(0, overlay.Top); Equal(mini.ClientSize.Width, overlay.Right);
                 Is(tinyExpand.Width <= expand.Width * .65 && tinyExpand.Height <= expand.Height * .65);
                 var tinyClose = WindowAction(mini, "TinyWindowClose");
                 var tinyShrink = WindowAction(mini, "TinyWindowShrink");
@@ -66,6 +75,7 @@ internal static partial class Program
                     Is(mini.ClientRectangle.Contains(rect));
                 }
                 mini.SetHoverControls(false); Is(!tinyExpand.Visible); Equal(tinyBounds, mini.Bounds);
+                Equal(textBounds, countdown.RectangleToScreen(countdown.ClientRectangle));
                 mini.SetHoverControls(true); tinyExpand.PerformClick(); Application.DoEvents();
                 Is(mini.Duration.Visible); Is(!main.Visible); Equal(mode == "running", mini.Duration.ReadOnly);
                 Equal(timer, app.Engine.Snapshot.Timer); Equal(seconds, full.Seconds);
