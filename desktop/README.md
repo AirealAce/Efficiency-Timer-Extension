@@ -1,6 +1,6 @@
 # Reflection Timer Desktop 3.12.3
 
-Fresh installations built from current source start with a **15-minute timer**, **Show compact view enabled** at the bottom left, reflection popups at the bottom right, and a **15-second low-time threshold**. Default sounds are Level Up (success), Out of Health (failure), Battle (Trainer) (low time), and the original extension sound (session end). Saved preferences remain in effect when upgrading.
+Fresh installations built from current source start with a **15-minute timer**, **Show compact view enabled** at the bottom left, reflection popups at the bottom right, and **Low on time audio checked** with a **15-second threshold**. Default sounds are Level Up (success), Out of Health (failure), Battle (Trainer) (low time), and the original extension sound (session end). Saved preferences remain in effect when upgrading.
 
 Release **3.12.3** reconciles the desktop implementation with [the missing-hotkeys report](https://github.com/AirealAce/Reflection-Timer/issues/1). Version 3.6.4 only registered Ctrl+Alt+T; the newer punctuation shortcuts require updating the app, not changing Google Sheets credentials. The public packager now gates all five shortcuts, compact/full focus, check-ins, early ending, and independent conflict reporting. The tray menu also offers **Check in to current session** if another app owns Ctrl+Alt+comma. See [Keyboard shortcuts and upgrading another PC](HOTKEYS.md) for the current mappings and safe upgrade checks.
 
@@ -155,6 +155,8 @@ Click **Mark issue** when something feels wrong, then **Diagnostics → Export d
 The rolling log retains at most 1,200 events / 7 days and can be paused or cleared. Retention is enforced during recording/reporting; disk files update on a successful log write. Clearing replaces the current log; the previous encrypted backup can still contain older events. Logs are best effort and can have gaps during crashes or storage failure.
 
 ## Development
+
+`dotnet run --project ReflectionTimer.Tests -c Release -- --input-layout` checks native input alignment, cutoff and low-time options, fade settings, and fresh-user defaults. Checkboxes beside inputs share the same vertically centered row style.
 
 `dotnet run --project ReflectionTimer.Tests -c Release -- --compact-layout` checks that the compact timer's input frames and native editors fit inside every parent panel at scaled sizes. The duration rows size to their contents so input borders remain visible at higher display scaling.
 

@@ -17,16 +17,29 @@ internal static partial class Program
             combo.Items.AddRange(["Disruptive", "Polite"]); combo.SelectedIndex = 0;
             var button = Widgets.Button("Choose MP3…", (_, _) => { });
             var row = Widgets.Row(text, number, combo, button); form.Controls.Add(row);
+            var options = new FlowLayoutPanel { Top = 80, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+            options.Controls.Add(new AutoRestartOptions()); options.Controls.Add(new LowTimeControl());
+            options.Controls.Add(new FadeOutControl(SoundEvent.Success)); form.Controls.Add(options);
             AppTheme.Apply(form); AppTheme.Apply(form); form.Show(); form.PerformLayout();
-            Equal(3, Descendants(form).OfType<InputFrame>().Count());
+            Equal(3, Descendants(row).OfType<InputFrame>().Count());
             Equal(140, text.Parent!.Width); Equal(120, number.Parent!.Width); Equal(180, combo.Parent!.Width);
-            foreach (var field in Descendants(form).OfType<InputFrame>()) {
+            foreach (var field in Descendants(row).OfType<InputFrame>()) {
                 Equal(button.Height, field.Height); Equal(button.Top, field.Top);
                 Is(field.Editor.Bounds.Top >= 0); Is(field.Editor.Bottom <= field.ClientSize.Height);
             }
             Equal("draft", text.Text); Is(text.UseSystemPasswordChar); Equal(15m, number.Value);
             Equal(0, combo.SelectedIndex); Equal(0, row.Controls.GetChildIndex(text.Parent!));
             Is(button.Width >= TextRenderer.MeasureText(button.Text, button.Font).Width);
+            foreach (var scale in new[] { 1f, 1.25f }) {
+                if (scale != 1) form.Scale(new SizeF(scale, scale));
+                form.PerformLayout(); Application.DoEvents();
+                var checks = Descendants(options).OfType<RowCheckBox>().ToArray(); Equal(3, checks.Length);
+                foreach (var check in checks) {
+                    var field = check.Parent!.Controls.OfType<InputFrame>().Single();
+                    Is(Math.Abs((2 * check.Top + check.Height) - (2 * field.Top + field.Height)) <= 1);
+                    Equal(ContentAlignment.MiddleLeft, check.CheckAlign); Equal(ContentAlignment.MiddleLeft, check.TextAlign);
+                }
+            }
         });
         Test("wheel guard requires a click, disarms on blur and preserves page scrolling", () => {
             using var form = new InputTestForm { ClientSize = new(500, 300) };

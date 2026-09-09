@@ -80,7 +80,7 @@ public sealed class SoundSourceControl : UserControl
 public sealed class LowTimeControl : UserControl
 {
     private readonly CheckBox enabled = new() { Text = "Low on time audio", AutoSize = true, Checked = true };
-    private readonly CheckBox inherit = new() { Text = "Use default threshold", AutoSize = true, Checked = true };
+    private readonly CheckBox inherit = new RowCheckBox { Text = "Use default threshold", Checked = true };
     private readonly NumericUpDown seconds = new() { Minimum = 1, Maximum = TimerEngine.MaxDuration, Value = AudioSettings.DefaultLowTimeThresholdSeconds, Width = 120, AccessibleName = "Low-time seconds remaining" };
     private readonly Label defaultLabel = Widgets.Text($"Default: {AudioSettings.DefaultLowTimeThresholdSeconds} seconds remaining");
     private readonly SoundSourceControl source = new(SoundEvent.LowTime, true);
@@ -130,8 +130,7 @@ public sealed class LowTimeControl : UserControl
 
 public sealed class FadeOutControl : UserControl
 {
-    private readonly CheckBox enabled = new RowCheckBox { Text = "Fade out after", TextAlign = ContentAlignment.MiddleLeft,
-        CheckAlign = ContentAlignment.MiddleLeft, Margin = new(0, 4, 10, 4) };
+    private readonly CheckBox enabled = new RowCheckBox { Text = "Fade out after" };
     private readonly NumericUpDown seconds = new() { Minimum = 1, Maximum = TimerEngine.MaxDuration, Value = 10, Width = 110, Enabled = false };
     private bool binding;
     public bool FadeEnabled => enabled.Checked;

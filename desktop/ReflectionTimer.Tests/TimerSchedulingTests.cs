@@ -7,6 +7,10 @@ internal static partial class Program
     private static void TestTimerScheduling()
     {
         Test("low-time audio defaults on and saved opt-outs survive reload", () => {
+            var fresh = JsonSerializer.Deserialize<AppState>("{}", DataJson.Options)!;
+            Equal(ReflectionPopupPosition.BottomRight, fresh.PopupPosition);
+            Equal(FloatingTimerPlacement.BottomLeft, fresh.FloatingPlacement); Is(fresh.ShowFloatingTimer);
+            Is(fresh.Timer.LowTime.Enabled);
             Is(new TimerState().LowTime.Enabled);
             Is(new ScheduledSession(Guid.NewGuid(), 0, 60, false, 0).LowTime.Enabled);
             Is(JsonSerializer.Deserialize<LowTimeOptions>("{}", DataJson.Options)!.Enabled);

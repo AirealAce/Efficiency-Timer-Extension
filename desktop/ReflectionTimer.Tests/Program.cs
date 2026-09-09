@@ -89,6 +89,10 @@ internal static partial class Program
         if (args is ["--compact-layout"]) {
             TestTinyCountdown(); TestCompactInputLayout(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
         }
+        if (args is ["--input-layout"]) {
+            TestInputLayout(); TestAutoRestartCutoff(); TestFadeOutSettings();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
         if (args is ["--compact-focus"]) {
             TestCompactFocusShortcut();
             Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;

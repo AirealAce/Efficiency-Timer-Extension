@@ -49,7 +49,14 @@ public static class Widgets
 
 // Sized with the native fields after inheriting the form's font and DPI.
 public sealed class RowLabel : Label { }
-public sealed class RowCheckBox : CheckBox { }
+public sealed class RowCheckBox : CheckBox
+{
+    public RowCheckBox()
+    {
+        TextAlign = CheckAlign = ContentAlignment.MiddleLeft;
+        Margin = new(0, 4, 10, 4);
+    }
+}
 
 // Retain native spin buttons and accessibility, but never clip typed overflow
 // or invalid text before the duration editor can validate the whole duration.
@@ -235,7 +242,7 @@ public sealed class VolumeControl : UserControl
 public sealed class AutoRestartOptions : UserControl
 {
     private readonly CheckBox repeat = new() { Text = "Auto-start next session", AutoSize = true, Margin = new(0, 4, 0, 8) };
-    private readonly CheckBox disableAt = new() { Text = "Disable auto-start at", AutoSize = true, Margin = new(0, 6, 12, 0) };
+    private readonly CheckBox disableAt = new RowCheckBox { Text = "Disable auto-start at" };
     private readonly SessionStartInput cutoff = new() { Width = 300, Enabled = false, AccessibleName = "Auto-start cutoff date and time" };
     private readonly Func<DateTime> suggestAfter;
     private bool assigning, loaded, loadedRepeat;
