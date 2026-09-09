@@ -9,6 +9,22 @@ internal static partial class Program
         TestVolumeSettings();
         TestDurationInputs();
         TestTimerScheduling();
+        Test("mixed-height fields center adjacent labels checkboxes and buttons", () => {
+            using var form = new Form { ClientSize = new(950, 500), Font = new("Segoe UI", 10) };
+            var check = new RowCheckBox { Text = "Disable auto-start at" };
+            var field = new SessionStartInput { Width = 260, Font = new("Segoe UI", 18) };
+            var label = Widgets.RowText("Local time", 100);
+            var button = Widgets.Button("Use time", (_, _) => { });
+            var row = Widgets.Row(check, field, label, button); row.WrapContents = false;
+            form.Controls.Add(row); AppTheme.Apply(form); form.Show(); Application.DoEvents();
+            foreach (var factor in new[] { 1f, 1.25f, 1.5f }) {
+                if (factor != 1f) form.Scale(new SizeF(factor, factor));
+                form.PerformLayout(); Application.DoEvents();
+                var frame = (InputFrame)field.Parent!;
+                foreach (var control in new Control[] { check, label, button })
+                    Is(Math.Abs(2 * control.Top + control.Height - (2 * frame.Top + frame.Height)) <= 2);
+            }
+        });
         Test("native fields and neighboring buttons have equal surfaces and aligned tops", () => {
             using var form = new Form { ClientSize = new(900, 500), Font = new("Segoe UI", 10) };
             var text = new TextBox { Width = 140, Text = "draft", UseSystemPasswordChar = true };

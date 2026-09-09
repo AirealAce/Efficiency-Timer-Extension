@@ -165,9 +165,12 @@ public sealed class MainWindow : Form
         })), Widgets.Button("Open Google Sheet", (_, _) => OpenSheet())));
 
         var settings = Widgets.Page(tabs, "Settings");
+        settings.Controls.Add(new SettingsSection("App theme") { Margin = new(0, 0, 0, 14) });
+        themeChoice.Items.AddRange(["Dark", "Light", "High Contrast", "Glamour"]);
+        settings.Controls.Add(themeChoice); settings.Controls.Add(themePreview); settings.Controls.Add(themeNotice);
         settings.Controls.Add(Widgets.Row(Widgets.Button("Guided setup / another PC", (_, _) => ShowSetup(), true),
             Widgets.Button("Setup guide", (_, _) => SetupWindow.OpenGuide())));
-        settings.Controls.Add(new SettingsSection("Display") { Margin = new(0, 0, 0, 14) });
+        settings.Controls.Add(new SettingsSection("Display"));
         settings.Controls.Add(floatingChoice);
         floatingChoice.CheckedChanged += (_, _) => { if (!binding) app.SetFloatingTimer(floatingChoice.Checked); };
         settings.Controls.Add(Widgets.Text("Compact timer position"));
@@ -178,9 +181,6 @@ public sealed class MainWindow : Form
         };
         settings.Controls.Add(Widgets.Text("Dragging saves a custom position, including across app and PC restarts. Presets use that screen; if it is disconnected, the timer stays on an available screen. Duration fields are shared with the main timer and editable while stopped or paused."));
         settings.Controls.Add(Widgets.Text("Keyboard shortcuts")); settings.Controls.Add(shortcutNotice); settings.Controls.Add(endEarlyNotice); settings.Controls.Add(compactNotice); settings.Controls.Add(compactFocusNotice); settings.Controls.Add(reflectionFocusNotice);
-        settings.Controls.Add(Widgets.Text("App theme"));
-        themeChoice.Items.AddRange(["Dark", "Light", "High Contrast", "Glamour"]);
-        settings.Controls.Add(themeChoice); settings.Controls.Add(themePreview); settings.Controls.Add(themeNotice);
         themeChoice.SelectedIndexChanged += (_, _) => {
             if (binding || themeChoice.SelectedIndex < 0) return;
             try {

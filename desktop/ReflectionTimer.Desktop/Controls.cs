@@ -28,6 +28,9 @@ public static class Widgets
     public static FlowLayoutPanel Row(params Control[] controls)
     {
         var row = new FlowLayoutPanel { Width = 750, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Margin = new(0, 4, 0, 6) };
+        // Left-only anchoring makes FlowLayout center each control vertically
+        // within its line, even with different fonts, field frames or DPI.
+        foreach (var control in controls) control.Anchor = AnchorStyles.Left;
         row.Controls.AddRange(controls); return row;
     }
     public static FlowLayoutPanel Page(TabControl tabs, string title)

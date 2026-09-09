@@ -147,6 +147,7 @@ public static class AppTheme
         if (control is SettingsSection section) { section.BackColor = Raised; section.ForeColor = Text; section.Invalidate(); return; }
         if (control is ToolStrip menu) { ApplyMenu(menu); return; }
         if (control is DataGridView grid) { ApplyGrid(grid); return; }
+        if (control is CompactWindowButton captionButton) { ApplyButton(captionButton, false); return; }
         if (control is Button button) {
             // Match the shared field surface even after inherited font/DPI changes.
             button.AutoSize = false;

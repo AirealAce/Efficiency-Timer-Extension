@@ -7,6 +7,7 @@ internal static partial class Program
     private static void TestTinyCountdown()
     {
         TestCompactCycle();
+        TestCompactWindowActions();
         Test("compact native window stays out of taskbar and Alt Tab in both layouts", () => {
             WithEndEarlyApp((app, _) => {
                 var (main, _, _, _) = TimerShortcutControls(app);
@@ -34,6 +35,7 @@ internal static partial class Program
                 Equal("Time remaining", label.AccessibleName); Is(label.Font.SizeInPoints < 30);
                 Equal(FormBorderStyle.None, mini.FormBorderStyle);
                 Is(mini.Width < fullSize.Width * .7 && mini.Height < fullSize.Height * .4);
+                mini.SetHoverControls(false);
                 Is(!Descendants(mini).Any(x => x.Visible && x is Button or CheckBox or DurationControl or DurationPartInput));
                 using var graphics = label.CreateGraphics();
                 var measured = TextRenderer.MeasureText(graphics, label.Text, label.Font, Size.Empty, TextFormatFlags.NoPadding);
@@ -54,7 +56,7 @@ internal static partial class Program
                 var toggle = mini.ContextMenuStrip!.Items.OfType<ToolStripMenuItem>().Single(x => x.Text == "Pause");
                 toggle.PerformClick(); Application.DoEvents();
                 Is(!app.Engine.Snapshot.Timer.IsRunning && mini.Duration.Visible && mini.Duration.Enabled);
-                Equal(fullSize, mini.Size); Equal(FormBorderStyle.FixedToolWindow, mini.FormBorderStyle);
+                Equal(fullSize, mini.Size); Equal(FormBorderStyle.None, mini.FormBorderStyle);
                 var label = Descendants(mini).OfType<Label>().Single(x => x.AccessibleName == "Time remaining");
                 Equal(mini.Duration.Width, label.Width);
                 CompactPart(mini.Duration, "Seconds").Text = "10";

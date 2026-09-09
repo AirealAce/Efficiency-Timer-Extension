@@ -100,6 +100,12 @@ public sealed class TimerApplication : ApplicationContext
         WindowActivation.Focus(main);
         if (main.Enabled) main.FocusDuration();
     }
+    public void OpenTimerPage()
+    {
+        if (quitting || main.IsDisposed) return;
+        WindowActivation.Focus(main);
+        if (main.Enabled) main.FocusTimerPage();
+    }
     public void EnableGlobalShortcut(IHotKeyRegistration? registration = null)
     {
         if (quitting || focusShortcut is not null || endEarlyShortcut is not null || compactShortcut is not null || compactFocusShortcut is not null || reflectionFocusShortcut is not null) return;

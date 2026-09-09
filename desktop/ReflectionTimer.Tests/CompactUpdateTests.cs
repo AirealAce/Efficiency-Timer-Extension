@@ -232,7 +232,7 @@ internal static partial class Program
                 foreach (var factor in new[] { 1f, 1.25f, 1.2f }) { // Original, 125%, then 150% of the original size.
                     if (factor != 1) mini.Scale(new SizeF(factor, factor));
                     mini.PerformLayout(); Application.DoEvents();
-                    foreach (var child in Descendants(mini).Where(x => x is Button or InputFrame or DurationPartInput or CheckBox)) {
+                    foreach (var child in Descendants(mini).Where(x => x.Visible && x is Button or InputFrame or DurationPartInput or CheckBox)) {
                         var rect = mini.RectangleToClient(child.RectangleToScreen(child.ClientRectangle));
                         Is(rect.Top >= 0 && rect.Bottom <= mini.ClientSize.Height - mini.Padding.Bottom);
                         Is(rect.Left >= 0 && rect.Right <= mini.ClientSize.Width);

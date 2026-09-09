@@ -115,8 +115,12 @@ internal static partial class Program
                 var path = Path.Combine(AppContext.BaseDirectory, SoundLibrary.FileName(track));
                 if (File.Exists(path)) Equal(path, Mp3AudioBackend.ValidateCustomFile(path));
             }
-            foreach (var kind in Enum.GetValues<SoundEvent>())
-                Is(SoundLibrary.Resolve(kind, new())!.EndsWith(SoundLibrary.FileName(SoundLibrary.DefaultFor(kind))));
+            foreach (var kind in Enum.GetValues<SoundEvent>()) {
+                var local = Path.Combine(AppContext.BaseDirectory, SoundLibrary.FileName(SoundLibrary.DefaultFor(kind)));
+                Equal(File.Exists(local) ? local : BuiltInTone.PathFor(kind), SoundLibrary.Resolve(kind, new()));
+                var empty = Path.Combine(Path.GetTempPath(), "ReflectionTimer-QA-missing-audio-" + Guid.NewGuid().ToString("N"));
+                Equal(BuiltInTone.PathFor(kind), SoundLibrary.Resolve(kind, new(), empty));
+            }
         });
     }
 

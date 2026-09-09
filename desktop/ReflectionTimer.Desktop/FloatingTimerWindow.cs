@@ -15,6 +15,12 @@ public sealed class FloatingTimerWindow : Form
     private readonly ToolTip actionTips = new();
     private readonly TableLayoutPanel actions;
     private readonly FlowLayoutPanel content;
+    private readonly Panel caption = new() { Width = 336, Height = 26, Margin = new(0, 0, 0, 6) };
+    private readonly Label captionTitle = new() { Text = "Reflection Timer", AutoSize = false,
+        TextAlign = ContentAlignment.MiddleLeft, AccessibleName = "Compact timer title" };
+    private readonly Panel hoverActions = new() { Visible = false, Size = new(78, 26), Margin = Padding.Empty };
+    private readonly CompactWindowButton[] captionButtons, hoverButtons;
+    private readonly System.Windows.Forms.Timer hoverCheck = new() { Interval = 100 };
     private readonly ContextMenuStrip quickActions = new();
     private readonly ToolStripMenuItem pauseMenu;
     private readonly CheckBox autoStart = new() { Text = "Auto-start", AutoSize = true,
@@ -43,10 +49,14 @@ public sealed class FloatingTimerWindow : Form
     {
         this.app = app;
         Text = "Reflection Timer · compact"; TopMost = true; ShowInTaskbar = false;
-        FormBorderStyle = FormBorderStyle.FixedToolWindow; MaximizeBox = false; MinimizeBox = false;
+        FormBorderStyle = FormBorderStyle.None; MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         Font = new("Segoe UI", 10); Padding = new(10); countdown.Font = editorFont;
         AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        captionButtons = CreateWindowActions("Compact", tiny: false);
+        hoverButtons = CreateWindowActions("Tiny", tiny: true);
+        caption.Controls.Add(captionTitle); caption.Controls.AddRange(captionButtons);
+        hoverActions.Controls.AddRange(hoverButtons);
         back = new(TransportIcon.Back, "CompactReset", "Reset timer", (_, _) => app.ResetTimer());
         pause = new(TransportIcon.Play, "CompactStartPause", "Start timer", (_, _) => app.ToggleTimerPause());
         forward = new(TransportIcon.Forward, "CompactEndEarly", "End timer early", (_, _) => app.EndTimerEarly());
@@ -64,16 +74,22 @@ public sealed class FloatingTimerWindow : Form
         actions.Controls.Add(back, 2, 0); actions.Controls.Add(pause, 3, 0); actions.Controls.Add(forward, 4, 0);
         content = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.TopDown, WrapContents = false, Location = new(10, 10), Margin = Padding.Empty };
-        content.Controls.Add(countdown); content.Controls.Add(Duration); content.Controls.Add(actions);
-        Controls.Add(content); AppTheme.Apply(this);
+        content.Controls.Add(caption); content.Controls.Add(countdown); content.Controls.Add(Duration); content.Controls.Add(actions);
+        Controls.Add(content); Controls.Add(hoverActions); AppTheme.Apply(this);
         pauseMenu = new ToolStripMenuItem("Start", null, (_, _) => app.ToggleTimerPause());
         quickActions.Items.Add(pauseMenu);
         quickActions.Items.Add("App", null, (_, _) => app.Open());
+        quickActions.Items.Add("Expand compact controls", null, (_, _) => app.FocusCompactTimer());
         quickActions.Items.Add("Hide compact timer", null, (_, _) => app.SetFloatingTimer(false));
         AppTheme.ApplyMenu(quickActions);
         ContextMenuStrip = countdown.ContextMenuStrip = content.ContextMenuStrip = quickActions;
         countdown.AccessibleDescription = "Drag to move. Right-click for Pause, App, or Hide compact timer.";
         countdown.MouseDown += DragCountdown; content.MouseDown += DragCountdown; MouseDown += DragCountdown;
+        caption.MouseDown += DragCaption; captionTitle.MouseDown += DragCaption;
+        countdown.MouseEnter += (_, _) => SetHoverControls(true);
+        content.MouseEnter += (_, _) => SetHoverControls(true);
+        MouseEnter += (_, _) => SetHoverControls(true);
+        hoverCheck.Tick += (_, _) => SetHoverControls(ClientRectangle.Contains(PointToClient(Cursor.Position)));
         autoStart.CheckedChanged += (_, _) => {
             if (binding) return;
             try {
@@ -100,12 +116,55 @@ public sealed class FloatingTimerWindow : Form
             }
         };
     }
+    private CompactWindowButton[] CreateWindowActions(string prefix, bool tiny)
+    {
+        var shrink = new CompactWindowButton(CompactWindowAction.Shrink, prefix + "WindowShrink", (_, _) => {
+            if (tiny) app.SetFloatingTimer(false); else ShrinkToTimeOnly();
+        });
+        var expand = new CompactWindowButton(CompactWindowAction.Expand, prefix + "WindowExpand", (_, _) => {
+            if (tiny) app.FocusCompactTimer(); else app.OpenTimerPage();
+        });
+        var close = new CompactWindowButton(CompactWindowAction.Close, prefix + "WindowClose", (_, _) => app.SetFloatingTimer(false));
+        shrink.AccessibleName = tiny ? "Hide compact timer" : "Shrink to time-only view";
+        expand.AccessibleName = tiny ? "Expand compact view" : "Open main timer page";
+        close.AccessibleName = "Close compact view";
+        foreach (var button in new[] { shrink, expand, close }) {
+            button.AccessibleDescription = "Changes only the window; the timer keeps its current state.";
+            actionTips.SetToolTip(button, button.AccessibleName);
+        }
+        return [shrink, expand, close];
+    }
+    internal void SetHoverControls(bool hovering)
+    {
+        if (IsDisposed || Disposing) return;
+        var visible = countdownOnly == true && Visible && (hovering || hoverActions.ContainsFocus);
+        if (hoverActions.Visible != visible) hoverActions.Visible = visible;
+        if (visible) hoverActions.BringToFront();
+    }
+    private void LayoutWindowActions()
+    {
+        var side = Math.Max(22, (int)Math.Round(26 * DeviceDpi / 96f));
+        caption.Size = new(Duration.Width, side);
+        captionTitle.Bounds = new(0, 0, Math.Max(0, caption.Width - side * 3), side);
+        for (var i = 0; i < 3; i++) {
+            captionButtons[i].Bounds = new(caption.Width - side * (3 - i), 0, side, side);
+            hoverButtons[i].Bounds = new(side * i, 0, side, side);
+        }
+        var timerBounds = RectangleToClient(countdown.RectangleToScreen(countdown.ClientRectangle));
+        hoverActions.Bounds = new(Math.Max(0, timerBounds.Right - side * 3), timerBounds.Top + (timerBounds.Height - side) / 2, side * 3, side);
+        hoverActions.BringToFront();
+    }
+    private void DragCaption(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        var point = Cursor.Position;
+        ReleaseCapture();
+        SendMessage(Handle, 0x00A1, 2, (point.Y << 16) | (point.X & 0xffff));
+    }
     private void DragCountdown(object? sender, MouseEventArgs e)
     {
         if (countdownOnly != true || e.Button != MouseButtons.Left) return;
-        var point = Cursor.Position;
-        ReleaseCapture();
-        SendMessage(Handle, 0x00A1, 2, (point.Y << 16) | (point.X & 0xffff)); // WM_NCLBUTTONDOWN / HTCAPTION
+        DragCaption(sender, e);
     }
     private void ApplyLayout(TimerState timer)
     {
@@ -119,8 +178,8 @@ public sealed class FloatingTimerWindow : Form
             countdownOnly = tiny; layoutDpi = DeviceDpi; layoutDigits = digits;
             int Scale(int value) => (int)Math.Round(value * DeviceDpi / 96f);
             int EditorScale(int value) => (int)Math.Round(value * Duration.Width / 336f);
-            Duration.Visible = actions.Visible = !tiny;
-            FormBorderStyle = tiny ? FormBorderStyle.None : FormBorderStyle.FixedToolWindow;
+            Duration.Visible = actions.Visible = caption.Visible = !tiny;
+            hoverActions.Visible = false;
             Padding = tiny ? new(Scale(8), Scale(4), Scale(8), Scale(4)) : new(EditorScale(10));
             content.Location = new(Padding.Left, Padding.Top);
             countdown.Font = tiny ? runningFont : editorFont;
@@ -141,6 +200,7 @@ public sealed class FloatingTimerWindow : Form
         }
         finally {
             content.ResumeLayout(true); ResumeLayout(true); PerformLayout();
+            LayoutWindowActions();
             Location = origin; placing = wasPlacing;
         }
         applied = null; // Reapply the saved anchor with the new size; never save an automatic resize as a drag.
@@ -235,7 +295,7 @@ public sealed class FloatingTimerWindow : Form
         try { autoStart.Checked = timer.AutoRestart; } finally { binding = false; }
         autoStart.Enabled = state.ExtensionDisabledConfirmed;
         ApplyLayout(timer);
-        if (!state.ShowFloatingTimer) { if (Visible) Hide(); return; }
+        if (!state.ShowFloatingTimer) { hoverCheck.Stop(); hoverActions.Visible = false; if (Visible) Hide(); return; }
         var desired = (state.FloatingTimerLeft, state.FloatingTimerTop, state.FloatingPlacement);
         if ((!placed || applied != desired) && !moving && !positionDirty) {
             PerformLayout();
@@ -256,10 +316,11 @@ public sealed class FloatingTimerWindow : Form
             try { Location = fitted; } finally { placing = false; }
         }
         if (!Visible) Show();
+        if (countdownOnly == true) hoverCheck.Start(); else hoverCheck.Stop();
     }
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { SavePosition(); positionSave.Dispose(); quickActions.Dispose(); actionTips.Dispose(); }
+        if (disposing) { SavePosition(); positionSave.Dispose(); hoverCheck.Dispose(); quickActions.Dispose(); actionTips.Dispose(); }
         base.Dispose(disposing);
         if (disposing) { editorFont.Dispose(); runningFont.Dispose(); }
     }

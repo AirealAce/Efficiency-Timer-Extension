@@ -18,6 +18,9 @@ internal static partial class Program
             _ => AppColorTheme.Dark
         };
         AppTheme.Initialize(() => smokeTheme);
+        if (args is ["--window-actions-preview", var windowPreviewDirectory]) {
+            RenderWindowActionsPreview(windowPreviewDirectory); return 0;
+        }
         if (args is ["--transport-preview", var previewPath, _]) {
             WithEndEarlyApp((app, _) => {
                 app.FocusCompactTimer(); Application.DoEvents();
@@ -505,14 +508,21 @@ internal static partial class Program
                 Throws<ArgumentException>(() => f.Engine.SetAlertSound(path));
             Equal(0, f.Store.Writes);
         });
-        Test("bundled sound is the original extension MP3 and decodes", () => {
+        Test("default session-end audio supports either a local MP3 or the built-in tone", () => {
             var path = AlertSoundPlayer.BundledPath;
-            Equal("01714F0BF6EC9F13DFBE0CBEAF02C3F499A39681BC8DE28C6C2E4AD9CD3FFBFA", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))));
+            if (path == BuiltInTone.PathFor(SoundEvent.SessionEnd)) {
+                var tone = new BuiltInTone(SoundEvent.SessionEnd); var samples = new float[44100];
+                var count = tone.Read(samples, 0, samples.Length);
+                Is(count > 0 && samples.Take(count).Any(sample => Math.Abs(sample) > .001));
+                Is(samples.Take(count).All(float.IsFinite)); Equal(0, tone.Read(samples, 0, samples.Length));
+                return;
+            }
+            Equal(Path.Combine(AppContext.BaseDirectory, "popup.mp3"), path);
             Equal(path, Mp3AudioBackend.ValidateCustomFile(path));
             using var reader = new NAudio.Wave.AudioFileReader(path); var buffer = new byte[4096];
             Is(reader.TotalTime > TimeSpan.Zero); var audible = false;
             while (reader.Read(buffer, 0, buffer.Length) is var count && count > 0) audible |= buffer.Take(count).Any(b => b != 0);
-            Is(audible); // The original clip starts with silence; inspect the whole file.
+            Is(audible); // An optional local clip may start with silence; inspect the whole file.
         });
         await TestAsync("empty selection plays bundled MP3 at clamped volume", async () => {
             var backend = new FakeAudio(); using var player = new AlertSoundPlayer(backend, "bundled.mp3");

@@ -6,6 +6,17 @@ internal static partial class Program
 {
     private static void TestSettingsInteractions()
     {
+        Test("App theme is first on Settings, before setup and display controls", () => {
+            WithEndEarlyApp((app, _) => {
+                var (main, tabs, _, _) = TimerShortcutControls(app);
+                tabs.SelectedIndex = 3; main.Show(); Application.DoEvents();
+                var page = tabs.TabPages[3].Controls.OfType<FlowLayoutPanel>().Single();
+                Equal("App theme", page.Controls[0].Text); Is(page.Controls[0] is SettingsSection);
+                var theme = Descendants(page).OfType<ComboBox>().Single(x => x.AccessibleName == "App theme");
+                Is(theme.Parent is InputFrame); Equal(1, page.Controls.GetChildIndex(theme.Parent!));
+                Is(Descendants(page).OfType<Button>().Any(x => x.Text == "Guided setup / another PC"));
+            });
+        });
         Test("None follows Default in every sound picker and programmatic binding never previews", () => {
             foreach (var kind in Enum.GetValues<SoundEvent>()) {
                 using var source = new SoundSourceControl(kind);
