@@ -13,6 +13,7 @@ async function createHarness(seed = {}, result = {}) {
   let ready;
   const elements = new Map();
   const stored = {
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit',
     webAppUrl: 'https://script.google.com/macros/s/test-deployment/exec',
     apiToken: 'test-token-with-at-least-16-characters',
     sheetName: 'Template', ...seed

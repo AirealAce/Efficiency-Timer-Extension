@@ -171,6 +171,7 @@ test('background initializes a 25-minute timer and removes legacy secrets', asyn
 test('reflection submissions and connection tests default to date mode with local send time', async () => {
   const requests = [];
   const harness = createHarness({
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit',
     sheetName: 'Template', apiToken: 'test-token-with-at-least-16-characters',
     webAppUrl: 'https://script.google.com/macros/s/test-deployment/exec'
   }, {
@@ -193,6 +194,7 @@ test('reflection submissions and connection tests default to date mode with loca
 test('explicit fixed-tab mode is preserved in the receiver request', async () => {
   let payload;
   const harness = createHarness({
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit',
     sheetMode: 'fixed', sheetName: 'Custom', apiToken: 'test-token-with-at-least-16-characters',
     webAppUrl: 'https://script.google.com/macros/s/test-deployment/exec'
   }, {
@@ -210,6 +212,7 @@ test('test submissions forward isTest without dismissing a pending real reflecti
   let payload;
   const harness = createHarness({
     timerStateV2: { durationSeconds: 1500, promptActive: true },
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit',
     apiToken: 'test-token-with-at-least-16-characters',
     webAppUrl: 'https://script.google.com/macros/s/test-deployment/exec'
   }, {
@@ -224,14 +227,14 @@ test('test submissions forward isTest without dismissing a pending real reflecti
   assert.equal(harness.stored.timerStateV2.promptActive, true);
 });
 
-test('background persists the known Sheet and target tab as safe defaults', async () => {
+test('background leaves the spreadsheet blank for each new user', async () => {
   const harness = createHarness();
 
   await harness.dispatch({ action: 'getTimerState' });
 
   assert.equal(
     harness.stored.sheetUrl,
-    'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit'
+    ''
   );
   assert.equal(harness.stored.sheetName, 'Template');
 });
@@ -245,7 +248,7 @@ test('incomplete Sheets setup returns one actionable configuration error', async
   assert.equal(response.errorCode, 'SETTINGS_REQUIRED');
   assert.match(response.error, /Apps Script deployment URL/i);
   assert.match(response.error, /Reflection API token/i);
-  assert.doesNotMatch(response.error, /Google Sheet URL/i);
+  assert.match(response.error, /Google Sheet URL/i);
 });
 
 test('the reflection prompt can open extension settings', async () => {
@@ -372,7 +375,7 @@ test('diagnostic issue markers include actual alarms and tab-switch evidence wit
 
 test('export cannot include configuration, reflection contents, or server errors', async () => {
   const secret = 'PRIVATE_TOKEN_1234567890';
-  const harness = createHarness({ apiToken: secret, webAppUrl: 'https://script.google.com/macros/s/PRIVATE_DEPLOYMENT/exec', sheetName: 'PRIVATE_SHEET' }, {
+  const harness = createHarness({ sheetUrl: 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit', apiToken: secret, webAppUrl: 'https://script.google.com/macros/s/PRIVATE_DEPLOYMENT/exec', sheetName: 'PRIVATE_SHEET' }, {
     async fetch() { return { ok: false, status: 403, async text() { return JSON.stringify({ success: false, error: 'PRIVATE_SERVER_RESPONSE' }); } }; }
   });
   await harness.dispatch({ action: 'saveReflection', message: 'PRIVATE_REFLECTION', isTest: true });

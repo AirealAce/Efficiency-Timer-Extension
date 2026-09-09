@@ -1,7 +1,7 @@
 'use strict';
 
 document.addEventListener('DOMContentLoaded', () => {
-  const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit';
+  const DEFAULT_SHEET_URL = '';
   const form = document.getElementById('settingsForm');
   const sheetUrl = document.getElementById('sheetUrl');
   const sheetName = document.getElementById('sheetName');

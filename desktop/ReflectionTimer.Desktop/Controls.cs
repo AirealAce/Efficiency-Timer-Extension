@@ -10,9 +10,15 @@ public static class Widgets
     public static Color Muted => AppTheme.Muted;
     public static Color Green => AppTheme.Accent;
     public static int FieldHeight(Control control) => Math.Max(38 * control.DeviceDpi / 96, control.Font.Height + 14 * control.DeviceDpi / 96);
-    public static Label Text(string text, int width = 750) => new() { Text = text, AutoSize = true, MaximumSize = new(width, 0), ForeColor = Muted, Margin = new(0, 6, 0, 10) };
-    public static Label RowText(string text, int width) => new RowLabel { Text = text, Width = width, Height = 38,
-        TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted, Margin = new(0, 4, 10, 4) };
+    public static Label Text(string text, int width = 750) {
+        var label = new Label { Text = text, AutoSize = true, MaximumSize = new(width, 0), Margin = new(0, 6, 0, 10) };
+        AppTheme.SetTextColor(label, ThemeTextRole.Muted); return label;
+    }
+    public static Label RowText(string text, int width) {
+        var label = new RowLabel { Text = text, Width = width, Height = 38,
+            TextAlign = ContentAlignment.MiddleLeft, Margin = new(0, 4, 10, 4) };
+        AppTheme.SetTextColor(label, ThemeTextRole.Muted); return label;
+    }
     public static Button Button(string text, EventHandler action, bool primary = false)
     {
         var button = new Button { Text = text, UseMnemonic = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(110, 38), Padding = new(10, 4, 10, 4), Margin = new(0, 4, 10, 4) };
@@ -43,6 +49,7 @@ public static class Widgets
 
 // Sized with the native fields after inheriting the form's font and DPI.
 public sealed class RowLabel : Label { }
+public sealed class RowCheckBox : CheckBox { }
 
 // Retain native spin buttons and accessibility, but never clip typed overflow
 // or invalid text before the duration editor can validate the whole duration.
@@ -74,8 +81,8 @@ public sealed class DurationPartInput : NumericUpDown
         }
         base.UpdateEditText();
     }
-    public override void UpButton() { if (TryRead(out var number) && number < (BigInteger)decimal.MaxValue) base.UpButton(); }
-    public override void DownButton() { if (TryRead(out var number) && number <= (BigInteger)decimal.MaxValue) base.DownButton(); }
+    public override void UpButton() { if (!ReadOnly && TryRead(out var number) && number < (BigInteger)decimal.MaxValue) base.UpButton(); }
+    public override void DownButton() { if (!ReadOnly && TryRead(out var number) && number <= (BigInteger)decimal.MaxValue) base.DownButton(); }
 }
 
 public sealed class DurationControl : UserControl
@@ -83,22 +90,33 @@ public sealed class DurationControl : UserControl
     private readonly DurationPartInput hours = Number(), minutes = Number(), seconds = Number();
     private bool assigning, untouched;
     public bool Dirty { get; private set; }
+    // A running compact timer can expose/select its duration without changing it.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal bool ReadOnly {
+        get => hours.ReadOnly;
+        set { hours.ReadOnly = minutes.ReadOnly = seconds.ReadOnly = value; }
+    }
     public event Action? UserChanged;
     public event Action? SubmitRequested;
+    internal event Action? DraftChanged;
     private static DurationPartInput Number() => new() { Width = 120, Font = new("Segoe UI", 15), TextAlign = HorizontalAlignment.Center };
-    public DurationControl()
+    public DurationControl() : this(false) { }
+    public DurationControl(bool compact)
     {
-        Size = new(450, 80); Margin = new(0, 6, 0, 10);
+        Size = new(compact ? 336 : 450, 80); Margin = new(0, 6, 0, 10);
         var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         foreach (var pair in new[] { ("Hours", hours), ("Minutes", minutes), ("Seconds", seconds) }) {
             pair.Item2.AccessibleName = pair.Item1;
             pair.Item2.AccessibleDescription = "Whole numbers; values above 59 carry into the next unit when you finish editing or press Enter.";
-            var panel = new FlowLayoutPanel { Width = 140, Height = 78, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-            panel.Controls.Add(new Label { Text = pair.Item1, AutoSize = true, ForeColor = Widgets.Muted }); panel.Controls.Add(pair.Item2); row.Controls.Add(panel);
+            if (compact) pair.Item2.Width = 100;
+            var panel = new FlowLayoutPanel { Width = compact ? 108 : 140, Height = 78, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+            var caption = new Label { Text = pair.Item1, AutoSize = true };
+            AppTheme.SetTextColor(caption, ThemeTextRole.Muted);
+            panel.Controls.Add(caption); panel.Controls.Add(pair.Item2); row.Controls.Add(panel);
             void Edited(object? sender, EventArgs args) {
                 if (assigning) return;
                 if (pair.Item2 == hours && untouched) { assigning = true; minutes.SetNumber(0); assigning = false; }
-                untouched = false; Dirty = true; UserChanged?.Invoke();
+                untouched = false; Dirty = true; DraftChanged?.Invoke(); UserChanged?.Invoke();
             }
             pair.Item2.ValueChanged += Edited;
             // NumericUpDown normally waits for focus to leave before committing
@@ -132,7 +150,7 @@ public sealed class DurationControl : UserControl
         AssignParts(total);
         // Normalization must not clear Dirty: an edited paused timer should start
         // the new duration rather than resume the old remainder.
-        if (changed) UserChanged?.Invoke();
+        if (changed) { DraftChanged?.Invoke(); UserChanged?.Invoke(); }
         return true;
     }
     private void AssignParts(int total)
@@ -143,34 +161,68 @@ public sealed class DurationControl : UserControl
     }
     public void LoadSeconds(int total, bool clearPresetWhenTypingHours = false)
     {
-        AssignParts(Math.Clamp(total, 0, TimerEngine.MaxDuration));
-        Dirty = false; untouched = clearPresetWhenTypingHours && total == 1500;
+        var normalized = Math.Clamp(total, 0, TimerEngine.MaxDuration);
+        var newUntouched = clearPresetWhenTypingHours && total == 1500;
+        // Refreshes must not disturb the caret or selection in an unchanged editor.
+        if (!Dirty && untouched == newUntouched && hours.Text == (normalized / 3600).ToString()
+            && minutes.Text == (normalized / 60 % 60).ToString() && seconds.Text == (normalized % 60).ToString()) return;
+        AssignParts(normalized);
+        Dirty = false; untouched = newUntouched;
+        DraftChanged?.Invoke();
+    }
+    // Mirror the raw draft, not just its numeric value: keep overflow and invalid
+    // text available for correction, without firing user-edit feedback loops.
+    internal void CopyDraftFrom(DurationControl source)
+    {
+        if (hours.Text == source.hours.Text && minutes.Text == source.minutes.Text && seconds.Text == source.seconds.Text
+            && Dirty == source.Dirty && untouched == source.untouched) return;
+        assigning = true;
+        try {
+            hours.Text = source.hours.Text; minutes.Text = source.minutes.Text; seconds.Text = source.seconds.Text;
+            Dirty = source.Dirty; untouched = source.untouched;
+        } finally { assigning = false; }
+        DraftChanged?.Invoke();
     }
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (keyData != Keys.Enter) return base.ProcessCmdKey(ref msg, keyData);
+        if (ReadOnly) return true;
         Normalize();
         SubmitRequested?.Invoke();
         foreach (var input in new[] { hours, minutes, seconds }) if (input.ContainsFocus) input.Select(0, input.Text.Length);
         return true;
     }
-    public void FocusHours() { if (Enabled) { hours.Focus(); hours.Select(0, hours.Text.Length); } }
+    public void FocusFirstPositivePart()
+    {
+        if (!Enabled) return;
+        // Read the draft as typed: choosing focus must not normalize or commit it.
+        var input = new[] { hours, minutes, seconds }.FirstOrDefault(x => x.TryRead(out var value) && value > 0) ?? hours;
+        input.Focus(); input.Select(0, input.Text.Length);
+    }
 }
 
 public sealed class VolumeControl : UserControl
 {
-    private readonly TrackBar track = new() { Minimum = 0, Maximum = 100, Value = 50, TickFrequency = 10, Width = 260, Height = 42 };
-    private readonly Label label = new() { Text = "Sound 50%", AutoSize = true, Width = 110, Padding = new(0, 9, 0, 0) };
+    private readonly TrackBar track = new() { Minimum = 0, Maximum = 100, Value = 50, TickStyle = TickStyle.None,
+        AutoSize = false, Width = 260, Height = 38, Margin = new(0, 4, 0, 4) };
+    private readonly Label label = Widgets.RowText("", 180);
+    private readonly string caption;
     public event Action? UserChanged;
     private bool assigning;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public int Value { get => track.Value; set { assigning = true; track.Value = Math.Clamp(value, 0, 100); label.Text = $"Sound {track.Value}%"; assigning = false; } }
-    public VolumeControl()
+    public int Value { get => track.Value; set { assigning = true; try { track.Value = Math.Clamp(value, 0, 100); UpdateLabel(); } finally { assigning = false; } } }
+    public VolumeControl() : this("App sound", "App sound volume") { }
+    public VolumeControl(string caption, string accessibleName)
     {
-        Size = new(420, 50); var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        this.caption = caption; AccessibleName = accessibleName; track.AccessibleName = accessibleName;
+        Width = 480; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
         row.Controls.Add(label); row.Controls.Add(track); Controls.Add(row);
-        track.Scroll += (_, _) => { label.Text = $"Sound {track.Value}%"; if (!assigning) UserChanged?.Invoke(); };
+        UpdateLabel();
+        track.ValueChanged += (_, _) => { UpdateLabel(); if (!assigning) UserChanged?.Invoke(); };
     }
+    private void UpdateLabel() => label.Text = $"{caption} ({track.Value}%)";
 }
 
 // Shared by the live timer and schedule editor so their repeat/cutoff behavior

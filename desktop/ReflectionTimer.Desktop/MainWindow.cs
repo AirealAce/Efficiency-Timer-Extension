@@ -21,7 +21,9 @@ public sealed class MainWindow : Form
     private readonly LowTimeControl lowTime = new();
     private readonly VolumeControl volume = new();
     private readonly Button start;
-    private readonly DataGridView scheduleGrid = Widgets.Grid("Start time", "Duration", "Auto-start", "Auto-start cutoff", "Sound", "Low on time");
+    private readonly SessionStartInput timerStart = new() { Width = 300, Value = DateTime.Now.AddHours(1), AccessibleName = "Start timer at" };
+    private readonly DataGridView scheduleGrid = Widgets.Grid("Start time", "Duration", "Auto-start", "Auto-start cutoff", "Sound", "Low on time", "Status");
+    private readonly ComboBox scheduleOverlap = new() { Width = 460, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Schedule overlap behavior" };
     private readonly SessionStartInput scheduledStart = new() { Width = 300, Value = DateTime.Now.AddHours(1) };
     private readonly DurationControl scheduledDuration = new();
     private readonly AutoRestartOptions scheduledRepeat;
@@ -31,7 +33,7 @@ public sealed class MainWindow : Form
     private readonly Button saveSchedule;
     private Guid? editing;
     private readonly DataGridView outboxGrid = Widgets.Grid("Saved locally", "Destination", "Status", "Attempts");
-    private readonly TextBox outboxText = new() { Width = 750, Height = 90, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox outboxText = new() { Width = 750, Height = 145, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
     private readonly TextBox sheetUrl = new() { Width = 750 };
     private readonly TextBox webAppUrl = new() { Width = 750 };
     private readonly TextBox token = new() { Width = 750, UseSystemPasswordChar = true };
@@ -39,16 +41,23 @@ public sealed class MainWindow : Form
     private readonly ComboBox popupPosition = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Reflection popup position" };
     private readonly ComboBox themeChoice = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "App theme" };
     private readonly ThemePreview themePreview = new();
+    private readonly CheckBox floatingChoice = new() { Text = "Show compact floating timer (always on top)", AutoSize = true };
+    private readonly ComboBox floatingPlacement = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Compact timer position" };
     private readonly Label themeNotice = Widgets.Text("");
     private readonly Label shortcutNotice = Widgets.Text("Ctrl+Alt+T is disabled in this isolated test session.");
+    private readonly Label endEarlyNotice = Widgets.Text("Ctrl+Alt+` is disabled in this isolated test session.");
+    private readonly Label compactNotice = Widgets.Text("Ctrl+Alt+/ is disabled in this isolated test session.");
+    private readonly Label compactFocusNotice = Widgets.Text("Ctrl+Alt+. is disabled in this isolated test session.");
+    private readonly Label reflectionFocusNotice = Widgets.Text("Ctrl+Alt+, is disabled in this isolated test session.");
     private readonly ComboBox mode = new() { Width = 350, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox sheetName = new() { Width = 350 };
     private readonly CheckBox logging = new() { Text = "Record local diagnostic events", AutoSize = true };
     private readonly CheckBox login = new() { Text = "Start in the tray when I sign in to Windows", AutoSize = true };
-    private readonly CheckBox disabledExtension = new() { Text = "I have turned off the Chrome Reflection Timer extension", AutoSize = true };
+    private readonly CheckBox disabledExtension = new() { Text = "The Chrome timer extension is off, or I never installed it", AutoSize = true };
     private readonly Label diagnosticsSummary = Widgets.Text("");
     private readonly TextBox diagnosticPreview = new() { Width = 750, Height = 280, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Font = new("Consolas", 10) };
     private bool binding;
+    private long? selectableRunningDeadline;
     private string scheduleSignature = "", outboxSignature = "";
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool AllowExit { get; set; }
@@ -71,24 +80,24 @@ public sealed class MainWindow : Form
         statusBar.Controls.Add(status, 0, 0); statusBar.Controls.Add(saveSettingsButton, 1, 0);
         Controls.Add(tabs); Controls.Add(statusBar); Controls.Add(header);
         var timer = Widgets.Page(tabs, "Timer");
-        migration.ForeColor = AppTheme.Warning;
+        AppTheme.SetTextColor(migration, ThemeTextRole.Warning);
+        AppTheme.SetTextColor(display, ThemeTextRole.Text);
+        AppTheme.SetTextColor(status, ThemeTextRole.Muted);
         timer.Controls.Add(migration); timer.Controls.Add(display); timer.Controls.Add(timerStatus); timer.Controls.Add(duration);
         start = Widgets.Button("Start", (_, _) => Safe(() => {
             if (!app.Engine.Snapshot.ExtensionDisabledConfirmed) throw new InvalidOperationException("Turn off the Chrome extension, then confirm the switch in Settings.");
             var current = app.Engine.Snapshot.Timer;
             if (current.IsRunning) app.Engine.Pause();
-            else if (!duration.Dirty && current.RemainingSeconds > 0 && current.RemainingSeconds < current.DurationSeconds) {
-                app.Engine.SetPreferences(repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
-                app.Engine.SetLowTime(lowTime.Selection);
-                app.Engine.Resume();
-            }
-            else app.Engine.Start(duration.CommitSeconds(), repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil, lowTime.Selection);
+            else StartOrResumeTimer();
             duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true);
         }), true);
         // Enter in the regular duration editor starts/resumes through the same
         // validation and options as Start. Repeated Enter must not pause it.
         duration.SubmitRequested += () => { if (!app.Engine.Snapshot.Timer.IsRunning) start.PerformClick(); };
-        timer.Controls.Add(Widgets.Row(start, Widgets.Button("Reset", (_, _) => Safe(() => { app.Engine.Reset(duration.Dirty ? duration.CommitSeconds() : null); duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true); }))));
+        timer.Controls.Add(Widgets.Row(start, Widgets.Button("Reset", (_, _) => Safe(ResetTimer))));
+        timer.Controls.Add(Widgets.Row(Widgets.RowText("Start timer at", 125), timerStart,
+            Widgets.Button("Schedule session", (_, _) => ScheduleTimerSession())));
+        timer.Controls.Add(Widgets.Text("Uses the duration and options on this page. View or cancel it in Scheduling session times."));
         timer.Controls.Add(repeat); timer.Controls.Add(lowTime); timer.Controls.Add(volume);
         lowTime.UserChanged += () => {
             if (binding) return;
@@ -101,20 +110,29 @@ public sealed class MainWindow : Form
             AudioSettings.From(app.Engine.Snapshot).ForLowTime(options), preview: true, announcePreview: !automatic);
         scheduledLowTime.PreviewRequested += (options, automatic) => {
             if (automatic) SetStatus("Session audio selected. Save the session to keep this choice.");
-            _ = app.PlaySound(SoundEvent.LowTime, scheduledVolume.Value,
+            _ = app.PlaySound(SoundEvent.LowTime, app.Engine.Snapshot.Timer.Volume,
                 AudioSettings.From(app.Engine.Snapshot).ForLowTime(options), preview: true, announcePreview: !automatic);
         };
         repeat.UserChanged += SaveTimerPreferences;
-        volume.UserChanged += SaveTimerPreferences;
-        duration.UserChanged += RenderClock;
+        volume.UserChanged += () => {
+            if (binding) return;
+            Safe(() => app.Engine.SetAppVolume(volume.Value));
+            volume.Value = app.Engine.Snapshot.Timer.Volume;
+        };
+        duration.DraftChanged += RenderClock;
         timer.Controls.Add(Widgets.Row(Widgets.Button("Test reflection prompt", (_, _) => Safe(() => app.Engine.TestPrompt())),
             Widgets.Button("Pending reflections", (_, _) => app.ShowReflections()), Widgets.Button("Mark issue", (_, _) => app.MarkIssue())));
         timer.Controls.Add(pending);
+        timer.Controls.Add(Widgets.Button("Show / hide floating timer", (_, _) => app.SetFloatingTimer(!app.Engine.Snapshot.ShowFloatingTimer)));
         timer.Controls.Add(Widgets.Text("Closing this window keeps the timer running in the tray. Right-click its tray icon to quit. Test reflections only go to the test tab."));
         timer.Controls.Add(Widgets.Button("Quit desktop app", (_, _) => app.Quit()));
 
         var schedule = Widgets.Page(tabs, "Scheduling session times");
-        schedule.Controls.Add(Widgets.Text("Each one-time appointment has its own duration, repeat setting, auto-start cutoff, and sound level. A scheduled start takes over the current timer. After downtime, only the latest missed appointment starts; future appointments remain queued."));
+        schedule.Controls.Add(Widgets.Text("Each appointment keeps its own duration, repeat, cutoff and audio options. Choose how a due appointment handles a running or paused session. After downtime, only the latest newly missed appointment is kept."));
+        schedule.Controls.Add(Widgets.Text("When a scheduled session overlaps"));
+        scheduleOverlap.Items.AddRange(["End current with a reflection, then start scheduled", "Ask me what to do", "Wait until the current session ends"]);
+        schedule.Controls.Add(scheduleOverlap);
+        scheduleOverlap.SelectedIndexChanged += (_, _) => { if (!binding && scheduleOverlap.SelectedIndex >= 0) Safe(() => app.Engine.SetScheduleOverlap((ScheduleOverlapPolicy)scheduleOverlap.SelectedIndex)); };
         scheduleGrid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
         scheduleGrid.Columns[0].FillWeight = 160; scheduleGrid.Columns[1].FillWeight = 85;
         scheduleGrid.Columns[2].FillWeight = 90; scheduleGrid.Columns[3].FillWeight = 160; scheduleGrid.Columns[4].FillWeight = 55;
@@ -135,7 +153,7 @@ public sealed class MainWindow : Form
         schedule.Controls.Add(Widgets.Text("Auto-start repeats this duration until its optional cutoff; it does not move the next appointment earlier. Cutoffs must follow the scheduled start. Pausing, resetting, or reaching a cutoff does not remove future appointments."));
 
         var outbox = Widgets.Page(tabs, "Outbox");
-        outbox.Controls.Add(Widgets.Text("Reflections are saved locally before sending. Pending entries send when a valid connection is available. A timeout or interrupted upload is held for review—not silently retried—because the current Apps Script receiver may already have written it."));
+        outbox.Controls.Add(Widgets.Text("Reflections save locally first. With the updated receiver, temporary failures retry automatically using the same entry ID, with increasing delays up to five minutes. Partial writes, legacy uploads and changed receivers still need review. After eight attempts, automatic retries stop."));
         outbox.Controls.Add(outboxGrid); outboxGrid.SelectionChanged += (_, _) => ShowOutboxText();
         outbox.Controls.Add(outboxText);
         outbox.Controls.Add(Widgets.Row(Widgets.Button("Send pending now", async (_, _) => await app.Sync(), true), Widgets.Button("Retry selected…", async (_, _) => {
@@ -147,8 +165,19 @@ public sealed class MainWindow : Form
         })), Widgets.Button("Open Google Sheet", (_, _) => OpenSheet())));
 
         var settings = Widgets.Page(tabs, "Settings");
+        settings.Controls.Add(Widgets.Row(Widgets.Button("Guided setup / another PC", (_, _) => ShowSetup(), true),
+            Widgets.Button("Setup guide", (_, _) => SetupWindow.OpenGuide())));
         settings.Controls.Add(new SettingsSection("Display") { Margin = new(0, 0, 0, 14) });
-        settings.Controls.Add(Widgets.Text("Keyboard shortcut")); settings.Controls.Add(shortcutNotice);
+        settings.Controls.Add(floatingChoice);
+        floatingChoice.CheckedChanged += (_, _) => { if (!binding) app.SetFloatingTimer(floatingChoice.Checked); };
+        settings.Controls.Add(Widgets.Text("Compact timer position"));
+        floatingPlacement.Items.AddRange(["Remember dragged position", "Center", "Top left", "Top right", "Bottom left", "Bottom right", "Top center", "Bottom center"]);
+        settings.Controls.Add(floatingPlacement);
+        floatingPlacement.SelectedIndexChanged += (_, _) => {
+            if (!binding && floatingPlacement.SelectedIndex >= 0) Safe(() => app.Engine.SetFloatingTimerPlacement((FloatingTimerPlacement)floatingPlacement.SelectedIndex));
+        };
+        settings.Controls.Add(Widgets.Text("Dragging saves a custom position, including across app and PC restarts. Presets use that screen; if it is disconnected, the timer stays on an available screen. Duration fields are shared with the main timer and editable while stopped or paused."));
+        settings.Controls.Add(Widgets.Text("Keyboard shortcuts")); settings.Controls.Add(shortcutNotice); settings.Controls.Add(endEarlyNotice); settings.Controls.Add(compactNotice); settings.Controls.Add(compactFocusNotice); settings.Controls.Add(reflectionFocusNotice);
         settings.Controls.Add(Widgets.Text("App theme"));
         themeChoice.Items.AddRange(["Dark", "Light", "High Contrast", "Glamour"]);
         settings.Controls.Add(themeChoice); settings.Controls.Add(themePreview); settings.Controls.Add(themeNotice);
@@ -156,6 +185,7 @@ public sealed class MainWindow : Form
             if (binding || themeChoice.SelectedIndex < 0) return;
             try {
                 app.Engine.SetTheme((AppColorTheme)themeChoice.SelectedIndex);
+                AppTheme.Change(app.Engine.Snapshot.Theme);
                 RenderThemeChoice(app.Engine.Snapshot.Theme);
                 SetStatus("Theme saved. " + themeNotice.Text);
             }
@@ -184,17 +214,17 @@ public sealed class MainWindow : Form
         audio = new AudioSettingsControl(app);
         audio.Status += (text, error) => SetStatus(text, error);
         settings.Controls.Add(audio);
-        settings.Controls.Add(new SettingsSection("Chrome extension switch-over"));
-        settings.Controls.Add(Widgets.Text("Switch over: open chrome://extensions, turn off Reflection Timer (leave it installed as a fallback), then check the confirmation below. This app does not read Chrome profile files or collect browser activity."));
+        settings.Controls.Add(new SettingsSection("Avoid duplicate timers"));
+        settings.Controls.Add(Widgets.Text("Never used the Chrome extension? Check the confirmation below. If you have it, turn it off in chrome://extensions first. This desktop app is independent and does not read Chrome profiles or browsing activity."));
         settings.Controls.Add(disabledExtension);
         settings.Controls.Add(new SettingsSection("Google Sheets connection"));
         settings.Controls.Add(Widgets.Text("Google Sheets URL")); settings.Controls.Add(sheetUrl);
         settings.Controls.Add(Widgets.Text("Apps Script deployment URL (must end in /exec)")); settings.Controls.Add(webAppUrl);
-        settings.Controls.Add(Widgets.Text("Reflection API token — reuse the value from the extension")); settings.Controls.Add(token);
+        settings.Controls.Add(Widgets.Text("Private Reflection API token — Guided setup creates one, or reuse your existing connection")); settings.Controls.Add(token);
         mode.Items.AddRange(["Automatically match the date when I save", "Always use a fixed tab"]);
         settings.Controls.Add(Widgets.Text("Destination tab")); settings.Controls.Add(mode); settings.Controls.Add(sheetName);
         mode.SelectedIndexChanged += (_, _) => sheetName.Enabled = mode.SelectedIndex == 1;
-        settings.Controls.Add(Widgets.Text("Date routing, new daily tabs from Temp, row borders, alternating timestamps, and hour themes remain handled by your existing Apps Script. Offline entries retain their original save date. Test prompts always use test."));
+        settings.Controls.Add(Widgets.Text("Your own Apps Script handles dated tabs, your configured template, column colors, row borders, and hour themes. Offline entries retain their original save date. Test prompts always use test. No developer spreadsheet or credentials are prefilled."));
         settings.Controls.Add(new SettingsSection("Startup & diagnostics"));
         settings.Controls.Add(login); settings.Controls.Add(logging);
         settings.Controls.Add(new SettingsSection("Save settings"));
@@ -216,32 +246,114 @@ public sealed class MainWindow : Form
                 if (MessageBox.Show(this, "Clear the local diagnostic log? Your timer, schedules, and reflections are not changed.", "Clear diagnostics", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                     Safe(() => { app.Log.Clear(); RenderDiagnostics(); });
             })));
-        tabs.SelectedIndexChanged += (_, _) => { saveSettingsButton.Visible = tabs.SelectedIndex == 3; if (tabs.SelectedIndex == 4) RenderDiagnostics(); if (tabs.SelectedIndex == 0) BeginInvoke(FocusHours); };
+        tabs.SelectedIndexChanged += (_, _) => { saveSettingsButton.Visible = tabs.SelectedIndex == 3; if (tabs.SelectedIndex == 4) RenderDiagnostics(); if (tabs.SelectedIndex == 0) BeginInvoke(FocusDuration); };
         var initial = app.Engine.Snapshot;
         sheetUrl.Text = initial.Connection.SheetUrl; webAppUrl.Text = initial.Connection.WebAppUrl; token.Text = initial.Connection.ApiToken;
         mode.SelectedIndex = initial.Connection.SheetMode == "fixed" ? 1 : 0; sheetName.Text = initial.Connection.SheetName;
         logging.Checked = initial.LoggingEnabled; login.Checked = initial.StartAtLogin; disabledExtension.Checked = initial.ExtensionDisabledConfirmed;
         if (!initial.ExtensionDisabledConfirmed || SheetsClient.Validate(initial.Connection) is not null) tabs.SelectedIndex = 3;
         saveSettingsButton.Visible = tabs.SelectedIndex == 3;
-        Activated += (_, _) => app.Log.Record("app.activated"); Deactivate += (_, _) => app.Log.Record("app.deactivated");
+        Activated += (_, _) => app.Log.Record("app.activated");
+        Deactivate += (_, _) => {
+            app.Log.Record("app.deactivated");
+            selectableRunningDeadline = null;
+            duration.Enabled = !app.Engine.Snapshot.Timer.IsRunning;
+        };
         FormClosing += (_, e) => {
             if (!AllowExit && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); app.Log.Record("app.hidden"); }
         };
         AppTheme.Apply(this);
     }
-    public void FocusHours() { if (tabs.SelectedIndex == 0) duration.FocusHours(); }
+    public void FocusDuration() { if (tabs.SelectedIndex == 0) duration.FocusFirstPositivePart(); }
+    internal void ShowSetup()
+    {
+        if (!Enabled || IsDisposed) return;
+        var draft = app.Engine.Snapshot.SetupDraft ?? new ConnectionSettings { SheetUrl = sheetUrl.Text.Trim(), WebAppUrl = webAppUrl.Text.Trim(), ApiToken = token.Text.Trim(), SheetMode = mode.SelectedIndex == 1 ? "fixed" : "date", SheetName = sheetName.Text.Trim() };
+        using var setup = new SetupWindow(app, draft);
+        if (setup.ShowDialog(this) != DialogResult.OK || !setup.Connected) return;
+        var connected = app.Engine.Snapshot.Connection;
+        sheetUrl.Text = connected.SheetUrl; webAppUrl.Text = connected.WebAppUrl; token.Text = connected.ApiToken;
+        mode.SelectedIndex = connected.SheetMode == "fixed" ? 1 : 0; sheetName.Text = connected.SheetName;
+        disabledExtension.Checked = true;
+        SetStatus("Your spreadsheet connection is ready. Other settings are unchanged.", success: true);
+        tabs.SelectedIndex = 0;
+    }
+    internal void FocusTimerPage()
+    {
+        if (!Enabled) return; // Do not redirect typing behind an owned modal dialog.
+        tabs.SelectedIndex = 0;
+        var state = app.Engine.Snapshot;
+        selectableRunningDeadline = state.Timer.IsRunning ? state.Timer.EndTime : null;
+        Render(state); // Settle queued shared-field updates before selecting text.
+        FocusDuration();
+    }
+    internal DurationControl TimerDuration => duration;
+    internal void ResetTimer()
+    {
+        app.Engine.Reset(duration.Dirty ? duration.CommitSeconds() : null);
+        duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true);
+    }
+    internal bool CanStartTimer {
+        get {
+            try {
+                var state = app.Engine.Snapshot;
+                if (!state.ExtensionDisabledConfirmed) return false;
+                var seconds = !duration.Dirty && TimerEngine.IsPaused(state.Timer) ? state.Timer.RemainingSeconds : duration.Seconds;
+                TimerEngine.ValidateDuration(seconds);
+                if (repeat.AutoRestartUntil <= app.Engine.Now) return false;
+                AudioSettings.Validate(lowTime.Selection);
+                return true;
+            } catch (ArgumentException) { return false; }
+        }
+    }
+    private void StartOrResumeTimer()
+    {
+        if (!app.Engine.Snapshot.ExtensionDisabledConfirmed) throw new InvalidOperationException("Turn off the Chrome extension, then confirm the switch in Settings.");
+        var current = app.Engine.Snapshot.Timer;
+        if (current.IsRunning) return;
+        if (!duration.Dirty && TimerEngine.IsPaused(current)) {
+            app.Engine.SetPreferences(repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil);
+            app.Engine.SetLowTime(lowTime.Selection);
+            app.Engine.Resume();
+        }
+        else app.Engine.Start(duration.CommitSeconds(), repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil, lowTime.Selection);
+        duration.LoadSeconds(app.Engine.Snapshot.Timer.DurationSeconds, true);
+    }
+    internal void StartTimerFromShortcut()
+    {
+        // PerformClick does nothing when the Timer tab/window is hidden. Call
+        // the same validated operation directly, including uncommitted HH/MM/SS.
+        try { StartOrResumeTimer(); }
+        catch (Exception error) {
+            app.Log.Record("error.unexpected");
+            app.Open();
+            SetStatus("Could not start the timer: " + error.Message, true);
+        }
+    }
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (tabs.SelectedIndex == 3 && keyData == (Keys.Control | Keys.Enter)) { SaveSettings(); return true; }
         if (tabs.SelectedIndex == 3 && keyData == Keys.Enter && audio.ThresholdContainsFocus) { audio.LeaveThreshold(); return true; }
         return base.ProcessCmdKey(ref msg, keyData);
     }
-    public void SetShortcutStatus(bool available)
+    public void SetShortcutStatus(bool available, bool endEarlyAvailable, bool compactAvailable = false, bool compactFocusAvailable = false, bool reflectionFocusAvailable = false)
     {
-        shortcutNotice.Text = available ? "Ctrl+Alt+T · focus Reflection Timer from any app, including when minimized or hidden in the tray. The app must be running."
+        compactNotice.Text = compactAvailable ? "Ctrl+Alt+/ · cycle compact controls → time-only → hidden → controls. Showing controls selects the first positive duration field (Hours if all are zero). A running timer continues unchanged; pause to edit its duration."
+            : "Ctrl+Alt+/ could not be registered (another app may use it). You can still show the compact timer using the checkbox or tray menu.";
+        compactFocusNotice.Text = compactFocusAvailable ? "Ctrl+Alt+. (period) · press once to select the compact timer input; press twice within 0.8 seconds to select it in the full Timer view. Selects the first positive field from the left (Hours if all are zero). Running durations are read-only; the timer is unchanged."
+            : "Ctrl+Alt+. (period) could not be registered (another app may use it). You can still open the compact timer using the checkbox or tray menu.";
+        AppTheme.SetTextColor(compactNotice, compactAvailable ? ThemeTextRole.Muted : ThemeTextRole.Warning);
+        AppTheme.SetTextColor(compactFocusNotice, compactFocusAvailable ? ThemeTextRole.Muted : ThemeTextRole.Warning);
+        reflectionFocusNotice.Text = reflectionFocusAvailable ? "Ctrl+Alt+, (comma) · open a check-in for the current session. Sending records elapsed active time without stopping the timer. Repeated presses focus the same draft. Use Pending reflections for older entries."
+            : "Ctrl+Alt+, (comma) could not be registered (another app may use it). Use the tray menu's Check in to current session instead. Pending reflections opens older drafts.";
+        AppTheme.SetTextColor(reflectionFocusNotice, reflectionFocusAvailable ? ThemeTextRole.Muted : ThemeTextRole.Warning);
+        shortcutNotice.Text = available ? "Ctrl+Alt+T · focus Reflection Timer from any app, including the tray. On the Timer tab, select the first positive duration field from left to right (Hours if all are zero). The app must be running."
             : "Ctrl+Alt+T is unavailable. Another app may have reserved it. Close that app and reopen Reflection Timer to try again. The timer still works normally.";
-        shortcutNotice.ForeColor = available ? Widgets.Muted : AppTheme.Warning;
-        if (!available) SetStatus("Ctrl+Alt+T could not be registered. See Settings → Keyboard shortcut.", true);
+        AppTheme.SetTextColor(shortcutNotice, available ? ThemeTextRole.Muted : ThemeTextRole.Warning);
+        endEarlyNotice.Text = endEarlyAvailable ? "Ctrl+Alt+` (backtick) · start using the Timer page's duration and options, or resume a paused timer. If running, end the session now and open its reflection. Auto-start and its cutoff work as usual; future schedules stay unchanged."
+            : "Ctrl+Alt+` (backtick) is unavailable. Another app may have reserved it. Close that app and reopen Reflection Timer to try again.";
+        AppTheme.SetTextColor(endEarlyNotice, endEarlyAvailable ? ThemeTextRole.Muted : ThemeTextRole.Warning);
+        if (!available || !endEarlyAvailable || !compactAvailable || !compactFocusAvailable || !reflectionFocusAvailable) SetStatus("A keyboard shortcut could not be registered. See Settings → Keyboard shortcuts.", true);
     }
     private static int PopupPositionIndex(ReflectionPopupPosition position) => Enum.IsDefined(position) ? (int)position : 0;
     private void RenderThemeChoice(AppColorTheme theme)
@@ -251,16 +363,15 @@ public sealed class MainWindow : Form
             theme = AppTheme.Normalize(theme);
             themeChoice.SelectedIndex = (int)theme; themePreview.ShowTheme(theme);
             themeNotice.Text = AppTheme.Palette.IsSystemContrast
-                ? "Windows high-contrast colors take priority. Your chosen theme is saved for the next launch without Windows high contrast."
-                : theme == AppTheme.Preference ? "Active theme. Changes save immediately and apply after you quit and reopen the app."
-                : $"{AppTheme.Name(theme)} is saved for next launch. When ready, use Quit desktop app (not X), then reopen it. Save any unfinished schedule edits first.";
+                ? "Windows high-contrast colors take priority. Your chosen theme returns when Windows high contrast is off."
+                : "Active theme. Changes save and apply immediately to all app windows; no restart needed.";
         }
         finally { binding = wasBinding; }
     }
     public void SetStatus(string text, bool error = false, bool success = false, bool silent = false)
     {
         ++StatusRevision;
-        status.Text = text; status.ForeColor = error ? AppTheme.Error : Widgets.Green;
+        status.Text = text; AppTheme.SetTextColor(status, error ? ThemeTextRole.Error : ThemeTextRole.Accent);
         if (!silent && (error || success)) app.PlayFeedback(!error);
     }
     private void Safe(Action action) { try { action(); } catch (Exception error) { app.Log.Record("error.unexpected"); SetStatus(error.Message, true); } }
@@ -268,30 +379,36 @@ public sealed class MainWindow : Form
     public void RenderClock()
     {
         var state = app.Engine.Snapshot;
-        var remaining = TimerEngine.Remaining(state.Timer, app.Engine.Now);
-        start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && state.Timer.RemainingSeconds is > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Resume" : "Start";
+        var remaining = app.DisplaySeconds(state.Timer, app.Engine.Now);
+        start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && TimerEngine.IsPaused(state.Timer) ? "Resume" : "Start";
         var shown = remaining;
         if (!state.Timer.IsRunning && duration.Dirty && !duration.TryGetSeconds(out shown, out var error)) {
-            display.Text = "—"; timerStatus.Text = error; timerStatus.ForeColor = AppTheme.Error; return;
+            display.Text = "—"; timerStatus.Text = error; AppTheme.SetTextColor(timerStatus, ThemeTextRole.Error); return;
         }
-        display.Text = Clock(shown); timerStatus.ForeColor = AppTheme.Muted;
+        display.Text = Clock(shown); AppTheme.SetTextColor(timerStatus, ThemeTextRole.Muted);
         timerStatus.Text = state.Timer.IsRunning ? "Running · ends " + DateTimeOffset.FromUnixTimeMilliseconds(state.Timer.EndTime!.Value).ToLocalTime().ToString("t")
-            : state.Timer.RemainingSeconds is > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Paused" : "Ready";
+            : TimerEngine.IsPaused(state.Timer) ? "Paused" : "Ready";
     }
     public void Render(AppState state)
     {
         binding = true;
+        floatingChoice.Checked = state.ShowFloatingTimer;
+        floatingPlacement.SelectedIndex = Enum.IsDefined(state.FloatingPlacement) ? (int)state.FloatingPlacement : 0;
+        scheduleOverlap.SelectedIndex = Enum.IsDefined(state.ScheduleOverlap) ? (int)state.ScheduleOverlap : 0;
         RenderThemeChoice(state.Theme);
         popupPosition.SelectedIndex = PopupPositionIndex(state.PopupPosition);
         var sounds = AudioSettings.From(state); audio.LoadOptions(sounds);
         lowTime.LoadOptions(state.Timer.LowTime, sounds.LowTimeThresholdSeconds);
         scheduledLowTime.LoadOptions(scheduledLowTime.Selection, sounds.LowTimeThresholdSeconds);
         if (state.Timer.IsRunning || !duration.Dirty) duration.LoadSeconds(state.Timer.DurationSeconds, true);
-        duration.Enabled = !state.Timer.IsRunning; repeat.LoadOptions(state.Timer.AutoRestart, state.Timer.AutoRestartUntil); volume.Value = state.Timer.Volume;
-        start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && state.Timer.RemainingSeconds > 0 && state.Timer.RemainingSeconds < state.Timer.DurationSeconds ? "Resume" : "Start";
+        if (!state.Timer.IsRunning || state.Timer.EndTime != selectableRunningDeadline) selectableRunningDeadline = null;
+        duration.ReadOnly = state.Timer.IsRunning;
+        duration.Enabled = !state.Timer.IsRunning || selectableRunningDeadline.HasValue;
+        repeat.LoadOptions(state.Timer.AutoRestart, state.Timer.AutoRestartUntil); volume.Value = state.Timer.Volume;
+        start.Text = state.Timer.IsRunning ? "Pause" : !duration.Dirty && TimerEngine.IsPaused(state.Timer) ? "Resume" : "Start";
         start.Enabled = state.ExtensionDisabledConfirmed;
-        migration.Text = state.ExtensionDisabledConfirmed ? "Desktop timer active · Chrome extension should remain off"
-            : "Switch-over pending: turn off the Chrome extension and confirm it in Settings before starting desktop timers.";
+        migration.Text = state.ExtensionDisabledConfirmed ? "Desktop timer active · Use only one timer app per session"
+            : "Open Guided setup in Settings. Confirm the Chrome extension is off or not installed before starting.";
         pending.Text = $"{state.Prompts.Count} pending reflection(s) · {state.Outbox.Count(x => x.Status != DeliveryStatus.Sent)} unsent entry/entries";
         var signature = JsonSerializer.Serialize(state.Schedules);
         if (signature != scheduleSignature) {
@@ -299,7 +416,8 @@ public sealed class MainWindow : Form
             foreach (var entry in state.Schedules) {
                 var row = scheduleGrid.Rows[scheduleGrid.Rows.Add(DateTimeOffset.FromUnixTimeMilliseconds(entry.StartTime).ToLocalTime().ToString("g"), Clock(entry.DurationSeconds), entry.AutoRestart ? "On" : "Off",
                     entry.AutoRestartUntil.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(entry.AutoRestartUntil.Value).ToLocalTime().ToString("g") : "—", entry.Volume + "%",
-                    entry.LowTime.Enabled ? entry.LowTime.ThresholdSeconds is { } seconds ? Clock(seconds) : "Default" : "Off")];
+                    entry.LowTime.Enabled ? entry.LowTime.ThresholdSeconds is { } seconds ? Clock(seconds) : "Default" : "Off",
+                    entry.AwaitingDecision ? "Needs choice" : entry.WaitingForCurrentSession ? "Waiting" : "Scheduled")];
                 row.Tag = entry.Id; if (entry.Id == selected) row.Selected = true;
             }
             scheduleSignature = signature;
@@ -318,7 +436,15 @@ public sealed class MainWindow : Form
     }
     private ScheduledSession? SelectedSchedule() => scheduleGrid.SelectedRows.Count > 0 && scheduleGrid.SelectedRows[0].Tag is Guid id ? app.Engine.Snapshot.Schedules.FirstOrDefault(x => x.Id == id) : null;
     private OutboxItem? SelectedOutbox() => outboxGrid.SelectedRows.Count > 0 && outboxGrid.SelectedRows[0].Tag is Guid id ? app.Engine.Snapshot.Outbox.FirstOrDefault(x => x.Id == id) : null;
-    private void ShowOutboxText() { var entry = SelectedOutbox(); outboxText.Text = entry is null ? "" : entry.Message + (entry.Status == DeliveryStatus.NeedsReview ? "\r\n\r\nNeeds review: " + entry.ErrorKind + ". Check the Sheet before retrying." : ""); }
+    private void ShowOutboxText()
+    {
+        var entry = SelectedOutbox();
+        outboxText.Text = entry is null ? "" : entry.Message + "\r\n\r\n" +
+            (entry.ActualDurationSeconds is { } actual ? Clock(actual) + " spent / " : "Actual time unavailable / ") + Clock(entry.DurationSeconds) + " allotted" +
+            (entry.IsCheckIn ? " · Check-in" : entry.EndedEarly ? " · ended early\r\nReason: " + (entry.EarlyEndReason.Length > 0 ? entry.EarlyEndReason : "Not supplied") : "") +
+            (entry.Status == DeliveryStatus.Pending && entry.NextAttemptAt is { } next ? "\r\nNext retry: " + DateTimeOffset.FromUnixTimeMilliseconds(next).ToLocalTime().ToString("T") : "") +
+            (entry.Status == DeliveryStatus.NeedsReview ? "\r\nNeeds review: " + entry.ErrorKind + ". Check the Sheet before retrying." : "");
+    }
     private void EditSelectedSchedule()
     {
         if (SelectedSchedule() is not { } entry) return;
@@ -333,6 +459,12 @@ public sealed class MainWindow : Form
         scheduledLowTime.LoadOptions(new(), AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds, true);
         scheduleHeading.Text = "Add a scheduled session"; saveSchedule.Text = "Add session";
     }
+    private void ScheduleTimerSession() => Safe(() => {
+        var when = new DateTimeOffset(timerStart.Value);
+        var seconds = duration.CommitSeconds();
+        app.Engine.SaveSchedule(null, when, seconds, repeat.AutoRestart, volume.Value, repeat.AutoRestartUntil, lowTime.Selection);
+        SetStatus($"Session scheduled for {when.LocalDateTime:g}. View or cancel it in Scheduling session times.", success: true);
+    });
     private void SaveTimerPreferences()
     {
         if (binding) return;

@@ -11,10 +11,13 @@
  * the request works cleanly from a Manifest V3 service worker.
  */
 
-const APP_VERSION = '2.3.1';
+const APP_VERSION = '2.7.0';
+const DELIVERY_PROTOCOL = 'request-id-v1';
+const RECEIPT_PREFIX = 'RT_RECEIPT_';
 const ROWS_PER_BLOCK = 16;
 const MAX_COLUMN_PAIRS = 100;
 const MAX_REFLECTION_LENGTH = 5000;
+const MAX_DURATION_SECONDS = 365 * 24 * 60 * 60;
 const NOTE_PREFIX = 'Reflection Timer: ';
 const HOUR_THEMES = [
   ['#312e81', '#818cf8'], ['#3730a3', '#a5b4fc'], ['#4c1d95', '#a78bfa'],
@@ -27,6 +30,48 @@ const HOUR_THEMES = [
   ['#86198f', '#f0abfc'], ['#6b21a8', '#d8b4fe'], ['#4338ca', '#c7d2fe']
 ];
 
+// Called ONLY by the private setupReflectionTimer wrapper generated on the
+// user's PC and run in their own bound Apps Script editor. Never exposed by HTTP.
+function initializeReflectionTimer_(spreadsheetId, apiToken) {
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(spreadsheetId) || !/^[a-f0-9]{64}$/.test(apiToken)) {
+    throw new Error('Copy a fresh setup script from Reflection Timer Guided setup.');
+  }
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (!spreadsheet || spreadsheet.getId() !== spreadsheetId) {
+    throw new Error('Open Extensions > Apps Script from the same spreadsheet selected in Guided setup. No configuration was changed.');
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const oldId = props.getProperty('SPREADSHEET_ID');
+    const oldToken = props.getProperty('REFLECTION_API_TOKEN');
+    if ((oldId && oldId !== spreadsheetId) || (oldToken && oldToken !== apiToken)) {
+      throw new Error('This script already has a different connection. Use existing connection setup; its credentials and data were not replaced.');
+    }
+    const templateName = props.getProperty('TEMPLATE_SHEET_NAME')
+      || (spreadsheet.getSheetByName('Temp') ? 'Temp' : spreadsheet.getSheetByName('Template') ? 'Template' : 'Temp');
+    for (const name of [templateName, 'test']) {
+      if (spreadsheet.getSheetByName(name)) continue; // Never clear or restyle an existing tab.
+      const sheet = spreadsheet.insertSheet(name);
+      ensureColumns_(sheet, 6);
+      const rows = Math.min(ROWS_PER_BLOCK, sheet.getMaxRows());
+      sheet.getRange(1, 1, rows, 6)
+        .setBackgrounds(Array.from({ length: rows }, () => ['#ffffff', '#000000', '#ffffff', '#000000', '#ffffff', '#000000']))
+        .setFontColors(Array.from({ length: rows }, () => ['#000000', '#ffffff', '#000000', '#ffffff', '#000000', '#ffffff']))
+        .setBorder(true, true, true, true, true, true, '#ffffff', SpreadsheetApp.BorderStyle.SOLID)
+        .setWrap(true);
+      [95, 440, 220, 220, 135, 300].forEach((width, column) => sheet.setColumnWidth(column + 1, width));
+    }
+    props.setProperty('SPREADSHEET_ID', spreadsheetId);
+    props.setProperty('REFLECTION_API_TOKEN', apiToken);
+    props.setProperty('TEMPLATE_SHEET_NAME', templateName);
+    SpreadsheetApp.flush();
+    console.log('Reflection Timer setup complete. Deploy as a web app, then paste its /exec URL into Guided setup.');
+    return { success: true, template: templateName }; // Never print the private token.
+  } finally { lock.releaseLock(); }
+}
+
 function doGet() {
   return jsonOutput_({
     success: true,
@@ -37,6 +82,7 @@ function doGet() {
 
 function doPost(event) {
   let lock;
+  let writeStarted = false;
   try {
     if (!event || !event.postData || !event.postData.contents) {
       throw new Error('The request body is empty.');
@@ -57,6 +103,8 @@ function doPost(event) {
       return jsonOutput_({
         success: true,
         version: APP_VERSION,
+        deliveryProtocol: DELIVERY_PROTOCOL,
+        supportsCheckIns: true,
         target: `${spreadsheet.getName()} / ${target.sheet ? target.sheet.getName() : target.name}`,
         willCreate: !target.sheet,
         template: target.templateName || null
@@ -75,16 +123,41 @@ function doPost(event) {
       throw new Error(`The reflection exceeds ${MAX_REFLECTION_LENGTH} characters.`);
     }
 
+    const durationSeconds = validateDuration_(payload.durationSeconds);
+    const session = validateSession_(payload, durationSeconds);
+    const requestId = validateRequestId_(payload.requestId, payload.deliveryProtocol);
+    const fingerprint = requestId ? requestFingerprint_(payload) : '';
     lock = LockService.getScriptLock();
     lock.waitLock(15000);
+    const properties = PropertiesService.getScriptProperties();
+    const receiptKey = RECEIPT_PREFIX + requestId;
+    if (requestId) {
+      const saved = properties.getProperty(receiptKey);
+      if (saved) return jsonOutput_(receiptReply_(JSON.parse(saved), fingerprint));
+    }
     const target = resolveTargetSheet_(spreadsheet, payload);
+    if (requestId && target.sheet) {
+      const existing = findReceiptInSheet_(target.sheet, requestId);
+      if (existing) return jsonOutput_(receiptReply_(existing, fingerprint));
+    }
+    // Reserve the ID before any sheet mutation. An interrupted partial write is
+    // quarantined, never retried as a new insertion. No reflection text/token is stored here.
+    if (requestId) {
+      pruneReceipts_(properties);
+      properties.setProperty(receiptKey, JSON.stringify({ status: 'writing', fingerprint, at: Date.now() }));
+      writeStarted = true;
+    }
     const sheet = target.sheet || createDailySheet_(spreadsheet, target);
-    const result = appendReflection_(sheet, message, submissionDate_(spreadsheet, payload), spreadsheet);
+    const result = appendReflection_(sheet, message, submissionDate_(spreadsheet, payload), spreadsheet, durationSeconds,
+      { ...session, requestId, fingerprint });
     SpreadsheetApp.flush();
+    if (requestId) properties.setProperty(receiptKey, JSON.stringify({ status: 'done', fingerprint,
+      sheet: sheet.getName(), timestamp: result.timestamp.toISOString(), at: Date.now() }));
 
     return jsonOutput_({
       success: true,
       version: APP_VERSION,
+      deliveryProtocol: DELIVERY_PROTOCOL,
       sheet: sheet.getName(),
       created: !target.sheet,
       range: result.range,
@@ -94,6 +167,7 @@ function doPost(event) {
     console.error(error);
     return jsonOutput_({
       success: false,
+      code: writeStarted ? 'write_uncertain' : 'rejected',
       error: error && error.message ? error.message : String(error)
     });
   } finally {
@@ -101,6 +175,59 @@ function doPost(event) {
       lock.releaseLock();
     }
   }
+}
+
+function validateRequestId_(id, protocol) {
+  if (protocol && protocol !== DELIVERY_PROTOCOL) throw new Error('Unsupported delivery protocol.');
+  if (id === undefined || id === null || id === '') {
+    if (protocol) throw new Error('Safe delivery requires an entry ID.');
+    return '';
+  }
+  if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(id)) throw new Error('Invalid entry ID.');
+  return id;
+}
+
+function requestFingerprint_(p) {
+  // An ID can never be reused for changed text, timing, reason or destination.
+  const fields = [extractSpreadsheetId_(p.sheetUrl), p.sheetMode || 'date', p.sheetName || '', p.isTest === true,
+    p.submittedAt || '', p.timezoneOffsetMinutes ?? null, String(p.message || '').trim(), p.durationSeconds ?? null,
+    p.actualDurationSeconds ?? null, p.endedEarly === true, String(p.earlyEndReason || '').trim()];
+  // Preserve fingerprints for pre-upgrade receipts, including explicit false.
+  if (p.isCheckIn === true) fields.push('check-in');
+  const text = JSON.stringify(fields);
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8)
+    .map(value => (value & 255).toString(16).padStart(2, '0')).join('');
+}
+
+function receiptReply_(receipt, fingerprint) {
+  if (receipt.fingerprint !== fingerprint) return { success: false, version: APP_VERSION, code: 'id_conflict', error: 'This entry ID already belongs to different content.' };
+  if (receipt.status !== 'done') return { success: false, version: APP_VERSION, code: 'write_uncertain', error: 'An earlier write was interrupted. Review this entry in the Sheet before taking further action.' };
+  return { success: true, version: APP_VERSION, deliveryProtocol: DELIVERY_PROTOCOL, duplicate: true,
+    sheet: receipt.sheet, timestamp: receipt.timestamp };
+}
+
+function findReceiptInSheet_(sheet, id) {
+  const notes = sheet.getRange(1, 1, Math.max(1, sheet.getLastRow()), 1).getNotes();
+  for (const row of notes) {
+    if (!row[0].startsWith(NOTE_PREFIX)) continue;
+    let record;
+    try { record = JSON.parse(row[0].slice(NOTE_PREFIX.length)); } catch (_) { continue; }
+    if (record.requestId === id) return { status: 'done', fingerprint: record.requestFingerprint,
+      sheet: sheet.getName(), timestamp: record.timestamp };
+  }
+  return null;
+}
+
+function pruneReceipts_(properties) {
+  // Bound the fast receipt cache. Completed IDs also live in the row's note;
+  // unresolved reservations are never pruned. Unrelated Script Properties are untouched.
+  const completed = [];
+  for (const [key, value] of Object.entries(properties.getProperties())) {
+    if (!key.startsWith(RECEIPT_PREFIX)) continue;
+    try { const receipt = JSON.parse(value); if (receipt.status === 'done') completed.push([key, receipt.at]); } catch (_) { /* Preserve unknown records. */ }
+  }
+  completed.sort((a, b) => b[1] - a[1]);
+  for (const [key] of completed.slice(499)) properties.deleteProperty(key);
 }
 
 function resolveTargetSheet_(spreadsheet, payload) {
@@ -253,8 +380,51 @@ function extractSpreadsheetId_(value) {
   return match ? match[1] : null;
 }
 
-function appendReflection_(sheet, message, moment, spreadsheet) {
-  ensureColumns_(sheet, 2);
+function validateDuration_(seconds) {
+  // Legacy clients may omit the duration. Unknown is blank, never an invented zero.
+  if (seconds === undefined || seconds === null) return null;
+  if (!Number.isInteger(seconds) || seconds < 0 || seconds > MAX_DURATION_SECONDS) {
+    throw new Error('The timer duration must be whole seconds from zero to one year.');
+  }
+  return seconds;
+}
+
+function durationNumberFormat_(seconds) {
+  if (seconds === null) return '@';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  const remaining = seconds % 60;
+  const parts = [];
+  if (hours) parts.push(`[h]" ${hours === 1 ? 'hr' : 'hrs'}"`);
+  if (minutes) parts.push(`${hours ? 'm' : '[m]'}" min"`);
+  if (remaining || !parts.length) parts.push(`${hours || minutes ? 's' : '[s]'}" ${remaining === 1 ? 'sec' : 'secs'}"`);
+  return parts.join(' ');
+}
+
+function validateSession_(payload, allotted) {
+  const actualDurationSeconds = validateDuration_(payload.actualDurationSeconds);
+  if (actualDurationSeconds !== null && (allotted === null || actualDurationSeconds > allotted)) {
+    throw new Error('Actual time cannot exceed the allotted time.');
+  }
+  if (payload.endedEarly !== undefined && typeof payload.endedEarly !== 'boolean') throw new Error('Invalid early-finish status.');
+  const endedEarly = payload.endedEarly === true;
+  if (payload.isCheckIn !== undefined && typeof payload.isCheckIn !== 'boolean') throw new Error('Invalid check-in status.');
+  const isCheckIn = payload.isCheckIn === true;
+  if (isCheckIn && (endedEarly || actualDurationSeconds === null)) throw new Error('A check-in requires actual time and cannot be an early finish.');
+  if (endedEarly && actualDurationSeconds === null) throw new Error('An early finish must include actual time.');
+  if (payload.earlyEndReason !== undefined && typeof payload.earlyEndReason !== 'string') throw new Error('Invalid early-finish reason.');
+  const earlyEndReason = String(payload.earlyEndReason || '').trim();
+  if (earlyEndReason.length > 1000) throw new Error('The early-finish reason exceeds 1000 characters.');
+  return { actualDurationSeconds, endedEarly, isCheckIn, earlyEndReason: endedEarly ? earlyEndReason : '' };
+}
+
+function appendReflection_(sheet, message, moment, spreadsheet, durationSeconds = null,
+    session = { actualDurationSeconds: null, endedEarly: false, earlyEndReason: '' }) {
+  ensureColumns_(sheet, 6);
+  // Only widen the newly owned fields, never shrink a user-chosen wider column.
+  for (const [column, width] of [[3, 220], [4, 220], [5, 135], [6, 300]]) {
+    if (sheet.getColumnWidth(column) < width) sheet.setColumnWidth(column, width);
+  }
   const previous = previousEntry_(sheet, spreadsheet);
   const needsHour = !previous || previous.hourStart !== moment.hourStart;
   const rows = needsHour ? 2 : 1;
@@ -262,26 +432,42 @@ function appendReflection_(sheet, message, moment, spreadsheet) {
   reserveTopRows_(sheet, rows);
   excludeNewCellsFromConditionalRules_(sheet, rows);
 
-  // Match column B's white cell outlines across every column, without repainting fills.
+  // Match column B's white cell outlines across every column.
   sheet.getRange(1, 1, 1, sheet.getMaxColumns())
     .setBorder(true, true, true, true, true, false, '#ffffff', SpreadsheetApp.BorderStyle.SOLID);
-  const entry = sheet.getRange(1, 1, 1, 2);
+  const entry = sheet.getRange(1, 1, 1, 6);
   // Treat reflections as plain text, including messages beginning with '='.
   entry.setNumberFormat('@');
+  // Store a real Sheets duration (fraction of a day), not an uncalculable label.
+  entry.getCell(1, 3).setNumberFormat(durationNumberFormat_(session.actualDurationSeconds));
+  entry.getCell(1, 4).setNumberFormat(durationNumberFormat_(durationSeconds));
   const clockLabel = `${moment.hour % 12 || 12}:${String(moment.minute).padStart(2, '0')}`;
-  entry.setValues([[clockLabel, message.startsWith('=') ? "'" + message : message]])
+  entry.setValues([[clockLabel, message.startsWith('=') ? "'" + message : message,
+    session.actualDurationSeconds === null ? '' : session.actualDurationSeconds / 86400,
+    durationSeconds === null ? '' : durationSeconds / 86400, session.isCheckIn ? 'Check-in' : session.endedEarly ? 'ended early' : '',
+    session.earlyEndReason.startsWith('=') ? "'" + session.earlyEndReason : session.earlyEndReason]])
     .setFontWeight('normal').setVerticalAlignment('top').clearNote();
   entry.getCell(1, 1).setBackground(background)
     .setFontColor(textColor_(background)).setNote(NOTE_PREFIX + JSON.stringify({
-      kind: 'entry', timestamp: moment.timestamp.toISOString(), hourStart: moment.hourStart
+      kind: 'entry', timestamp: moment.timestamp.toISOString(), hourStart: moment.hourStart, durationSeconds,
+      actualDurationSeconds: session.actualDurationSeconds, endedEarly: session.endedEarly, isCheckIn: session.isCheckIn === true,
+      requestId: session.requestId || undefined, requestFingerprint: session.fingerprint || undefined
     }));
-  entry.getCell(1, 2).setBackground('#0d0d0d').setFontColor('#ffffff').setWrap(true);
+  // New rows can inherit an hour band's fill. Restore column stripes explicitly:
+  // B/D/F/... are black with white text; C/E/G/... are white with black text.
+  // Leave A's independent alternation and the other cells' content/style intact.
+  const stripedCells = sheet.getRange(1, 2, 1, sheet.getMaxColumns() - 1);
+  const backgrounds = Array.from({ length: stripedCells.getNumColumns() },
+    (_unused, index) => index % 2 === 0 ? '#000000' : '#ffffff');
+  stripedCells.setBackgrounds([backgrounds])
+    .setFontColors([backgrounds.map((color) => color === '#000000' ? '#ffffff' : '#000000')]);
+  sheet.getRange(1, 2, 1, 5).setWrap(true);
 
   if (needsHour) {
     const theme = HOUR_THEMES[moment.hour];
     const marker = sheet.getRange(2, 1, 1, sheet.getMaxColumns());
-    sheet.getRange(2, 1, 1, 2).setNumberFormat('@')
-      .setValues([[`${moment.hour % 12 || 12}:00 ${moment.hour < 12 ? 'AM' : 'PM'}`, '']]).clearNote();
+    sheet.getRange(2, 1, 1, 6).setNumberFormat('@')
+      .setValues([[`${moment.hour % 12 || 12}:00 ${moment.hour < 12 ? 'AM' : 'PM'}`, '', '', '', '', '']]).clearNote();
     marker.setBackground(theme[0]).setFontColor(textColor_(theme[0]))
       .setFontWeight('bold').setWrap(false)
       .setBorder(true, false, true, false, false, false, theme[1], SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
@@ -322,9 +508,8 @@ function reserveTopRows_(sheet, rows) {
 }
 
 function excludeNewCellsFromConditionalRules_(sheet, rows) {
-  // Protect A1:B1 and the full-width hour row without changing neighboring rules.
-  const exclusions = [{ row: 1, col: 1, endRow: 1, endCol: 2 }];
-  if (rows === 2) exclusions.push({ row: 2, col: 1, endRow: 2, endCol: sheet.getMaxColumns() });
+  // Protect the new full-width entry/hour rows without changing neighboring rules.
+  const exclusions = [{ row: 1, col: 1, endRow: rows, endCol: sheet.getMaxColumns() }];
   const rules = sheet.getConditionalFormatRules();
   let changed = false;
   const updated = [];

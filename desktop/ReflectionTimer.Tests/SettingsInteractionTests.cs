@@ -41,7 +41,7 @@ internal static partial class Program
             main.Render(app.Engine.Snapshot); main.Show();
             var tabs = Descendants(main).OfType<TabControl>().Single(); tabs.SelectedIndex = 3;
             var audio = Descendants(main).OfType<AudioSettingsControl>().Single();
-            var number = Descendants(audio).OfType<NumericUpDown>().Single();
+            var number = Descendants(audio).OfType<NumericUpDown>().Single(x => x.AccessibleName == "Default low-time threshold in seconds");
             bool Key(Keys keys) => (bool)typeof(MainWindow).GetMethod("ProcessCmdKey", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(main, [Message.Create(0, 0, 0, 0), keys])!;
             int Requests() => app.Log.Recent().Count(x => x.Event == "sound.requested");

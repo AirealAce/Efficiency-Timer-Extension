@@ -64,7 +64,8 @@ public sealed class DiagnosticLog
         "reflection.queued", "upload.started", "upload.sent", "upload.needsReview", "upload.recovered", "upload.retryRequested",
         "upload.confirmedByUser", "settings.saved", "connection.checked", "issue.marked", "error.storage", "error.unexpected",
         "sound.changed", "sound.preview", "sound.played", "sound.fallback", "sound.muted", "sound.stopped", "sound.failed", "display.changed", "theme.changed",
-        "shortcut.registered", "shortcut.unavailable", "shortcut.used", "timer.lowTime", "timer.lowTimeOptions", "sound.thresholdChanged", "sound.requested"
+        "shortcut.registered", "shortcut.unavailable", "shortcut.used", "timer.endedEarly", "timer.lowTime", "timer.lowTimeOptions", "sound.thresholdChanged", "sound.requested",
+        "schedule.policy", "schedule.resolved", "prompt.checkIn"
     };
     public bool Enabled { get; set; } = true;
     public bool StorageAvailable { get; private set; } = true;
@@ -92,18 +93,20 @@ public sealed class DiagnosticLog
     public IReadOnlyList<Activity> Recent() { lock (gate) { Prune(); return events.ToArray(); } }
     public void Clear() { lock (gate) { EncryptedStore.Write(path, new List<Activity>()); events = []; StorageAvailable = true; } }
     public object Report(AppState state) => new {
-        FormatVersion = 1, AppVersion = "3.6.4", ExportedAt = DateTimeOffset.Now,
+        FormatVersion = 1, AppVersion = "3.12.2", ExportedAt = DateTimeOffset.Now,
         Privacy = "No reflection text, drafts, connection credentials, browsing URLs, window titles, audio filenames/paths, or other-app activity.",
         CustomAlertSound = !string.IsNullOrEmpty(state.AlertSoundPath),
         PopupPosition = state.PopupPosition.ToString(),
         Theme = state.Theme.ToString(),
+        ScheduleOverlap = state.ScheduleOverlap.ToString(), state.ShowFloatingTimer, FloatingPlacement = state.FloatingPlacement.ToString(),
         Audio = Enum.GetValues<SoundEvent>().Select(kind => new { Event = kind.ToString(), AudioSettings.From(state).For(kind).Behavior,
             AudioSettings.From(state).For(kind).Track, Custom = AudioSettings.From(state).For(kind).Mp3Path.Length > 0 }),
         AudioSettings.From(state).LowTimeThresholdSeconds,
         Enabled, StorageAvailable, Events = Recent(), Timer = state.Timer with { LowTime = state.Timer.LowTime with { Mp3Path = "" } },
         TimerLowTimeCustom = state.Timer.LowTime.Mp3Path.Length > 0,
         Schedules = state.Schedules.Select(x => x with { LowTime = x.LowTime with { Mp3Path = "" } }), PendingPrompts = state.Prompts.Count,
-        Outbox = state.Outbox.Select(x => new { x.Id, x.SubmittedAt, x.Status, x.IsTest, x.Attempts, ErrorKind = TimerEngine.SafeError(x.ErrorKind) }),
+        Outbox = state.Outbox.Select(x => new { x.Id, x.SubmittedAt, x.Status, x.IsTest, x.Attempts, x.RetryProtected,
+            x.NextAttemptAt, x.DurationSeconds, x.ActualDurationSeconds, x.EndedEarly, x.IsCheckIn, ErrorKind = TimerEngine.SafeError(x.ErrorKind) }),
         state.ExtensionDisabledConfirmed
     };
 }

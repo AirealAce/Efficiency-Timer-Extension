@@ -15,22 +15,31 @@ public sealed class GlobalShortcut : NativeWindow, IDisposable
     internal const int HotKeyMessage = 0x0312, HotKeyId = 0x5254;
     internal const uint Modifiers = 0x0002 | 0x0001 | 0x4000; // Control + Alt + NoRepeat
     internal const uint Key = 0x54; // T
+    internal const int EndEarlyId = 0x5255;
+    internal const uint EndEarlyKey = 0xC0; // VK_OEM_3: backtick/tilde on a US keyboard.
+    internal const int CompactId = 0x5256;
+    internal const uint CompactKey = 0xBF; // VK_OEM_2: slash/question mark on a US keyboard.
+    internal const int CompactFocusId = 0x5257;
+    internal const uint CompactFocusKey = 0xBE; // VK_OEM_PERIOD: period on a US keyboard.
+    internal const int ReflectionFocusId = 0x5258;
+    internal const uint ReflectionFocusKey = 0xBC; // VK_OEM_COMMA: comma on a US keyboard.
     private readonly IHotKeyRegistration registration;
     private readonly Action pressed;
+    private readonly int hotKeyId;
     private bool disposed;
     public bool IsRegistered { get; private set; }
 
-    public GlobalShortcut(Action pressed, IHotKeyRegistration? registration = null)
+    public GlobalShortcut(Action pressed, IHotKeyRegistration? registration = null, uint key = Key, int id = HotKeyId)
     {
-        this.pressed = pressed; this.registration = registration ?? new WindowsHotKeyRegistration();
+        this.pressed = pressed; this.registration = registration ?? new WindowsHotKeyRegistration(); hotKeyId = id;
         CreateHandle(new CreateParams { Caption = "Reflection Timer shortcut", Parent = new nint(-3) }); // HWND_MESSAGE
-        try { IsRegistered = this.registration.Register(Handle, HotKeyId, Modifiers, Key); }
+        try { IsRegistered = this.registration.Register(Handle, hotKeyId, Modifiers, key); }
         catch { DestroyHandle(); throw; }
     }
 
     internal bool Dispatch(int message, nint id)
     {
-        if (disposed || !IsRegistered || message != HotKeyMessage || id != HotKeyId) return false;
+        if (disposed || !IsRegistered || message != HotKeyMessage || id != hotKeyId) return false;
         pressed(); return true;
     }
     protected override void WndProc(ref Message message)
@@ -42,10 +51,29 @@ public sealed class GlobalShortcut : NativeWindow, IDisposable
     {
         if (disposed) return;
         disposed = true;
-        try { if (IsRegistered) registration.Unregister(Handle, HotKeyId); }
+        try { if (IsRegistered) registration.Unregister(Handle, hotKeyId); }
         finally { IsRegistered = false; DestroyHandle(); }
         GC.SuppressFinalize(this);
     }
+}
+
+// Only counts this registered shortcut. No keyboard hook or delayed first action.
+internal sealed class ConsecutiveShortcutPresses(TimeProvider? timeProvider = null)
+{
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+    private long? previous;
+    internal static readonly TimeSpan DoublePressWindow = TimeSpan.FromMilliseconds(800);
+
+    internal bool Press()
+    {
+        var now = clock.GetTimestamp();
+        if (previous is { } last && clock.GetElapsedTime(last, now) is var elapsed &&
+            elapsed >= TimeSpan.Zero && elapsed <= DoublePressWindow) {
+            Reset(); return true; // Consume the pair; a third press starts a new pair.
+        }
+        previous = now; return false;
+    }
+    internal void Reset() => previous = null;
 }
 
 internal sealed class WindowsHotKeyRegistration : IHotKeyRegistration

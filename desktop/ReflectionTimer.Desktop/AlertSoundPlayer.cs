@@ -10,11 +10,15 @@ public interface IAlertAudioBackend
     Task PlayAsync(string path, AudioLevel level, CancellationToken cancellationToken);
 }
 
-public sealed class AudioLevel(int volume)
+public sealed class AudioLevel(int volume, int? fadeOutAfterSeconds = null, int soundVolume = 100)
 {
-    public int Volume { get; } = Math.Clamp(volume, 0, 100);
+    private int appVolume = Math.Clamp(volume, 0, 100), eventVolume = Math.Clamp(soundVolume, 0, 100);
+    public int Volume => Volatile.Read(ref appVolume);
+    public int SoundVolume => Volatile.Read(ref eventVolume);
+    public int? FadeOutAfterSeconds { get; } = fadeOutAfterSeconds;
     private float multiplier = 1;
-    public float Gain => Volume / 100f * Volatile.Read(ref multiplier);
+    public float Gain => Volume / 100f * (SoundVolume / 100f) * Volatile.Read(ref multiplier);
+    internal void SetVolumes(int app, int sound) { Volatile.Write(ref appVolume, Math.Clamp(app, 0, 100)); Volatile.Write(ref eventVolume, Math.Clamp(sound, 0, 100)); }
     internal void Duck(bool ducked) => Volatile.Write(ref multiplier, ducked ? .25f : 1f);
 }
 
@@ -22,12 +26,27 @@ public sealed class AudioLevel(int volume)
 // or device-wide volume. Other apps are never captured, stopped, or attenuated.
 internal sealed class LiveGainProvider(ISampleProvider source, AudioLevel level) : ISampleProvider
 {
+    private long samplesPlayed;
     public WaveFormat WaveFormat => source.WaveFormat;
     public int Read(float[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
     public int Read(Span<float> buffer)
     {
+        var fadeStartFrame = level.FadeOutAfterSeconds is { } seconds ? (long)seconds * WaveFormat.SampleRate : (long?)null;
+        if (fadeStartFrame is { } start) {
+            // Count audio frames, not wall time: decoding/device setup cannot
+            // consume the delay, and every channel gets the same one-second fade.
+            var remaining = (start + WaveFormat.SampleRate) * WaveFormat.Channels - samplesPlayed;
+            if (remaining <= 0) return 0;
+            buffer = buffer[..(int)Math.Min(buffer.Length, remaining)];
+        }
         var read = source.Read(buffer); var gain = level.Gain;
-        for (var i = 0; i < read; i++) buffer[i] *= gain;
+        for (var i = 0; i < read; i++) {
+            var fade = fadeStartFrame is { } fadeStart
+                ? Math.Clamp(1f - ((samplesPlayed + i) / WaveFormat.Channels - fadeStart) / (float)WaveFormat.SampleRate, 0f, 1f)
+                : 1f;
+            buffer[i] *= gain * fade;
+        }
+        samplesPlayed += read;
         return read;
     }
 }
@@ -53,11 +72,13 @@ public sealed class Mp3AudioBackend : IAlertAudioBackend
     public async Task PlayAsync(string path, AudioLevel level, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        using var reader = new AudioFileReader(path);
+        var builtIn = path.StartsWith("builtin:", StringComparison.Ordinal);
+        using var reader = builtIn ? null : new AudioFileReader(path);
+        ISampleProvider source = reader is not null ? reader : new BuiltInTone(Enum.Parse<SoundEvent>(path[8..]));
         using var output = new WaveOut();
         var stopped = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         output.PlaybackStopped += (_, e) => stopped.TrySetResult(e.Exception);
-        output.Init(new LiveGainProvider(reader, level));
+        output.Init(new LiveGainProvider(source, level));
         cancellationToken.ThrowIfCancellationRequested();
         output.Play();
         using var registration = cancellationToken.Register(() => {
@@ -74,7 +95,8 @@ public sealed class Mp3AudioBackend : IAlertAudioBackend
 
 public sealed class AlertSoundPlayer : IDisposable
 {
-    public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "popup.mp3");
+    public static string BundledPath => File.Exists(Path.Combine(AppContext.BaseDirectory, "popup.mp3"))
+        ? Path.Combine(AppContext.BaseDirectory, "popup.mp3") : BuiltInTone.PathFor(SoundEvent.SessionEnd);
     private readonly IAlertAudioBackend backend;
     private readonly string defaultPath;
     private readonly TimeProvider timeProvider;
@@ -84,11 +106,11 @@ public sealed class AlertSoundPlayer : IDisposable
     private Task stopping = Task.CompletedTask;
     private bool disposed;
 
-    private sealed class Voice(int volume, SoundBehavior behavior, SoundEvent kind, bool preview)
+    private sealed class Voice(int volume, SoundBehavior behavior, SoundEvent kind, bool preview, int? fadeOutAfterSeconds, int soundVolume)
     {
         public readonly CancellationTokenSource Cancellation = new();
         public readonly TaskCompletionSource Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public readonly AudioLevel Level = new(volume);
+        public readonly AudioLevel Level = new(volume, fadeOutAfterSeconds, soundVolume);
         public readonly SoundBehavior Behavior = behavior;
         public readonly SoundEvent Kind = kind;
         public readonly bool Preview = preview;
@@ -105,19 +127,20 @@ public sealed class AlertSoundPlayer : IDisposable
     public Task<AlertSoundResult> PlayAsync(string customPath, int volume) =>
         PlayAsync(customPath, volume, SoundBehavior.Disruptive, SoundEvent.SessionEnd);
 
-    public Task<AlertSoundResult> PlayAsync(string? path, int volume, SoundBehavior behavior, SoundEvent kind, string? fallback = null, bool preview = false)
+    public Task<AlertSoundResult> PlayAsync(string? path, int volume, SoundBehavior behavior, SoundEvent kind, string? fallback = null, bool preview = false, int? fadeOutAfterSeconds = null, int soundVolume = 100)
     {
+        if (fadeOutAfterSeconds is < 1 or > TimerEngine.MaxDuration) throw new ArgumentOutOfRangeException(nameof(fadeOutAfterSeconds));
         lock (gate) {
             if (disposed) return Task.FromResult(AlertSoundResult.Cancelled);
             // Even None replaces the previous preview, but never stops a real
             // session sound or falls back to a bundled file.
             if (preview) CancelVoices(voices.Where(x => x.Preview).ToArray());
             if (path is null) return Task.FromResult(AlertSoundResult.Muted);
-            if (volume <= 0) return Task.FromResult(AlertSoundResult.Muted); // Muted events cannot interrupt audible ones.
+            if (volume <= 0 || soundVolume <= 0) return Task.FromResult(AlertSoundResult.Muted); // Muted events cannot interrupt audible ones.
             if (!Enum.IsDefined(behavior)) behavior = SoundBehavior.Disruptive;
             if (behavior == SoundBehavior.Disruptive) CancelVoices(voices.ToArray());
             if (voices.Count >= 32) return Task.FromResult(AlertSoundResult.Cancelled);
-            var request = new Voice(volume, behavior, kind, preview); voices.Add(request);
+            var request = new Voice(volume, behavior, kind, preview, fadeOutAfterSeconds, soundVolume); voices.Add(request);
             var waitForStops = stopping;
             return Task.Run(() => RunAsync(path, fallback ?? defaultPath, request, waitForStops));
         }
@@ -159,8 +182,16 @@ public sealed class AlertSoundPlayer : IDisposable
 
     private void UpdateGains()
     {
-        var foreground = voices.LastOrDefault(x => x.Running && !x.Cancellation.IsCancellationRequested && x.Behavior == SoundBehavior.Assertive);
+        var foreground = voices.LastOrDefault(x => x.Running && !x.Cancellation.IsCancellationRequested && x.Behavior == SoundBehavior.Assertive
+            && x.Level.Volume > 0 && x.Level.SoundVolume > 0);
         foreach (var voice in voices) voice.Level.Duck(foreground is not null && !ReferenceEquals(voice, foreground));
+    }
+    public void UpdateVolumes(int appVolume, AudioSettings settings)
+    {
+        lock (gate) {
+            foreach (var voice in voices) voice.Level.SetVolumes(appVolume, settings.For(voice.Kind).Volume);
+            UpdateGains();
+        }
     }
     private void CancelVoices(Voice[] targets)
     {

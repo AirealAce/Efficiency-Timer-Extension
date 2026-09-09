@@ -11,7 +11,7 @@ internal static partial class Program
             var state = new AppState { AlertSoundPath = Path.Combine(Path.GetTempPath(), "existing.mp3") };
             var settings = AudioSettings.From(state); Equal(state.AlertSoundPath, settings.SessionEnd.Mp3Path);
             foreach (var kind in Enum.GetValues<SoundEvent>()) Equal(SoundBehavior.Disruptive, settings.For(kind).Behavior);
-            Equal(60, settings.LowTimeThresholdSeconds); Is(!state.Timer.LowTime.Enabled);
+            Equal(60, settings.LowTimeThresholdSeconds); Is(state.Timer.LowTime.Enabled);
             Equal(LibrarySound.LevelUp, SoundLibrary.DefaultFor(SoundEvent.Success));
             Equal(LibrarySound.OutOfHealth, SoundLibrary.DefaultFor(SoundEvent.Failure));
             Equal(LibrarySound.TrainerBattle, SoundLibrary.DefaultFor(SoundEvent.LowTime));
@@ -121,6 +121,8 @@ internal static partial class Program
 
     private static async Task TestAudioPolicies()
     {
+        await TestVolumePlayback();
+        await TestFadeOutPlayback();
         await TestPreviewAudio();
         await TestAsync("Polite voices overlap without changing each other's volumes", async () => {
             var backend = new ControlledAudio(); using var player = new AlertSoundPlayer(backend);

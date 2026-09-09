@@ -26,7 +26,8 @@ internal static class Program
                 var connection = JsonSerializer.Deserialize<ConnectionSettings>(Console.In.ReadToEnd(), DataJson.Options) ?? throw new InvalidDataException("No connection supplied.");
                 var error = SheetsClient.Validate(connection);
                 if (error is not null) throw new InvalidDataException(error);
-                var saved = store.Load(); saved.Connection = connection; store.Save(saved);
+                var engine = new TimerEngine(store); var saved = engine.Snapshot;
+                engine.SaveSettings(connection, saved.LoggingEnabled, saved.StartAtLogin, saved.ExtensionDisabledConfirmed);
                 return;
             }
             if (args.Contains("--check-connection"))
@@ -44,6 +45,7 @@ internal static class Program
             if (!args.Contains("--no-global-shortcut")) app.EnableGlobalShortcut();
             Application.ThreadException += (_, _) => app.ShowError("An unexpected app error occurred. Your last committed state is retained. Export diagnostics if this repeats.");
             app.OpenUnlessTray(args.Contains("--tray"));
+            if (!args.Contains("--no-setup")) app.OfferInitialSetup();
             Application.Run(app);
         }
         catch (Exception)

@@ -26,6 +26,7 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
   const insertedCells = [];
   const createdSheets = [];
   const deletedSheets = [];
+  const properties = new Map();
   function createSheet(name, grid = Array.from({ length: 16 }, () => ['', ''])) {
     grids.set(name, grid);
     const formatsGrid = [];
@@ -33,11 +34,14 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
     formats.set(name, formatsGrid);
     notesBySheet.set(name, notes);
     let maxRows = 774;
+    const columnWidths = new Map();
     let conditionalRules = [];
     const sheet = {
       getName: () => name,
       getMaxColumns: () => 33,
       getMaxRows: () => maxRows,
+      getColumnWidth: (column) => columnWidths.get(column) || 100,
+      setColumnWidth(column, width) { columnWidths.set(column, width); },
       getLastRow: () => grid.length,
       insertRowsAfter(_row, count) { maxRows += count; },
       insertRowsBefore(row, count) {
@@ -61,6 +65,12 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
           const cells = read(formatsGrid, null).map((line) => line.map((item) => ({ ...item, [field]: value })));
           write(formatsGrid, cells);
         };
+        const styleGrid = (field, values) => {
+          assert.equal(values.length, rowCount);
+          values.forEach((line) => assert.equal(line.length, columnCount));
+          write(formatsGrid, read(formatsGrid, null).map((line, r) =>
+            line.map((item, c) => ({ ...item, [field]: values[r][c] }))));
+        };
         return {
           getRow: () => row, getColumn: () => column,
           getNumRows: () => rowCount, getNumColumns: () => columnCount,
@@ -72,6 +82,8 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
           setNote(value) { write(notes, read(notes, '').map((line) => line.map(() => value))); return this; },
           setBackground(value) { style('background', value); return this; },
           setFontColor(value) { style('fontColor', value); return this; },
+          setBackgrounds(values) { styleGrid('background', values); return this; },
+          setFontColors(values) { styleGrid('fontColor', values); return this; },
           setFontWeight(value) { style('fontWeight', value); return this; },
           setVerticalAlignment(value) { style('verticalAlignment', value); return this; },
           setNumberFormat(value) { style('numberFormat', value); return this; },
@@ -166,8 +178,11 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
       getScriptProperties: () => ({
         getProperty(name) {
           if (name === 'TEMPLATE_SHEET_NAME') return options.templateName || '';
-          return name === 'SPREADSHEET_ID' ? SPREADSHEET_ID : TOKEN;
-        }
+          return name === 'SPREADSHEET_ID' ? SPREADSHEET_ID : name === 'REFLECTION_API_TOKEN' ? TOKEN : properties.get(name) ?? null;
+        },
+        setProperty(name, value) { if (options.failReceiptDone && JSON.parse(value).status === 'done') throw new Error('Receipt save interrupted'); properties.set(name, value); },
+        getProperties() { return Object.fromEntries(properties); },
+        deleteProperty(name) { properties.delete(name); }
       })
     },
     SpreadsheetApp: {
@@ -196,7 +211,7 @@ function createHarness(names = ['Template'], timezone = 'America/New_York', opti
   };
   vm.runInNewContext(source, context, { filename: 'google-sheets-script.gs' });
   const request = (payload) => JSON.parse(context.doPost({ postData: { contents: JSON.stringify(payload) } }).text);
-  return { grid: grids.get('Template'), grids, formats, notesBySheet, insertedCells, request, scriptLock, createdSheets, deletedSheets, context, sheets };
+  return { grid: grids.get('Template'), grids, formats, notesBySheet, insertedCells, request, scriptLock, createdSheets, deletedSheets, context, sheets, properties };
 }
 
 test('Apps Script ping validates configuration and returns the target', () => {
@@ -223,13 +238,13 @@ test('Apps Script prepends timestamp/activity pairs newest first', () => {
   };
   const first = harness.request({ ...base, message: 'First session' });
   const second = harness.request({ ...base, message: 'Second session' });
-  assert.equal(first.range, 'A1:B1');
-  assert.equal(second.range, 'A1:B1');
+  assert.equal(first.range, 'A1:F1');
+  assert.equal(second.range, 'A1:F1');
   assert.equal(harness.grid[0][1], 'Second session');
   assert.equal(harness.grid[1][1], 'First session');
 });
 
-test('Apps Script grows A:B past 16 entries without using other column pairs', () => {
+test('Apps Script grows A:F past 16 entries without using other column pairs', () => {
   const harness = createHarness();
   const base = {
     action: 'appendReflection',
@@ -242,7 +257,7 @@ test('Apps Script grows A:B past 16 entries without using other column pairs', (
   for (let index = 1; index <= 17; index += 1) {
     result = harness.request({ ...base, message: `Session ${index}` });
   }
-  assert.equal(result.range, 'A1:B1');
+  assert.equal(result.range, 'A1:F1');
   assert.equal(harness.grid[0][1], 'Session 17');
   assert.equal(harness.grid[16][1], 'Session 1');
   assert.equal(harness.grid[0][3] || '', '');
@@ -268,6 +283,204 @@ const datedRequest = {
   message: 'A dated reflection', submittedAt: '2026-09-06T02:30:00.000Z',
   timezoneOffsetMinutes: 240
 };
+
+for (const [seconds, pattern] of [
+  [0, '[s]" secs"'], [1, '[s]" sec"'], [15, '[s]" secs"'],
+  [60, '[m]" min"'], [61, '[m]" min" s" sec"'],
+  [2104, '[m]" min" s" secs"'], [3600, '[h]" hr"'],
+  [3601, '[h]" hr" s" sec"'], [6620, '[h]" hr" m" min" s" secs"'],
+  [7260, '[h]" hrs" m" min"'], [86400, '[h]" hrs"'],
+  [31536000, '[h]" hrs"']
+]) test(`duration ${seconds} is stored numerically in C with readable units`, () => {
+  const harness = createHarness(['test', 'Temp', '09/05/2026']);
+  const result = harness.request({ ...datedRequest, isTest: true, durationSeconds: seconds, actualDurationSeconds: seconds });
+  assert.equal(result.success, true, result.error);
+  assert.equal(result.range, 'A1:F1');
+  assert.equal(harness.grids.get('test')[0][2], seconds / 86400);
+  const cell = harness.formats.get('test')[0][2];
+  assert.equal(cell.numberFormat, pattern);
+  assert.equal(cell.fontColor, '#000000');
+  assert.equal(cell.background, '#ffffff');
+  assert.equal(cell.fontWeight, 'normal');
+  assert.equal(cell.verticalAlignment, 'top');
+  assert.equal(cell.wrap, true);
+  assert.equal(cell.borders.color, '#ffffff');
+  assert.equal(harness.grids.get('test')[1][2], '', 'hour dividers have no duration');
+  assert.equal(JSON.parse(harness.notesBySheet.get('test')[0][0].slice('Reflection Timer: '.length)).durationSeconds, seconds);
+  assert.deepEqual(harness.grids.get('Temp')[0], ['', '']);
+  assert.deepEqual(harness.grids.get('09/05/2026')[0], ['', '']);
+});
+
+test('safe delivery repeats a completed ID without inserting again', () => {
+  const h = createHarness(['test']);
+  const p = { ...datedRequest, isTest: true, requestId: crypto.randomUUID(), deliveryProtocol: 'request-id-v1',
+    durationSeconds: 60, actualDurationSeconds: 12, endedEarly: true, earlyEndReason: 'appointment' };
+  assert.equal(h.request(p).success, true); const before = structuredClone(h.grids.get('test'));
+  const retry = h.request(p); assert.equal(retry.success, true); assert.equal(retry.duplicate, true);
+  assert.equal(retry.deliveryProtocol, 'request-id-v1'); assert.deepEqual(h.grids.get('test'), before);
+  assert.equal(h.request({ ...p, message: 'changed' }).code, 'id_conflict');
+  assert.equal(h.request({ ...p, token: 'wrong token' }).success, false);
+  assert.deepEqual(h.grids.get('test'), before);
+});
+
+test('lost final receipt remains quarantined and cannot duplicate its row', () => {
+  const h = createHarness(['test'], 'America/New_York', { failReceiptDone: true });
+  const p = { ...datedRequest, isTest: true, requestId: crypto.randomUUID() };
+  assert.equal(h.request(p).code, 'write_uncertain'); const before = structuredClone(h.grids.get('test'));
+  assert.equal(h.request(p).code, 'write_uncertain'); assert.deepEqual(h.grids.get('test'), before);
+  const record = JSON.parse(h.properties.get('RT_RECEIPT_' + p.requestId));
+  assert.equal(record.status, 'writing'); assert.equal(record.message, undefined); assert.equal(record.token, undefined);
+});
+
+test('row notes recognize an older ID after completed receipt cache eviction', () => {
+  const h = createHarness(['test']); const p = { ...datedRequest, isTest: true, requestId: crypto.randomUUID() };
+  h.request(p); h.properties.delete('RT_RECEIPT_' + p.requestId);
+  h.request({ ...p, requestId: crypto.randomUUID(), message: 'later entry' });
+  const before = structuredClone(h.grids.get('test'));
+  assert.equal(h.request(p).duplicate, true); assert.deepEqual(h.grids.get('test'), before);
+  assert.equal(h.request({ ...p, earlyEndReason: 'changed' }).code, 'id_conflict');
+});
+
+test('receipt pruning preserves unresolved reservations and unrelated settings', () => {
+  const h = createHarness(['test']);
+  for (let i = 0; i < 505; i++) h.properties.set('RT_RECEIPT_' + i, JSON.stringify({ status: 'done', at: i }));
+  h.properties.set('RT_RECEIPT_unresolved', JSON.stringify({ status: 'writing', at: -10 }));
+  h.properties.set('unrelated-setting', 'keep'); h.context.pruneReceipts_({
+    getProperties: () => Object.fromEntries(h.properties), deleteProperty: key => h.properties.delete(key)
+  });
+  assert.equal(h.properties.size, 501); assert.ok(h.properties.has('RT_RECEIPT_unresolved')); assert.equal(h.properties.get('unrelated-setting'), 'keep');
+});
+
+test('safe protocol requires valid IDs and ping advertises support without writing', () => {
+  const h = createHarness(['test']);
+  const ping = h.request({ ...datedRequest, isTest: true, action: 'ping' });
+  assert.equal(ping.deliveryProtocol, 'request-id-v1'); assert.equal(h.properties.size, 0);
+  for (const requestId of [null, '', 'short', '../invalid/id/123456789']) {
+    assert.equal(h.request({ ...datedRequest, isTest: true, requestId, deliveryProtocol: 'request-id-v1' }).success, false);
+  }
+  assert.equal(h.properties.size, 0); assert.equal(h.insertedCells.length, 0);
+});
+
+test('early-finish details write actual, allotted, status and safe reason to C:F', () => {
+  const h = createHarness(['test']);
+  const result = h.request({ ...datedRequest, isTest: true, durationSeconds: 1800, actualDurationSeconds: 480,
+    endedEarly: true, earlyEndReason: '=appointment' });
+  assert.equal(result.success, true, result.error);
+  assert.deepEqual(h.grids.get('test')[0].slice(2, 6), [480 / 86400, 1800 / 86400, 'ended early', "'=appointment"]);
+  assert.deepEqual(h.grids.get('test')[1].slice(2, 6), ['', '', '', '']);
+  assert.equal(h.formats.get('test')[0][5].numberFormat, '@');
+});
+
+test('completed entries leave status and reason blank and legacy actual time is unknown', () => {
+  const h = createHarness(['test']);
+  h.request({ ...datedRequest, isTest: true, durationSeconds: 60, actualDurationSeconds: 60, earlyEndReason: 'not applicable' });
+  assert.deepEqual(h.grids.get('test')[0].slice(2, 6), [60 / 86400, 60 / 86400, '', '']);
+  h.request({ ...datedRequest, isTest: true, durationSeconds: 120 });
+  assert.deepEqual(h.grids.get('test')[0].slice(2, 6), ['', 120 / 86400, '', '']);
+});
+
+test('check-ins write elapsed/allotted durations and Check-in status with no early-end reason', () => {
+  for (const actualDurationSeconds of [0, 25, 60]) {
+    const h = createHarness(['test', 'Temp', '09/05/2026']);
+    const p = { ...datedRequest, isTest: true, isCheckIn: true, durationSeconds: 60,
+      actualDurationSeconds, earlyEndReason: 'not applicable', requestId: crypto.randomUUID(), deliveryProtocol: 'request-id-v1' };
+    const result = h.request(p); assert.equal(result.success, true, result.error);
+    assert.deepEqual(h.grids.get('test')[0].slice(2, 6), [actualDurationSeconds / 86400, 60 / 86400, 'Check-in', '']);
+    assert.equal(JSON.parse(h.notesBySheet.get('test')[0][0].slice('Reflection Timer: '.length)).isCheckIn, true);
+    assert.equal(h.formats.get('test')[0][2].background, '#ffffff');
+    assert.equal(h.formats.get('test')[0][3].background, '#000000');
+    assert.equal(h.formats.get('test')[0][4].background, '#ffffff');
+    const before = structuredClone(h.grids.get('test'));
+    assert.equal(h.request(p).duplicate, true); assert.deepEqual(h.grids.get('test'), before);
+    assert.equal(h.request({ ...p, isCheckIn: false }).code, 'id_conflict');
+    assert.deepEqual(h.grids.get('Temp')[0], ['', '']); assert.deepEqual(h.grids.get('09/05/2026')[0], ['', '']);
+  }
+});
+
+test('check-in capability is explicit and malformed or contradictory check-ins never write', () => {
+  const h = createHarness(['test']);
+  assert.equal(h.request({ ...datedRequest, isTest: true, action: 'ping' }).supportsCheckIns, true);
+  for (const bad of [{ isCheckIn: 'true', actualDurationSeconds: 5 }, { isCheckIn: true },
+    { isCheckIn: true, actualDurationSeconds: 5, endedEarly: true }]) {
+    assert.equal(h.request({ ...datedRequest, isTest: true, durationSeconds: 60, ...bad }).success, false);
+  }
+  assert.equal(h.insertedCells.length, 0); assert.equal(h.properties.size, 0);
+});
+
+test('new receiver preserves legacy fingerprints and recognizes old receipts', () => {
+  const h = createHarness(['test']);
+  const p = { ...datedRequest, isTest: true, durationSeconds: 60, actualDurationSeconds: 60, requestId: crypto.randomUUID() };
+  const legacyFields = [SPREADSHEET_ID, 'date', '', true, p.submittedAt, p.timezoneOffsetMinutes,
+    p.message, 60, 60, false, ''];
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify(legacyFields)).digest('hex');
+  assert.equal(h.context.requestFingerprint_(p), fingerprint);
+  assert.equal(h.context.requestFingerprint_({ ...p, isCheckIn: false }), fingerprint);
+  h.properties.set('RT_RECEIPT_' + p.requestId, JSON.stringify({ status: 'done', fingerprint, sheet: 'test', timestamp: p.submittedAt }));
+  assert.equal(h.request({ ...p, isCheckIn: false }).duplicate, true);
+  assert.equal(h.insertedCells.length, 0);
+});
+
+test('invalid session details fail before sheet mutations', () => {
+  for (const details of [{ actualDurationSeconds: 61 }, { actualDurationSeconds: -1 }, { actualDurationSeconds: '3' },
+    { endedEarly: 'yes' }, { endedEarly: true }, { earlyEndReason: 3 }, { earlyEndReason: 'x'.repeat(1001) }]) {
+    const h = createHarness();
+    assert.equal(h.request({ ...datedRequest, durationSeconds: 60, ...details }).success, false);
+    assert.equal(h.createdSheets.length, 0); assert.equal(h.insertedCells.length, 0);
+  }
+});
+
+test('zero actual time and optional early reason remain meaningful', () => {
+  const h = createHarness(['test']);
+  assert.equal(h.request({ ...datedRequest, isTest: true, durationSeconds: 60, actualDurationSeconds: 0, endedEarly: true }).success, true);
+  assert.deepEqual(h.grids.get('test')[0].slice(2, 6), [0, 60 / 86400, 'ended early', '']);
+});
+
+test('legacy missing durations stay blank instead of inventing a duration', () => {
+  for (const durationSeconds of [undefined, null]) {
+    const harness = createHarness(['test']);
+    assert.equal(harness.request({ ...datedRequest, isTest: true, durationSeconds }).success, true);
+    assert.equal(harness.grids.get('test')[0][2], '');
+  }
+});
+
+test('invalid durations are rejected before creating a tab or changing any cells', () => {
+  for (const durationSeconds of [-1, 1.5, '15', '', false, {}, 31536001, Number.MAX_SAFE_INTEGER]) {
+    const harness = createHarness();
+    const original = structuredClone(harness.grid);
+    const result = harness.request({ ...datedRequest, durationSeconds });
+    assert.equal(result.success, false);
+    assert.match(result.error, /timer duration must be whole seconds/);
+    assert.deepEqual(harness.grid, original);
+    assert.equal(harness.createdSheets.length, 0);
+    assert.equal(harness.insertedCells.length, 0);
+  }
+});
+
+test('durations move with their reflections and only C:F is widened when needed', () => {
+  const harness = createHarness(['test']);
+  const sheet = harness.sheets[0];
+  sheet.setColumnWidth(2, 450); sheet.setColumnWidth(7, 105);
+  for (const [minute, durationSeconds] of [[1, 15], [2, 2104], [3, 6620]]) {
+    assert.equal(harness.request({ ...datedRequest, isTest: true, durationSeconds, actualDurationSeconds: durationSeconds,
+      submittedAt: `2026-09-05T18:0${minute}:00-04:00` }).success, true);
+  }
+  assert.deepEqual(harness.grids.get('test').slice(0, 4).map(row => row[2]), [6620 / 86400, 2104 / 86400, 15 / 86400, '']);
+  assert.equal(sheet.getColumnWidth(3), 220);
+  assert.equal(sheet.getColumnWidth(2), 450); assert.equal(sheet.getColumnWidth(7), 105);
+  sheet.setColumnWidth(3, 300);
+  assert.equal(harness.request({ ...datedRequest, isTest: true, durationSeconds: 60 }).success, true);
+  assert.equal(sheet.getColumnWidth(3), 300, 'retain a user-chosen wider duration column');
+});
+
+test('a new daily tab receives the timer duration without changing its source template', () => {
+  const harness = createHarness(['Temp'], 'America/New_York', { templateName: 'Temp' });
+  const original = structuredClone(harness.grids.get('Temp'));
+  const result = harness.request({ ...datedRequest, durationSeconds: 6620, actualDurationSeconds: 6620 });
+  assert.equal(result.success, true, result.error); assert.equal(result.created, true);
+  assert.equal(harness.grids.get(result.sheet)[0][2], 6620 / 86400);
+  assert.equal(harness.grids.get(result.sheet)[1][2], '');
+  assert.deepEqual(harness.grids.get('Temp'), original);
+});
 
 test('hour markers follow the example and entry colors alternate across the divider', () => {
   const harness = createHarness(['test']);
@@ -326,20 +539,54 @@ test('reused and inserted entry rows have thin white borders in every column wit
   }
 });
 
-test('full-row entry borders preserve the other columns background, text and notes', () => {
+test('full-row column stripes preserve the other columns font weight and notes', () => {
   const harness = createHarness(['test']);
-  harness.sheets[0].getRange(1, 3, 1, 31).setBackground('#abcdef')
+  harness.sheets[0].getRange(1, 7, 1, 27).setBackground('#abcdef')
     .setFontColor('#123456').setFontWeight('bold').setNote('Keep my note');
   assert.equal(harness.request({ ...datedRequest, isTest: true }).success, true);
   const format = harness.formats.get('test')[0];
   const notes = harness.notesBySheet.get('test')[0];
-  for (let column = 2; column < 33; column += 1) {
-    assert.equal(format[column].background, '#abcdef');
-    assert.equal(format[column].fontColor, '#123456');
+  for (let column = 6; column < 33; column += 1) {
+    assert.equal(format[column].background, column % 2 === 1 ? '#000000' : '#ffffff');
+    assert.equal(format[column].fontColor, column % 2 === 1 ? '#ffffff' : '#000000');
     assert.equal(format[column].fontWeight, 'bold');
     assert.equal(format[column].borders.color, '#ffffff');
     assert.equal(notes[column], 'Keep my note');
   }
+});
+
+test('column stripes cover reused and inserted rows, with or without a new hour and duration metadata', () => {
+  const harness = createHarness(['test']);
+  // Simulate the color a blank row can inherit from an hour band.
+  harness.sheets[0].getRange(1, 1, 1, 33).setBackground('#980000').setFontColor('#ffffff');
+  for (const [index, time] of ['17:58', '17:59', '18:01', '18:02'].entries()) {
+    const result = harness.request({ ...datedRequest, isTest: true,
+      submittedAt: `2026-09-05T${time}:00-04:00`,
+      ...(index % 2 === 0 ? { durationSeconds: 120, actualDurationSeconds: 30,
+        endedEarly: true, earlyEndReason: 'Test interruption' } : {}) });
+    assert.equal(result.success, true, result.error);
+    const format = harness.formats.get('test');
+    for (let column = 1; column < 33; column++) {
+      assert.equal(format[0][column].background, column % 2 === 1 ? '#000000' : '#ffffff');
+      assert.equal(format[0][column].fontColor, column % 2 === 1 ? '#ffffff' : '#000000');
+    }
+    assert.equal(format[0][0].background, index % 2 === 0 ? '#ffffff' : '#595959');
+    if (index % 2 === 0) {
+      assert.ok(format[1].every((cell) => cell.background === (index === 0 ? '#1e40af' : '#980000')));
+    }
+  }
+});
+
+test('column stripes on a newly copied daily tab do not repaint the template', () => {
+  const harness = createHarness(['Temp'], 'America/New_York', { templateName: 'Temp' });
+  harness.sheets[0].getRange(1, 1, 1, 33).setBackground('#abcdef').setFontColor('#123456');
+  const original = structuredClone(harness.formats.get('Temp'));
+  const result = harness.request({ ...datedRequest, durationSeconds: 120, actualDurationSeconds: 120 });
+  assert.equal(result.success, true, result.error);
+  for (let column = 1; column < 33; column++) {
+    assert.equal(harness.formats.get(result.sheet)[0][column].background, column % 2 === 1 ? '#000000' : '#ffffff');
+  }
+  assert.deepEqual(harness.formats.get('Temp'), original);
 });
 
 test('empty top pairs are reused, while partial pairs and empty-result formulas are preserved', () => {
@@ -427,7 +674,19 @@ test('newly written cells are excluded from old conditional rules without changi
   sheet.setConditionalFormatRules([makeRule([sheet.getRange(1, 1, 774, 33)])]);
   harness.request({ ...datedRequest, isTest: true });
   const ranges = sheet.getConditionalFormatRules()[0].getRanges();
-  assert.deepEqual(Array.from(ranges, (r) => r.getA1Notation()), ['A3:AG774', 'C1:AG1']);
+  assert.deepEqual(Array.from(ranges, (r) => r.getA1Notation()), ['A3:AG774']);
+});
+
+test('same-hour entries exclude only the new full-width row from conditional colors', () => {
+  const harness = createHarness(['test']);
+  harness.request({ ...datedRequest, isTest: true });
+  const sheet = harness.sheets[0];
+  const makeRule = (ranges) => ({ getRanges: () => ranges,
+    copy() { return { setRanges(next) { return { build: () => makeRule(next) }; } }; } });
+  sheet.setConditionalFormatRules([makeRule([sheet.getRange(1, 1, 774, 33)])]);
+  assert.equal(harness.request({ ...datedRequest, isTest: true }).success, true);
+  const ranges = sheet.getConditionalFormatRules()[0].getRanges();
+  assert.deepEqual(Array.from(ranges, (r) => r.getA1Notation()), ['A2:AG774']);
 });
 
 test('reflections beginning with equals are stored as literal text', () => {
@@ -498,7 +757,7 @@ test('the first send copies Template once and clears only the copy log area', ()
   assert.equal(first.success, true);
   assert.equal(first.sheet, '09/05/2026');
   assert.equal(first.created, true);
-  assert.equal(first.range, 'A1:B1');
+  assert.equal(first.range, 'A1:F1');
   const dailyGrid = harness.grids.get(first.sheet);
   assert.equal(dailyGrid[0][1], datedRequest.message);
   assert.deepEqual(dailyGrid[18].slice(0, 4), ['', '', ...original[16].slice(2)]);
@@ -506,7 +765,7 @@ test('the first send copies Template once and clears only the copy log area', ()
   assert.deepEqual(harness.grid, original, 'source template is never cleared');
   const second = harness.request({ ...datedRequest, message: 'Next session' });
   assert.equal(second.created, false);
-  assert.equal(second.range, 'A1:B1');
+  assert.equal(second.range, 'A1:F1');
   assert.equal(harness.createdSheets.length, 1);
 });
 

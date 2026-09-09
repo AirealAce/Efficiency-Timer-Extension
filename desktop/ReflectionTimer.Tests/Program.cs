@@ -7,13 +7,26 @@ using ReflectionTimer.Desktop;
 internal static partial class Program
 {
     private static int passed, failed;
-    private static readonly ConnectionSettings Connection = new() { WebAppUrl = "https://script.google.com/macros/s/test-deployment/exec", ApiToken = "unit-test-token-not-a-real-secret" };
+    private static readonly ConnectionSettings Connection = new() { SheetUrl = "https://docs.google.com/spreadsheets/d/synthetic-spreadsheet-id-for-tests/edit", WebAppUrl = "https://script.google.com/macros/s/test-deployment/exec", ApiToken = "unit-test-token-not-a-real-secret" };
 
     [STAThread]
     private static int Main(string[] args)
     {
-        var smokeTheme = args is ["--theme-smoke", var selected] ? Enum.Parse<AppColorTheme>(selected) : AppColorTheme.Dark;
+        var smokeTheme = args switch {
+            ["--theme-smoke", var selected] => Enum.Parse<AppColorTheme>(selected),
+            ["--transport-preview", _, var selected] => Enum.Parse<AppColorTheme>(selected),
+            _ => AppColorTheme.Dark
+        };
         AppTheme.Initialize(() => smokeTheme);
+        if (args is ["--transport-preview", var previewPath, _]) {
+            WithEndEarlyApp((app, _) => {
+                app.FocusCompactTimer(); Application.DoEvents();
+                var mini = Application.OpenForms.OfType<FloatingTimerWindow>().Single();
+                using var preview = new Bitmap(mini.Width, mini.Height);
+                mini.DrawToBitmap(preview, new Rectangle(Point.Empty, mini.Size));
+                preview.Save(previewPath, System.Drawing.Imaging.ImageFormat.Png);
+            }); return 0;
+        }
         if (args is ["--audio-smoke"]) {
             // Explicit hardware check only: normal tests never emit audio.
             return Task.Run(async () => {
@@ -35,13 +48,109 @@ internal static partial class Program
             new EncryptedStore(path).Save(new AppState { Theme = theme, ExtensionDisabledConfirmed = true, Timer = new TimerState { Volume = 0, DurationSeconds = 10, RemainingSeconds = 10 } });
             return 0;
         }
+        if (args is ["--seed-tiny-ui", var tinyPath, var tinyTheme]) {
+            if (!Path.GetFileName(tinyPath).StartsWith("ReflectionTimer-QA-", StringComparison.Ordinal) || Directory.Exists(tinyPath)) throw new ArgumentException("Use a new isolated QA directory.");
+            var theme = Enum.Parse<AppColorTheme>(tinyTheme);
+            if (!Enum.IsDefined(theme)) throw new ArgumentException("Choose a valid QA theme.");
+            new EncryptedStore(tinyPath).Save(new AppState {
+                Theme = theme, ExtensionDisabledConfirmed = true, ShowFloatingTimer = true, FloatingPlacement = FloatingTimerPlacement.Center,
+                Timer = new TimerState { DurationSeconds = 300, RemainingSeconds = 300, Volume = 0 }
+            }); return 0;
+        }
+        if (args is ["--seed-update-ui", var qaPath, var qaTheme]) {
+            if (!Path.GetFileName(qaPath).StartsWith("ReflectionTimer-QA-", StringComparison.Ordinal) || Directory.Exists(qaPath)) throw new ArgumentException("Use a new isolated QA directory.");
+            var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            new EncryptedStore(qaPath).Save(new AppState {
+                Theme = Enum.Parse<AppColorTheme>(qaTheme), ExtensionDisabledConfirmed = true, ShowFloatingTimer = true, ScheduleOverlap = ScheduleOverlapPolicy.Ask,
+                Timer = new TimerState { DurationSeconds = 1800, RemainingSeconds = 1320, PausedRemainingMilliseconds = 1320000, Volume = 0 },
+                Prompts = [new ReflectionPrompt(Guid.NewGuid(), now, 1800, 0, true) { ActualDurationSeconds = 480, EndedEarly = true }],
+                Schedules = [new ScheduledSession(Guid.NewGuid(), now - 1000, 1200, false, 0) { AwaitingDecision = true }]
+            }); return 0;
+        }
+        if (args is ["--session-details"]) {
+            TestSessionDetails(); TestEndEarly(); TestFloatingTimer();
+            Console.WriteLine($"\n{passed} passed; {failed} failed.");
+            return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--reliability-boundaries"]) {
+            TestReliabilityBoundaries(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--compact"]) {
+            TestTinyCountdown(); TestCompactUpdate(); TestFloatingTimer(); TestEndEarly(); TestReliabilityBoundaries(); TestVolumeSettings();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--tiny"]) {
+            TestTinyCountdown(); TestCompactUpdate(); TestFloatingTimer();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--compact-focus"]) {
+            TestCompactFocusShortcut();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--hotkeys"]) {
+            TestHotkeyRegistrationMatrix(); TestGlobalShortcut(); TestCompactFocusShortcut();
+            TestTimerFocusShortcut(); TestCompactCycle(); TestReflectionFocus(); TestCheckIns();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--reflection-focus"]) {
+            TestReflectionFocus();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--check-ins"]) {
+            TestCheckIns(); TestCheckInHttp().GetAwaiter().GetResult();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--theme-switch"]) {
+            TestThemeSwitches(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--onboarding"]) {
+            TestOnboarding(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--setup-preview", var setupPreviewDirectory]) {
+            RenderSetupPreview(setupPreviewDirectory); return 0;
+        }
+        if (args is ["--theme-switch-preview", var themePreviewDirectory]) {
+            RenderThemeSwitchPreview(themePreviewDirectory); return 0;
+        }
+        if (args is ["--timer-focus"]) {
+            TestTimerFocusShortcut();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--compact-transport"]) {
+            TestCompactTransport();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--probe-timer-focus-shortcut"]) {
+            // Explicit availability check only; the normal suite never reserves a chord.
+            using var probe = new GlobalShortcut(() => { }, key: GlobalShortcut.CompactFocusKey, id: GlobalShortcut.CompactFocusId);
+            Console.WriteLine(probe.IsRegistered ? "Ctrl+Alt+. is available; probe released on exit." : "Ctrl+Alt+. could not be registered; no existing binding was changed.");
+            return probe.IsRegistered ? 0 : 1;
+        }
+        if (args is ["--sync-safety"]) {
+            TestSafeDelivery(); RunHttpTests().GetAwaiter().GetResult();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--schedule-overlap"]) {
+            TestScheduleOverlap(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
         if (args is ["--theme-smoke", _]) {
             TestTheme(); TestStorage(); TestInputLayout();
             Console.WriteLine($"\n{passed} passed; {failed} failed. Theme: {AppTheme.Preference}");
             return failed == 0 ? 0 : 1;
         }
         Test("default and detached snapshots", () => { var f = new Fixture(); Equal(1500, f.Engine.Snapshot.Timer.DurationSeconds); f.Engine.Snapshot.Prompts.Add(new(Guid.NewGuid(), 0, 30, 0, true)); Equal(0, f.Engine.Snapshot.Prompts.Count); });
+        TestOnboarding();
         TestInputLayout();
+        TestSessionDetails();
+        TestCheckIns();
+        TestFloatingTimer();
+        TestCompactUpdate();
+        TestReflectionFocus();
+        TestTimerFocusShortcut();
+        TestTinyCountdown();
+        TestSafeDelivery();
+        TestScheduleOverlap();
+        TestReliabilityBoundaries();
         Test("absolute deadline and ceiling", () => { var f = new Fixture(); f.Engine.Start(60, false, 500); f.Move(10.2); Equal(50, TimerEngine.Remaining(f.Engine.Snapshot.Timer, f.Engine.Now)); Equal(100, f.Engine.Snapshot.Timer.Volume); });
         Test("pause/resume retains remainder", () => { var f = new Fixture(); f.Engine.Start(60, false, 50); f.Move(20); f.Engine.Pause(); f.Move(100); Equal(40, f.Engine.Snapshot.Timer.RemainingSeconds); f.Engine.Resume(); f.Move(10); Equal(30, TimerEngine.Remaining(f.Engine.Snapshot.Timer, f.Engine.Now)); });
         Test("reset keeps independent future schedules", () => { var f = new Fixture(); f.Add(10, 30); f.Engine.Start(60, true, 10); f.Engine.Reset(100); Equal(100, f.Engine.Snapshot.Timer.RemainingSeconds); Equal(1, f.Engine.Snapshot.Schedules.Count); Is(!f.Engine.Snapshot.Timer.IsRunning); });
@@ -55,7 +164,7 @@ internal static partial class Program
         Test("schedule copies all independent options", () => { var f = new Fixture(); f.Add(5, 120, true, 37); f.Move(5); f.Engine.Advance(); var t = f.Engine.Snapshot.Timer; Equal(120, t.DurationSeconds); Is(t.AutoRestart); Equal(37, t.Volume); Equal(0, f.Engine.Snapshot.Schedules.Count); });
         Test("only latest missed schedule starts and future remains", () => { var f = new Fixture(); f.Add(5, 30); f.Add(10, 60); f.Add(20, 90); f.Move(15); f.Engine.Advance(); Equal(60, f.Engine.Snapshot.Timer.DurationSeconds); Equal(1, f.Engine.Snapshot.Schedules.Count); Equal(0, f.Engine.Snapshot.Prompts.Count); });
         Test("scheduled takeover preserves already-completed reflection", () => { var f = new Fixture(); f.Engine.Start(5, false, 0); f.Add(10, 60); f.Move(15); f.Engine.Advance(); Equal(1, f.Engine.Snapshot.Prompts.Count); Equal(5, f.Engine.Snapshot.Prompts[0].DurationSeconds); Equal(60, f.Engine.Snapshot.Timer.DurationSeconds); });
-        Test("takeover does not invent reflection for unfinished timer", () => { var f = new Fixture(); f.Engine.Start(100, false, 0); f.Add(10, 60); f.Move(200); f.Engine.Advance(); Equal(0, f.Engine.Snapshot.Prompts.Count); Equal(60, f.Engine.Snapshot.Timer.DurationSeconds); });
+        Test("late scheduled takeover preserves the elapsed original session", () => { var f = new Fixture(); f.Engine.Start(100, false, 0); f.Add(10, 60); f.Move(200); f.Engine.Advance(); Equal(1, f.Engine.Snapshot.Prompts.Count); Equal(100, f.Engine.Snapshot.Prompts.Single().ActualDurationSeconds!.Value); Equal(60, f.Engine.Snapshot.Timer.DurationSeconds); });
         Test("schedule editing and removal use stable IDs", () => { var f = new Fixture(); var id = f.Add(5, 10); f.Engine.SaveSchedule(id, f.Time.AddSeconds(20), 30, true, 80); Equal(id, f.Engine.Snapshot.Schedules.Single().Id); Equal(30, f.Engine.Snapshot.Schedules[0].DurationSeconds); f.Engine.RemoveSchedule(id); Equal(0, f.Engine.Snapshot.Schedules.Count); });
         Test("schedule validation is atomic", () => { var f = new Fixture(); f.Add(5, 10); Throws<ArgumentException>(() => f.Add(5, 20)); Throws<ArgumentException>(() => f.Add(-1, 20)); Throws<ArgumentException>(() => f.Engine.SaveSchedule(Guid.NewGuid(), f.Time.AddSeconds(10), 20, false, 0)); Equal(1, f.Engine.Snapshot.Schedules.Count); });
         Test("50 schedule cap", () => { var f = new Fixture(); for (var i = 1; i <= 50; i++) f.Add(i, 10); Throws<ArgumentException>(() => f.Add(51, 10)); Equal(50, f.Engine.Snapshot.Schedules.Count); });
@@ -81,9 +190,12 @@ internal static partial class Program
         TestAutoRestartCutoff();
         TestDisplayPlacement();
         TestThemePreferences();
+        TestThemeSwitches();
         TestGlobalShortcut();
+        TestHotkeyRegistrationMatrix();
         Task.Run(TestAlertSounds).GetAwaiter().GetResult();
         TestLowTime();
+        TestFadeOutSettings();
         Task.Run(TestAudioPolicies).GetAwaiter().GetResult();
         RunHttpTests().GetAwaiter().GetResult();
         TestStorage();
@@ -94,6 +206,7 @@ internal static partial class Program
 
     private static void TestGlobalShortcut()
     {
+        TestEndEarly();
         Test("global shortcut registers exactly Ctrl Alt T with repeat suppression", () => {
             var api = new FakeHotKey(); using var shortcut = new GlobalShortcut(() => { }, api);
             Is(shortcut.IsRegistered); Equal(1, api.Registrations.Count);
@@ -441,9 +554,43 @@ internal static partial class Program
 
     private static async Task RunHttpTests()
     {
+        await TestDeliveryBoundaries();
+        await TestCheckInHttp();
+        await TestAsync("protected upload includes actual allotted reason and protocol", async () => {
+            var item = new OutboxItem { Id = Guid.NewGuid(), Message = "synthetic reflection", DurationSeconds = 2104,
+                ActualDurationSeconds = 480, EndedEarly = true, EarlyEndReason = "synthetic reason", RetryProtected = true,
+                ReceiverUrl = Connection.WebAppUrl, SheetUrl = Connection.SheetUrl, SheetMode = "fixed", SheetName = "test", IsTest = true,
+                SubmittedAt = DateTimeOffset.Parse("2026-09-07T12:00:00-04:00") };
+            var handler = new FakeHttp(_ => Json("{\"success\":true,\"deliveryProtocol\":\"request-id-v1\",\"duplicate\":true,\"sheet\":\"test\"}"));
+            using var client = new SheetsClient(handler); var reply = await client.Upload(Connection, item);
+            Is(reply.Success); Is(reply.SupportsSafeRetry);
+            using var body = JsonDocument.Parse(handler.Requests.Single().Body); var root = body.RootElement;
+            Equal(2104, root.GetProperty("durationSeconds").GetInt32()); Equal(480, root.GetProperty("actualDurationSeconds").GetInt32());
+            Is(root.GetProperty("endedEarly").GetBoolean()); Equal("synthetic reason", root.GetProperty("earlyEndReason").GetString());
+            Equal(SheetsClient.DeliveryProtocol, root.GetProperty("deliveryProtocol").GetString());
+        });
+        await TestAsync("safe retry capability must be explicitly advertised", async () => {
+            foreach (var protocol in new[] { "request-id-v1", "future-protocol", "" }) {
+                using var client = new SheetsClient(new FakeHttp(_ => Json(JsonSerializer.Serialize(new { success = true, target = "Synthetic / test", deliveryProtocol = protocol }))));
+                Equal(protocol == SheetsClient.DeliveryProtocol, (await client.Ping(Connection)).SupportsSafeRetry);
+            }
+        });
+        await TestAsync("only transient HTTP failures are retryable", async () => {
+            foreach (var status in new[] { 429, 500, 503, 403 }) {
+                using var client = new SheetsClient(new FakeHttp(_ => new HttpResponseMessage((HttpStatusCode)status) {
+                    Content = new StringContent("{\"success\":false}") }));
+                var reply = await client.Ping(Connection); Is(!reply.Success); Equal(status != 403, reply.Retryable);
+            }
+        });
+        await TestAsync("partial write and ID conflict require review without exposing raw errors", async () => {
+            foreach (var code in new[] { "write_uncertain", "id_conflict" }) {
+                using var client = new SheetsClient(new FakeHttp(_ => Json(JsonSerializer.Serialize(new { success = false, code, error = "private-secret" }))));
+                var reply = await client.Ping(Connection); Equal(code, reply.ErrorKind); Is(!reply.Retryable); Is(!reply.DisplayMessage.Contains("private-secret"));
+            }
+        });
         await TestAsync("ping contract uses POST and no reflection", async () => { var handler = new FakeHttp(_ => Json("{\"success\":true,\"target\":\"Book / test\"}")); using var client = new SheetsClient(handler); var result = await client.Ping(Connection); Is(result.Success); Equal("Book / test", result.Target); using var body = JsonDocument.Parse(handler.Requests[0].Body); Equal("ping", body.RootElement.GetProperty("action").GetString()); Equal("", body.RootElement.GetProperty("message").GetString()); });
         await TestAsync("upload preserves test route and save-time zone", async () => { var f = new Fixture(); f.Engine.SaveSettings(Connection, true, false, true); f.Queue(); var item = f.Engine.Snapshot.Outbox.Single(); var handler = new FakeHttp(_ => Json("{\"success\":true,\"sheet\":\"test\"}")); using var client = new SheetsClient(handler); var result = await client.Upload(Connection, item); Is(result.Success); Equal("test", result.Tab); using var body = JsonDocument.Parse(handler.Requests[0].Body); var root = body.RootElement; Equal("appendReflection", root.GetProperty("action").GetString()); Is(root.GetProperty("isTest").GetBoolean()); Equal(240, root.GetProperty("timezoneOffsetMinutes").GetInt32()); Equal(item.SubmittedAt.UtcDateTime.ToString("O"), root.GetProperty("submittedAt").GetString()); Equal(item.Id.ToString(), root.GetProperty("requestId").GetString()); Equal("text/plain", handler.Requests[0].ContentType); });
-        await TestAsync("Apps Script 302 switches to body-free GET", async () => { var handler = new FakeHttp(i => i == 0 ? Redirect("https://script.googleusercontent.com/macros/echo?test=1") : Json("{\"success\":true}")); using var client = new SheetsClient(handler); Is((await client.Ping(Connection)).Success); Equal(HttpMethod.Get, handler.Requests[1].Method); Equal("", handler.Requests[1].Body); });
+        await TestAsync("Apps Script 302 switches to body-free GET", async () => { var handler = new FakeHttp(i => i == 0 ? Redirect("https://script.googleusercontent.com/macros/echo?test=1") : Json("{\"success\":true,\"target\":\"Synthetic / test\"}")); using var client = new SheetsClient(handler); Is((await client.Ping(Connection)).Success); Equal(HttpMethod.Get, handler.Requests[1].Method); Equal("", handler.Requests[1].Body); });
         foreach (var url in new[] { "https://evil.test/", "http://script.googleusercontent.com/a", "https://script.googleusercontent.com:444/a", "https://user@script.google.com/a" }) await TestAsync("credentials never follow redirect " + url, async () => { var handler = new FakeHttp(_ => Redirect(url, HttpStatusCode.TemporaryRedirect)); using var client = new SheetsClient(handler); Equal("invalid_response", (await client.Ping(Connection)).ErrorKind); Equal(1, handler.Requests.Count); });
         await TestAsync("redirect loop is bounded", async () => { var handler = new FakeHttp(_ => Redirect("https://script.google.com/macros/s/loop/exec")); using var client = new SheetsClient(handler); Equal("invalid_response", (await client.Ping(Connection)).ErrorKind); Equal(6, handler.Requests.Count); });
         foreach (var invalid in new[] { "[]", "null", "<html>sign in</html>", "\"text\"" }) await TestAsync("invalid server shape " + invalid, async () => { using var client = new SheetsClient(new FakeHttp(_ => Json(invalid))); Equal("invalid_response", (await client.Ping(Connection)).ErrorKind); });
@@ -475,8 +622,8 @@ internal static partial class Program
                 using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
                 using var app = new TimerApplication(new EncryptedStore(directory), directory, show);
                 var api = new FakeHotKey(); app.EnableGlobalShortcut(api); app.EnableGlobalShortcut(api);
-                Equal(1, api.Registrations.Count); Is(app.Log.Recent().Any(x => x.Event == "shortcut.registered"));
-                app.Quit(); Equal(1, api.Unregistrations.Count);
+                Equal(5, api.Registrations.Count); Is(app.Log.Recent().Any(x => x.Event == "shortcut.registered"));
+                app.Quit(); Equal(5, api.Unregistrations.Count);
             });
             Test("shortcut conflict reports status and leaves app usable", () => {
                 var directory = Path.Combine(root, "shortcut-conflict");
@@ -493,7 +640,7 @@ internal static partial class Program
                 var log = new DiagnosticLog(directory); log.Record("theme.changed", value: 3);
                 Is(JsonSerializer.Serialize(log.Report(store.Load())).Contains("Glamour")); Equal(1, log.Recent().Count);
             });
-            Test("theme selector saves immediately and preview never changes active windows", () => {
+            Test("theme selector saves and updates active windows while its sample stays passive", () => {
                 var directory = Path.Combine(root, "theme-ui"); var store = new EncryptedStore(directory);
                 store.Save(new AppState { Theme = AppTheme.Preference });
                 using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
@@ -502,10 +649,9 @@ internal static partial class Program
                 var selector = Descendants(main).OfType<ComboBox>().Single(x => x.AccessibleName == "App theme");
                 var preview = Descendants(main).OfType<ThemePreview>().Single();
                 Equal(4, selector.Items.Count); Equal((int)AppTheme.Preference, selector.SelectedIndex);
-                var original = main.BackColor;
                 foreach (var theme in Enum.GetValues<AppColorTheme>()) {
                     selector.SelectedIndex = (int)theme; Equal(theme, store.Load().Theme);
-                    Equal(original, main.BackColor); Is(preview.AccessibleName!.StartsWith(AppTheme.Name(theme)));
+                    Equal(AppTheme.Background, main.BackColor); Is(preview.AccessibleName!.StartsWith(AppTheme.Name(theme)));
                     Equal(0, Descendants(preview).OfType<Button>().Count()); Is(!preview.TabStop);
                 }
                 main.Show();
@@ -579,7 +725,7 @@ internal static partial class Program
                 using var main = new MainWindow(app, _ => { }); main.Render(app.Engine.Snapshot); main.Show();
                 Descendants(main).OfType<TabControl>().Single().SelectedIndex = 3;
                 var control = Descendants(main).OfType<AudioSettingsControl>().Single();
-                var threshold = Descendants(control).OfType<NumericUpDown>().Single(); threshold.Value = 120;
+                var threshold = Descendants(control).OfType<NumericUpDown>().Single(x => x.AccessibleName == "Default low-time threshold in seconds"); threshold.Value = 120;
                 var unitLabel = threshold.Parent!.Parent!.Controls.OfType<Label>().Single(x => x.Text == "seconds remaining");
                 Equal(threshold.Parent.Height, unitLabel.Height); Equal(threshold.Parent.Top, unitLabel.Top);
                 Equal(ContentAlignment.MiddleLeft, unitLabel.TextAlign);
@@ -607,7 +753,7 @@ internal static partial class Program
                 Descendants(main).OfType<Button>().Single(x => x.Text == "Save settings").PerformClick();
                 Equal(120, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
                 Equal(2, Descendants(main).OfType<LowTimeControl>().Count());
-                Is(!app.Engine.Snapshot.Timer.LowTime.Enabled); Is(!app.Engine.Snapshot.Timer.IsRunning);
+                Is(app.Engine.Snapshot.Timer.LowTime.Enabled); Is(!app.Engine.Snapshot.Timer.IsRunning);
             });
             Test("encrypted state round-trip without plaintext credentials", () => {
                 var store = new EncryptedStore(Path.Combine(root, "roundtrip")); var state = new AppState { Connection = Connection };
@@ -623,7 +769,16 @@ internal static partial class Program
                 Equal(DeliveryStatus.NeedsReview, new EncryptedStore(directory).Load().Outbox[0].Status); Equal(1, Directory.GetFiles(directory, "state.dat.unreadable-*").Length);
             });
             Test("corruption without a backup is not silently reset", () => { var directory = Path.Combine(root, "no-backup"); Directory.CreateDirectory(directory); File.WriteAllText(Path.Combine(directory, "state.dat"), "bad test data"); Throws<System.Security.Cryptography.CryptographicException>(() => new EncryptedStore(directory).Load()); Equal("bad test data", File.ReadAllText(Path.Combine(directory, "state.dat"))); });
-            Test("diagnostic export excludes text and credentials", () => { var log = new DiagnosticLog(Path.Combine(root, "logs")); log.Record("timer.started", value: 30); log.Record("private-sentinel"); var state = new AppState { Connection = Connection, Prompts = [new(Guid.NewGuid(), 0, 1, 0, true, "private-sentinel")], Outbox = [new OutboxItem { Message = "private-sentinel", ErrorKind = "private-sentinel" }] }; var report = JsonSerializer.Serialize(log.Report(state)); Is(!report.Contains("private-sentinel")); Is(!report.Contains(Connection.ApiToken)); Is(!report.Contains(Connection.SheetUrl)); Equal(1, log.Recent().Count); });
+            Test("diagnostic export excludes reflection reasons text and credentials", () => {
+                var log = new DiagnosticLog(Path.Combine(root, "logs")); log.Record("timer.started", value: 30); log.Record("private-sentinel");
+                var state = new AppState { Connection = Connection,
+                    Prompts = [new(Guid.NewGuid(), 0, 1, 0, true, "private-sentinel") { EarlyEndReason = "private-reason" }],
+                    Outbox = [new OutboxItem { Message = "private-sentinel", ErrorKind = "private-sentinel", EarlyEndReason = "private-reason",
+                        ReceiverUrl = Connection.WebAppUrl, RetryProtected = true, ActualDurationSeconds = 8, DurationSeconds = 30, EndedEarly = true }] };
+                var report = JsonSerializer.Serialize(log.Report(state)); Is(!report.Contains("private-sentinel")); Is(!report.Contains("private-reason"));
+                Is(!report.Contains(Connection.ApiToken)); Is(!report.Contains(Connection.SheetUrl)); Is(!report.Contains(Connection.WebAppUrl));
+                Is(report.Contains("3.12.2")); Is(report.Contains("RetryProtected")); Is(report.Contains("ScheduleOverlap")); Equal(1, log.Recent().Count);
+            });
             Test("diagnostic opt-out, retention and clear", () => { var log = new DiagnosticLog(Path.Combine(root, "retention")); log.Record(new Activity(DateTimeOffset.Now.AddDays(-8).ToUnixTimeMilliseconds(), "timer.started")); Equal(0, log.Recent().Count); log.Enabled = false; log.Record("timer.started"); Equal(0, log.Recent().Count); log.Enabled = true; log.Record("timer.paused"); log.Clear(); Equal(0, log.Recent().Count); Equal(0, new DiagnosticLog(Path.Combine(root, "retention")).Recent().Count); });
             Test("duration input clears untouched 25-minute preset", () => { using var control = new DurationControl(); var numbers = Descendants(control).OfType<NumericUpDown>().ToArray(); numbers[0].Value = 1; Equal(3600, control.Seconds); Is(control.Dirty); control.LoadSeconds(1500, true); numbers[1].Value = 10; numbers[0].Value = 1; Equal(4200, control.Seconds); });
             Test("typed hours update immediately with a live preview subscriber", () => { using var control = new DurationControl(); var preview = 0; control.UserChanged += () => preview = control.Seconds; var numbers = Descendants(control).OfType<NumericUpDown>().ToArray(); numbers[0].Text = "1"; Equal(3600, preview); Equal(0m, numbers[1].Value); });
@@ -745,10 +900,11 @@ internal static partial class Program
     private sealed class FakeHotKey : IHotKeyRegistration
     {
         public bool Available = true;
+        public uint? BlockedKey;
         public readonly List<(nint Window, int Id, uint Modifiers, uint Key)> Registrations = [];
         public readonly List<(nint Window, int Id)> Unregistrations = [];
         public bool Register(nint window, int id, uint modifiers, uint key) {
-            Registrations.Add((window, id, modifiers, key)); return Available;
+            Registrations.Add((window, id, modifiers, key)); return Available && BlockedKey != key;
         }
         public bool Unregister(nint window, int id) { Unregistrations.Add((window, id)); return true; }
     }

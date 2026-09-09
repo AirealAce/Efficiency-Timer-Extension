@@ -72,13 +72,12 @@ internal static partial class Program
 
     private static void TestDurationEnter()
     {
-        // Exercise keyboard preprocessing on each native field, including the
+        // Exercise command-key bubbling on each native field, including the
         // themed wrappers, so Enter must actually bubble to the duration editor.
         static void Enter(DurationPartInput input)
         {
             input.Focus();
-            var message = Message.Create(input.Handle, 0x0100, (nint)Keys.Enter, 0);
-            Is(input.PreProcessMessage(ref message));
+            Is(DispatchCommandKey(input, Keys.Enter));
         }
         static void WithWindow(TimerState timer, Action<TimerApplication, MainWindow, DurationControl[]> test)
         {

@@ -6,7 +6,9 @@ internal static partial class Program
     private static void TestInputLayout()
     {
         TestSettingsInteractions();
+        TestVolumeSettings();
         TestDurationInputs();
+        TestTimerScheduling();
         Test("native fields and neighboring buttons have equal surfaces and aligned tops", () => {
             using var form = new Form { ClientSize = new(900, 500), Font = new("Segoe UI", 10) };
             var text = new TextBox { Width = 140, Text = "draft", UseSystemPasswordChar = true };

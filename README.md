@@ -1,8 +1,10 @@
 # Reflection Timer
 
+[Download Reflection Timer 3.12.3 for Windows x64](https://github.com/AirealAce/Reflection-Timer/releases/tag/v3.12.3) · [Current keyboard shortcuts and upgrade help](desktop/HOTKEYS.md)
+
 A focus timer with Google Sheets reflection logging. The new [Windows desktop version](desktop/README.md) provides a native tray timer, standalone prompts, independent scheduled sessions, encrypted local saves, and diagnostic exports. The Chrome extension below remains available as a fallback; disable it manually when switching to desktop so only one timer engine runs.
 
-See [desktop setup and migration](desktop/README.md) to install the Windows app. The desktop app reuses the existing Apps Script receiver, so the Sheet formatting and daily-tab behavior below remain unchanged.
+Start with the [download and setup guide](desktop/START-HERE.html) (included in the release ZIP), or [desktop documentation](desktop/README.md). Every user supplies their own spreadsheet and private connection. A self-contained Windows package and Guided setup support fresh PCs without .NET/Chrome installation. Existing connections can be transferred privately to another PC without redeploying. Sheet formatting and daily-tab behavior remain unchanged. Public releases exclude personal data, credentials, and user-supplied soundtrack files.
 
 ## What it does
 
@@ -10,8 +12,8 @@ See [desktop setup and migration](desktop/README.md) to install the Windows app.
 - Supports pause/resume, reset, auto-restart, and scheduled starts.
 - Shows an accessible reflection dialog on the active webpage when time expires.
 - Automatically selects the dated tab using the computer's local date when you send, not when the timer started or finished.
-- Writes newest-first timestamp/activity pairs in `A:B`. Entirely empty top rows are reused; otherwise whole sheet rows are inserted. Contents, notes and formatting in all columns move down together so full-width hour bands stay aligned.
-- Gives every cell across a new entry's entire row thin white top, bottom, and side borders, matching column B (including the lines between columns). Other columns' backgrounds and text styling are preserved. Hour dividers keep their colored top/bottom-only borders.
+- Writes newest-first timestamps and activities in A/B. With receiver 2.5.0 and desktop 3.7.0, **C is actual time spent**, **D is allotted time**, **E is `ended early` or blank**, and **F is the optional early-end reason**. Durations have compact labels such as `15 secs`, `35 min 4 secs`, and `1 hr 50 min 20 secs`, omitting zero units, but remain numeric for calculations. Older clients/prompts without actual-time metadata leave C blank. Entirely empty top rows are reused; otherwise whole sheet rows are inserted. Contents, notes and formatting in all columns move down together so full-width hour bands stay aligned.
+- Gives every cell across a new entry's entire row thin white top, bottom, and side borders, matching column B (including the lines between columns). Receiver **2.5.1** alternates column colors across each new entry: B/D/F/etc. use black backgrounds with white text, while C/E/G/etc. use white backgrounds with black text. This applies to inserted and reused rows, including blank cells, without changing A's independent alternation or full-width hour themes. Existing rows remain unchanged. C/D are widened to at least 220 pixels, E to 135, and F to 300, never shrinking wider layouts. Hour dividers keep their full-width colored top/bottom-only borders and have no duration or reason.
 - Alternates timestamp backgrounds between white (black text) and `#595959` (white text), ignoring hour dividers when choosing the next color. Entry times are displayed as plain-text 12-hour labels (`6:21`); the cell note retains the full ISO timestamp and hour boundary.
 - Inserts an hour divider beneath the first entry of each new hour, including the day's first entry. Its background, contrasting text, and colored top/bottom borders span every column in the sheet; there are no side or internal vertical borders. Each of the 24 hours has a distinct theme; 6 PM is red. Hours with no entries do not generate extra dividers.
 - Routes **Test reflection prompt** submissions exclusively to the tab named `test`, never `Temp`, `Template`, a dated tab, or a configured fixed live tab. The dialog labels test mode and shows the saved destination. A missing `test` tab is an error, not a fallback. **Save & test** remains a read-only connection check for the normal destination. Daily-tab creation continues to use the configured template independently.
@@ -43,7 +45,7 @@ The included [`google-sheets-script.gs`](google-sheets-script.gs) is the only co
 1. Open the target Google Sheet and choose **Extensions → Apps Script**.
 2. Replace the Apps Script editor contents with `google-sheets-script.gs`.
 3. In **Project Settings → Script properties**, add:
-   - `SPREADSHEET_ID`: `synthetic-spreadsheet-id-for-tests`
+   - `SPREADSHEET_ID`: your own spreadsheet ID (the part between `/d/` and the next slash in its URL).
    - `REFLECTION_API_TOKEN`: a long random value. The extension settings can generate one.
 4. Choose **Deploy → New deployment → Web app**.
 5. Set **Execute as** to yourself and allow anyone to access the web app. Requests still require the secret token and are restricted to the configured spreadsheet.
@@ -54,9 +56,15 @@ If the day's tab is missing, the first reflection creates `MM/DD/YYYY` from `Tem
 
 Date routing also applies to requests from older extension versions, even if their saved tab name is still `Template`. Reload the unpacked extension to see the new mode selector. Existing entries are not moved between tabs or retroactively reordered. Connection tests use the same date routing but never write cells or create tabs; they report which tab would be created. When a client supplies no local time zone, the receiver uses the spreadsheet's time zone ([Apps Script reference](https://developers.google.com/apps-script/reference/spreadsheet/spreadsheet#getSpreadsheetTimeZone())).
 
-After upgrading, reload the extension and refresh webpages to update the test-dialog wording. Clients from 2.2 already send the test flag and will be routed to `test` by the updated receiver, even if an old dialog still says Temp. Earlier content scripts do not send the flag and must be refreshed before testing. Hour markers and entries carry timestamp notes for rollover detection. Native [whole-row insertion](https://developers.google.com/apps-script/reference/spreadsheet/sheet#insertRowsBefore(Integer,Integer)) preserves row alignment. Old conditional-format rules are excluded only from the new A:B entry and full-width hour divider so they cannot override those colors; neighboring rules/ranges remain intact. Border formatting uses the [Apps Script Range API](https://developers.google.com/apps-script/reference/spreadsheet/range).
+After upgrading, reload the extension and refresh webpages to update the test-dialog wording. Clients from 2.2 already send the test flag and will be routed to `test` by the updated receiver, even if an old dialog still says Temp. Earlier content scripts do not send the flag and must be refreshed before testing. Hour markers and entries carry timestamp notes for rollover detection. Native [whole-row insertion](https://developers.google.com/apps-script/reference/spreadsheet/sheet#insertRowsBefore(Integer,Integer)) preserves row alignment. Old conditional-format rules are excluded only from the new full-width entry and hour divider so they cannot override those colors; neighboring rules/ranges remain intact. Border formatting uses the [Apps Script Range API](https://developers.google.com/apps-script/reference/spreadsheet/range).
 
 When the Apps Script changes, use **Deploy → Manage deployments**, edit the deployment, and select a new version. Saving code alone does not update an existing deployment.
+
+Receiver **2.5.1** is a formatting-only update for new rows. Deploy it to the existing URL; desktop **3.7.1** needs no reinstall, restart, or settings changes.
+
+Receiver **2.5.0** adds the C–F session details described above and duplicate-aware delivery for desktop **3.7.0**. Update the existing Apps Script deployment before installing the desktop update; no new URL, token, or Google service permissions are needed. Actual time excludes pauses and is captured before auto-start or scheduled replacement. Old Sheet rows remain unchanged; older clients still write their configured duration to D but leave unknown actual time in C blank. Duration is a fraction of a day, using [Google Sheets duration formats](https://developers.google.com/workspace/sheets/api/guides/formats); multiplying C or D by 86400 gives seconds.
+
+The receiver reserves request IDs before writes, recognizes identical repeat requests, and holds interrupted partial writes for manual review. Desktop automatic retries require its advertised safe-delivery protocol and retain the original entry ID and receiver. Preserve timestamp notes and `RT_RECEIPT_` Script Properties; see [desktop delivery and recovery](desktop/README.md#local-saves-and-delivery) for limits and manual-review behavior. The fallback extension does not gain desktop overlap or elapsed-time tracking from a receiver-only update.
 
 ## Debugging intermittent timer behavior (2.4+)
 

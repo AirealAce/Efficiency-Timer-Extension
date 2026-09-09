@@ -10,11 +10,14 @@ public record SoundSetting
     public string Mp3Path { get; init; } = "";
     public LibrarySound Track { get; init; }
     public SoundBehavior Behavior { get; init; } = SoundBehavior.Disruptive;
+    public int Volume { get; init; } = 100; // Relative to App sound; legacy settings keep their existing loudness.
+    public bool FadeOutEnabled { get; init; }
+    public int FadeOutAfterSeconds { get; init; } = 10;
 }
 
 public record LowTimeOptions
 {
-    public bool Enabled { get; init; }
+    public bool Enabled { get; init; } = true;
     public int? ThresholdSeconds { get; init; } // Null follows Settings, including future changes.
     public string Mp3Path { get; init; } = "";
     public LibrarySound Track { get; init; } // Default follows the global low-time sound.
@@ -52,6 +55,9 @@ public record AudioSettings
     {
         ValidateSource(setting.Mp3Path, setting.Track);
         if (!Enum.IsDefined(setting.Behavior)) throw new ArgumentException("Choose Disruptive, Assertive, or Polite.");
+        if (setting.Volume is < 0 or > 100) throw new ArgumentException("Audio volume must be between 0 and 100 percent.");
+        if (setting.FadeOutAfterSeconds is < 1 or > TimerEngine.MaxDuration)
+            throw new ArgumentException($"Fade out after must be between 1 and {TimerEngine.MaxDuration} seconds.");
     }
     public static void Validate(LowTimeOptions options)
     {

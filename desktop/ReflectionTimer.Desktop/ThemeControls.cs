@@ -5,23 +5,43 @@ namespace ReflectionTimer.Desktop;
 
 public sealed class ThemeHeader : Label
 {
+    private readonly bool compact;
+    private Font? headingFont;
+    private bool? decorated;
     public ThemeHeader(string title, bool compact = false)
     {
-        var glamour = AppTheme.Palette.IsGlamour;
+        this.compact = compact;
         Text = title; Dock = DockStyle.Top;
-        Height = compact ? (glamour ? 62 : 45) : (glamour ? 90 : 72);
-        Font = new(glamour ? "Georgia" : "Segoe UI", compact ? 19 : 26, glamour ? FontStyle.Italic : FontStyle.Bold);
+        RefreshPalette();
+    }
+    internal void RefreshPalette()
+    {
+        var glamour = AppTheme.Palette.IsGlamour;
+        if (decorated != glamour) {
+            decorated = glamour;
+            Height = LogicalToDeviceUnits(compact ? (glamour ? 62 : 45) : (glamour ? 90 : 72));
+            var old = headingFont;
+            headingFont = new(glamour ? "Georgia" : "Segoe UI", compact ? 19 : 26, glamour ? FontStyle.Italic : FontStyle.Bold);
+            Font = headingFont; old?.Dispose();
+            Padding = compact ? new(0, LogicalToDeviceUnits(3), 0, LogicalToDeviceUnits(10))
+                : new(LogicalToDeviceUnits(20), LogicalToDeviceUnits(12), 0, LogicalToDeviceUnits(12));
+        }
         ForeColor = compact ? AppTheme.Text : AppTheme.Accent;
         BackColor = glamour ? AppTheme.Raised : AppTheme.Background;
-        Padding = compact ? new(0, 3, 0, 10) : new(20, 12, 0, 12);
-        if (glamour) Paint += (_, e) => {
+        Invalidate();
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        if (AppTheme.Palette.IsGlamour) {
             using var line = new Pen(AppTheme.Palette.Decoration);
             e.Graphics.DrawLine(line, 0, Height - 3, Width, Height - 3);
             var bowSize = Math.Min(Height - 18, 54 * DeviceDpi / 96);
             if (TextRenderer.MeasureText(Text, Font).Width + Padding.Left + bowSize + 36 < Width)
                 GlamourOrnament.Draw(e.Graphics, new(Width - bowSize - 24, (Height - bowSize) / 2, bowSize, bowSize), AppTheme.Palette);
-        };
+        }
     }
+    protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) headingFont?.Dispose(); }
 }
 
 // A passive sample, never a second editor or a button that can submit a reflection.
@@ -45,7 +65,7 @@ public sealed class ThemePreview : UserControl
     public void ShowTheme(AppColorTheme theme)
     {
         theme = AppTheme.Normalize(theme);
-        if (shown == theme) return;
+        if (shown == theme && palette == AppTheme.PaletteFor(theme, AppTheme.Palette.IsSystemContrast)) return;
         shown = theme;
         palette = AppTheme.PaletteFor(theme, AppTheme.Palette.IsSystemContrast);
         BackColor = palette.Background;
@@ -68,6 +88,7 @@ public sealed class ThemePreview : UserControl
         AccessibleDescription = description.Text + " Sample reflection field and save button. This preview is not interactive.";
         Invalidate();
     }
+    internal void RefreshPalette() => ShowTheme(shown ?? AppTheme.Preference);
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
