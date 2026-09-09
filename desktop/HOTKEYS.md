@@ -42,4 +42,4 @@ Punctuation bindings currently use Windows US-keyboard virtual keys (OEM grave, 
 
 Run `dotnet run --project desktop/ReflectionTimer.Tests -c Release -- --hotkeys` on Windows. These isolated tests use synthetic state and an injected registration backend, leaving the running user's timer and real global chords alone. They cover all five exact virtual-key/modifier mappings, independent conflicts/disposal, hidden/minimized window behavior, focus selection, compact cycling, early endings, and check-ins. They do not prove that another PC's real chords are free; check that PC's status panel as well.
 
-The public packaging script runs this gate before producing a ZIP, alongside onboarding/install, delivery-safety, and receiver checks. It excludes local data, credentials, and personal soundtrack files.
+The public packaging script runs this gate before producing a ZIP, alongside onboarding/install, delivery-safety, and receiver checks. It includes the bundled soundtrack library and excludes local data, credentials, and additional personal soundtrack files.

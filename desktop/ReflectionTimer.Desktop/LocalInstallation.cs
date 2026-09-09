@@ -46,7 +46,7 @@ internal static class LocalInstallation
         foreach (var entry in manifest.Files) {
             var path = SafeChild(source, entry.Path);
             NoRedirects(path);
-            if (!new[] { ".exe", ".dll", ".json", ".txt", ".html", ".gs" }.Contains(Path.GetExtension(path).ToLowerInvariant())
+            if (!new[] { ".exe", ".dll", ".json", ".txt", ".html", ".gs", ".mp3" }.Contains(Path.GetExtension(path).ToLowerInvariant())
                 || !System.Text.RegularExpressions.Regex.IsMatch(entry.Sha256 ?? "", "^[a-fA-F0-9]{64}$")) throw new InvalidDataException("Unexpected package contents.");
             if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("A package file is missing or redirected.");
             using var stream = File.OpenRead(path);
@@ -83,10 +83,12 @@ internal static class LocalInstallation
         // Persist the manifest already validated above, not a second unchecked
         // read of a download file that may have changed during the copy.
         File.WriteAllText(Path.Combine(staging, ManifestName), JsonSerializer.Serialize(manifest));
-        // Preserve this user's optional local soundtrack files, never put them in a shared ZIP.
+        // Keep additional user MP3s; manifest-verified bundled tracks take precedence.
+        // The previous install (including any replaced tracks) is retained in the backup.
         if (Directory.Exists(target)) foreach (var mp3 in Directory.EnumerateFiles(target, "*.mp3", SearchOption.TopDirectoryOnly)) {
             if ((File.GetAttributes(mp3) & FileAttributes.ReparsePoint) != 0) continue;
-            File.Copy(mp3, Path.Combine(staging, Path.GetFileName(mp3)), false);
+            var destination = Path.Combine(staging, Path.GetFileName(mp3));
+            if (!File.Exists(destination)) File.Copy(mp3, destination, false);
         }
         if (targetRunning()) throw new InvalidOperationException("The installed app reopened during setup. Quit it and try again; the existing install is unchanged.");
         var hadPrevious = Directory.Exists(target);

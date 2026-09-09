@@ -4,7 +4,7 @@
 
 A focus timer with Google Sheets reflection logging. The new [Windows desktop version](desktop/README.md) provides a native tray timer, standalone prompts, independent scheduled sessions, encrypted local saves, and diagnostic exports. The Chrome extension below remains available as a fallback; disable it manually when switching to desktop so only one timer engine runs.
 
-Start with the [download and setup guide](desktop/START-HERE.html) (included in the release ZIP), or [desktop documentation](desktop/README.md). Every user supplies their own spreadsheet and private connection. A self-contained Windows package and Guided setup support fresh PCs without .NET/Chrome installation. Existing connections can be transferred privately to another PC without redeploying. Sheet formatting and daily-tab behavior remain unchanged. Public releases exclude personal data, credentials, and user-supplied soundtrack files.
+Start with the [download and setup guide](desktop/START-HERE.html) (included in the release ZIP), or [desktop documentation](desktop/README.md). Every user supplies their own spreadsheet and private connection. A self-contained Windows package and Guided setup support fresh PCs without .NET/Chrome installation. Existing connections can be transferred privately to another PC without redeploying. Sheet formatting and daily-tab behavior remain unchanged. Packages built from the current source include the bundled Pokémon/Kirby soundtrack library and exclude personal data and credentials.
 
 ## What it does
 

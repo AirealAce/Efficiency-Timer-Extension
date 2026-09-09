@@ -35,13 +35,18 @@ if ($LASTEXITCODE -ne 0) { throw 'Clean public build failed; no ZIP produced.' }
 if ($LASTEXITCODE -ne 0) { throw 'Self-contained publish failed; no ZIP produced.' }
 
 $files = @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse)
-$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs')
+$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs', '.mp3')
+$bundledSounds = @('popup.mp3', 'pokemon-obtained-item.mp3', 'pokemon-level-up.mp3', 'pokemon-healed.mp3',
+    'pokemon-key-item.mp3', 'pokemon-battle-trainer.mp3', 'pokemon-battle-champion.mp3', 'kirby-out-of-health.mp3')
 foreach ($file in $files) {
     if ($file.Extension.ToLowerInvariant() -notin $allowedExtensions -or $file.Name -match '^state\.|^diagnostics\.|^\.env|\.pdb$') {
         throw "Unexpected public package file: $($file.Name). No ZIP produced."
     }
+    if ($file.Extension -eq '.mp3' -and ($file.Name -notin $bundledSounds -or $file.DirectoryName -ne $payloadRoot)) {
+        throw "Unexpected soundtrack file: $($file.Name). No ZIP produced."
+    }
 }
-# No user data directories or MP3s are ever copied by this script. Check text and
+# Only the bundled soundtrack files are permitted; user data is never copied. Check text and
 # managed binaries for personalized config as a second safety net (UTF-8/UTF-16).
 $privacyPatterns = @('https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]{20,}', 'https://script\.google\.com/macros/s/[A-Za-z0-9_-]{20,}/exec')
 foreach ($file in $files) {
@@ -57,7 +62,7 @@ foreach ($file in $files) {
         }
     }
 }
-foreach ($required in @('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt')) {
+foreach ($required in (@('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt') + $bundledSounds)) {
     if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot $required))) { throw "Required self-contained package file is missing: $required" }
 }
 $manifestEntries = @($files | Sort-Object FullName | ForEach-Object {

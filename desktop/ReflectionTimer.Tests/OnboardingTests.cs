@@ -184,7 +184,7 @@ internal static partial class Program
                 AppTheme.Change(AppColorTheme.Dark);
             });
         });
-        Test("public builds have distinct audible built-in tones without MP3 files", () => {
+        Test("missing MP3 files fall back to distinct audible built-in tones", () => {
             foreach (var kind in Enum.GetValues<SoundEvent>()) {
                 Equal("builtin:" + kind, SoundLibrary.Resolve(kind, new(), Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
                 var tone = new BuiltInTone(kind); var buffer = new float[44100]; var count = tone.Read(buffer, 0, buffer.Length);
@@ -227,10 +227,31 @@ internal static partial class Program
             Throws<InvalidOperationException>(() => LocalInstallation.InstallFiles(source, target, () => true));
             Equal("private local sound", File.ReadAllText(Path.Combine(target, "popup.mp3")));
         });
+        Test("installer updates bundled MP3s and preserves additional user tracks across repeated upgrades", () => {
+            var root = Path.Combine(Path.GetTempPath(), "ReflectionTimer-QA-bundled-audio-" + Guid.NewGuid().ToString("N"));
+            var source = Path.Combine(root, "download"); var target = Path.Combine(root, "Programs", "ReflectionTimerDesktop");
+            Directory.CreateDirectory(source); Directory.CreateDirectory(target);
+            WriteTestPackage(source, "popup.mp3", "pokemon-level-up.mp3");
+            File.WriteAllText(Path.Combine(target, "popup.mp3"), "old session sound");
+            File.WriteAllText(Path.Combine(target, "pokemon-level-up.mp3"), "old success sound");
+            File.WriteAllText(Path.Combine(target, "my-custom-sound.mp3"), "user audio");
+            var backup = LocalInstallation.InstallFiles(source, target, () => false)!;
+            Equal("old session sound", File.ReadAllText(Path.Combine(backup, "popup.mp3")));
+            Equal("old success sound", File.ReadAllText(Path.Combine(backup, "pokemon-level-up.mp3")));
+            foreach (var name in new[] { "popup.mp3", "pokemon-level-up.mp3" })
+                Equal(File.ReadAllText(Path.Combine(source, name)), File.ReadAllText(Path.Combine(target, name)));
+            Equal("user audio", File.ReadAllText(Path.Combine(target, "my-custom-sound.mp3")));
+            LocalInstallation.ReadManifest(target);
+            LocalInstallation.InstallFiles(source, target, () => false);
+            Equal("user audio", File.ReadAllText(Path.Combine(target, "my-custom-sound.mp3")));
+            LocalInstallation.ReadManifest(target);
+            File.AppendAllText(Path.Combine(source, "pokemon-level-up.mp3"), "corrupted audio");
+            Throws<InvalidDataException>(() => LocalInstallation.ReadManifest(source));
+        });
     }
-    private static void WriteTestPackage(string directory)
+    private static void WriteTestPackage(string directory, params string[] extraFiles)
     {
-        var files = new[] { "ReflectionTimer.exe", "ReflectionTimer.dll", "START-HERE.html", "google-sheets-script.gs" }.Select(name => {
+        var files = new[] { "ReflectionTimer.exe", "ReflectionTimer.dll", "START-HERE.html", "google-sheets-script.gs" }.Concat(extraFiles).Select(name => {
             var path = Path.Combine(directory, name); File.WriteAllText(path, "synthetic package payload " + name);
             return new PackageFile(name, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
         }).ToList();
