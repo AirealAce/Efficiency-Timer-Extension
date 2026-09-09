@@ -99,6 +99,7 @@ internal static partial class Program
                 EndedEarly = kind == "early", EarlyEndReason = kind == "early" ? "Synthetic reason" : ""
             };
             WithEndEarlyApp((app, directory) => {
+                app.SetFloatingTimer(false);
                 var (main, _, _, _) = TimerShortcutControls(app); main.Hide();
                 app.Engine.Start(9000, true, 0, app.Engine.Now + 3600000); Application.DoEvents();
                 var popup = Application.OpenForms.OfType<ReflectionWindow>().Single(); var response = ReflectionResponse(popup);
@@ -135,6 +136,7 @@ internal static partial class Program
         });
         foreach (var running in new[] { false, true }) Test("Pending reflections with no reflection does not create one or alter the timer; running=" + running, () => {
             WithEndEarlyApp((app, _) => {
+                app.SetFloatingTimer(false);
                 var (main, _, _, _) = TimerShortcutControls(app); main.Hide();
                 if (running) app.Engine.Start(9000, true, 0);
                 var before = app.Engine.Snapshot.Timer;

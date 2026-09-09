@@ -25,11 +25,12 @@ public record LowTimeOptions
 
 public record AudioSettings
 {
+    public const int DefaultLowTimeThresholdSeconds = 15;
     public SoundSetting SessionEnd { get; init; } = new();
     public SoundSetting Success { get; init; } = new();
     public SoundSetting Failure { get; init; } = new();
     public SoundSetting LowTime { get; init; } = new();
-    public int LowTimeThresholdSeconds { get; init; } = 60;
+    public int LowTimeThresholdSeconds { get; init; } = DefaultLowTimeThresholdSeconds;
 
     public static AudioSettings From(AppState state) => state.Audio ?? new() { SessionEnd = new() { Mp3Path = state.AlertSoundPath } };
     public SoundSetting For(SoundEvent kind) => kind switch {

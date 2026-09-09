@@ -11,7 +11,7 @@ internal static partial class Program
             var state = new AppState { AlertSoundPath = Path.Combine(Path.GetTempPath(), "existing.mp3") };
             var settings = AudioSettings.From(state); Equal(state.AlertSoundPath, settings.SessionEnd.Mp3Path);
             foreach (var kind in Enum.GetValues<SoundEvent>()) Equal(SoundBehavior.Disruptive, settings.For(kind).Behavior);
-            Equal(60, settings.LowTimeThresholdSeconds); Is(state.Timer.LowTime.Enabled);
+            Equal(15, settings.LowTimeThresholdSeconds); Is(state.Timer.LowTime.Enabled);
             Equal(LibrarySound.LevelUp, SoundLibrary.DefaultFor(SoundEvent.Success));
             Equal(LibrarySound.OutOfHealth, SoundLibrary.DefaultFor(SoundEvent.Failure));
             Equal(LibrarySound.TrainerBattle, SoundLibrary.DefaultFor(SoundEvent.LowTime));
@@ -72,7 +72,8 @@ internal static partial class Program
             var f = new Fixture(); var count = 0; f.Engine.LowTimeReached += _ => count++;
             f.Engine.Start(15, false, 0, lowTime: new() { Enabled = true }); Equal(0, count);
             f.Engine.Advance(); f.Engine.Advance(); Equal(1, count);
-            f.Engine.Start(120, false, 0); f.Move(100); f.Engine.Advance(); Equal(2, count);
+            f.Engine.Start(120, false, 0); f.Move(104); f.Engine.Advance(); Equal(1, count);
+            f.Move(1); f.Engine.Advance(); Equal(2, count);
         });
         Test("failed low-time commit emits nothing and retries on the next tick", () => {
             var f = new Fixture(); var count = 0; f.Engine.LowTimeReached += _ => count++;

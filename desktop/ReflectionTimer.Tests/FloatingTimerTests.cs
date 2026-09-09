@@ -6,7 +6,8 @@ internal static partial class Program
     private static void TestFloatingTimer()
     {
         Test("floating view preference and position survive restart", () => {
-            var f = new Fixture(); Is(!f.Engine.Snapshot.ShowFloatingTimer);
+            var f = new Fixture(); Is(f.Engine.Snapshot.ShowFloatingTimer);
+            f.Engine.SetFloatingTimer(false); Is(!f.Restart().Snapshot.ShowFloatingTimer);
             f.Engine.SetFloatingTimer(true); f.Engine.SetFloatingTimerPosition(-250, 90);
             var state = f.Restart().Snapshot; Is(state.ShowFloatingTimer); Equal(-250, state.FloatingTimerLeft!.Value); Equal(90, state.FloatingTimerTop!.Value);
         });

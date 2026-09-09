@@ -455,7 +455,7 @@ public sealed class MainWindow : Form
     }
     private void ResetScheduleEditor()
     {
-        editing = null; scheduledStart.Value = DateTime.Now.AddHours(1); scheduledDuration.LoadSeconds(1500, true); scheduledRepeat.LoadOptions(false, null, true); scheduledVolume.Value = 50;
+        editing = null; scheduledStart.Value = DateTime.Now.AddHours(1); scheduledDuration.LoadSeconds(TimerState.DefaultDurationSeconds, true); scheduledRepeat.LoadOptions(false, null, true); scheduledVolume.Value = 50;
         scheduledLowTime.LoadOptions(new(), AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds, true);
         scheduleHeading.Text = "Add a scheduled session"; saveSchedule.Text = "Add session";
     }

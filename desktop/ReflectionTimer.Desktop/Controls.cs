@@ -125,7 +125,7 @@ public sealed class DurationControl : UserControl
             pair.Item2.TextChanged += Edited;
             pair.Item2.Enter += (_, _) => pair.Item2.Select(0, pair.Item2.Text.Length);
         }
-        Controls.Add(row); LoadSeconds(1500, true);
+        Controls.Add(row); LoadSeconds(TimerState.DefaultDurationSeconds, true);
         Leave += (_, _) => Normalize();
     }
     // Preview reads raw text without forcing NumericUpDown to commit/clamp it.
@@ -162,7 +162,7 @@ public sealed class DurationControl : UserControl
     public void LoadSeconds(int total, bool clearPresetWhenTypingHours = false)
     {
         var normalized = Math.Clamp(total, 0, TimerEngine.MaxDuration);
-        var newUntouched = clearPresetWhenTypingHours && total == 1500;
+        var newUntouched = clearPresetWhenTypingHours && total == TimerState.DefaultDurationSeconds;
         // Refreshes must not disturb the caret or selection in an unchanged editor.
         if (!Dirty && untouched == newUntouched && hours.Text == (normalized / 3600).ToString()
             && minutes.Text == (normalized / 60 % 60).ToString() && seconds.Text == (normalized % 60).ToString()) return;

@@ -55,7 +55,7 @@ internal static partial class Program
             Equal(count + 1, Requests()); Equal(1, app.Log.Recent().Count(x => x.Event == "sound.preview"));
             count = Requests(); // Exactly the selected sound's preview, not an extra autosave success chime.
             number.Focus(); number.Text = "123"; Is(Key(Keys.Enter)); Is(!number.ContainsFocus);
-            Equal(count, Requests()); Equal(60, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
+            Equal(count, Requests()); Equal(15, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
             var save = Descendants(main).OfType<Button>().Single(x => x.Text == "Save settings");
             Is(save.Visible); Is(save.Parent is TableLayoutPanel); Is(save.Parent!.Dock == DockStyle.Bottom);
             number.Focus(); Is(Key(Keys.Control | Keys.Enter));

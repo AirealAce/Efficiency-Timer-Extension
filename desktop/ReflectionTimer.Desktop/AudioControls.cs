@@ -81,8 +81,8 @@ public sealed class LowTimeControl : UserControl
 {
     private readonly CheckBox enabled = new() { Text = "Low on time audio", AutoSize = true, Checked = true };
     private readonly CheckBox inherit = new() { Text = "Use default threshold", AutoSize = true, Checked = true };
-    private readonly NumericUpDown seconds = new() { Minimum = 1, Maximum = TimerEngine.MaxDuration, Value = 60, Width = 120, AccessibleName = "Low-time seconds remaining" };
-    private readonly Label defaultLabel = Widgets.Text("Default: 60 seconds remaining");
+    private readonly NumericUpDown seconds = new() { Minimum = 1, Maximum = TimerEngine.MaxDuration, Value = AudioSettings.DefaultLowTimeThresholdSeconds, Width = 120, AccessibleName = "Low-time seconds remaining" };
+    private readonly Label defaultLabel = Widgets.Text($"Default: {AudioSettings.DefaultLowTimeThresholdSeconds} seconds remaining");
     private readonly SoundSourceControl source = new(SoundEvent.LowTime, true);
     private readonly FlowLayoutPanel options;
     private bool binding;
@@ -165,7 +165,7 @@ public sealed class AudioSettingsControl : UserControl
     private readonly TimerApplication app;
     private readonly Dictionary<SoundEvent, (SoundSourceControl Source, ComboBox Behavior, VolumeControl Volume, FadeOutControl Fade)> editors = [];
     private readonly VolumeControl appVolume = new("App sound", "Settings app sound volume");
-    private readonly NumericUpDown threshold = new() { Minimum = 1, Maximum = TimerEngine.MaxDuration, Value = 60, Width = 140, AccessibleName = "Default low-time threshold in seconds" };
+    private readonly NumericUpDown threshold = new() { Minimum = 1, Maximum = TimerEngine.MaxDuration, Value = AudioSettings.DefaultLowTimeThresholdSeconds, Width = 140, AccessibleName = "Default low-time threshold in seconds" };
     private bool binding;
     private int? loadedThreshold;
     public int DefaultThresholdSeconds => (int)threshold.Value;

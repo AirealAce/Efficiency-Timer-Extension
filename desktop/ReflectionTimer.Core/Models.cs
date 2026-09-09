@@ -10,10 +10,11 @@ public static class DataJson
 
 public record TimerState
 {
+    public const int DefaultDurationSeconds = 15 * 60;
     public Guid? SessionId { get; init; }
     public bool IsRunning { get; init; }
-    public int DurationSeconds { get; init; } = 1500;
-    public int RemainingSeconds { get; init; } = 1500;
+    public int DurationSeconds { get; init; } = DefaultDurationSeconds;
+    public int RemainingSeconds { get; init; } = DefaultDurationSeconds;
     public long? PausedRemainingMilliseconds { get; init; }
     public long? EndTime { get; init; }
     public bool AutoRestart { get; init; }
@@ -91,7 +92,7 @@ public record AppState
     public string AlertSoundPath { get; set; } = ""; // Empty means the bundled extension sound.
     public AudioSettings? Audio { get; set; } // Null migrates the existing session-end MP3 without changing it.
     public ReflectionPopupPosition PopupPosition { get; set; } = ReflectionPopupPosition.BottomRight;
-    public bool ShowFloatingTimer { get; set; }
+    public bool ShowFloatingTimer { get; set; } = true;
     public int? FloatingTimerLeft { get; set; }
     public int? FloatingTimerTop { get; set; }
     public FloatingTimerPlacement FloatingPlacement { get; set; } = FloatingTimerPlacement.BottomLeft;

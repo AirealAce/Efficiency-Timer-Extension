@@ -145,7 +145,7 @@ internal static partial class Program
                 Equal(before, app.Engine.Snapshot.Timer);
                 shortcut.Dispatch(GlobalShortcut.HotKeyMessage, GlobalShortcut.CompactId); Application.DoEvents();
                 Is(!mini.Visible); Is(!new EncryptedStore(directory).Load().ShowFloatingTimer); Equal(9000, duration.Seconds);
-            }, new AppState { ExtensionDisabledConfirmed = true, Timer = new TimerState { DurationSeconds = 9000, RemainingSeconds = 9000, Volume = 0 } });
+            }, new AppState { ExtensionDisabledConfirmed = true, ShowFloatingTimer = false, Timer = new TimerState { DurationSeconds = 9000, RemainingSeconds = 9000, Volume = 0 } });
         });
         Test("slash shortcut registration is independent and released", () => {
             var api = new FakeHotKey(); var count = 0;

@@ -75,6 +75,9 @@ internal static partial class Program
         if (args is ["--reliability-boundaries"]) {
             TestReliabilityBoundaries(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
         }
+        if (args is ["--low-time"]) {
+            TestLowTime(); Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
         if (args is ["--compact"]) {
             TestTinyCountdown(); TestCompactUpdate(); TestFloatingTimer(); TestEndEarly(); TestReliabilityBoundaries(); TestVolumeSettings();
             Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
@@ -138,7 +141,7 @@ internal static partial class Program
             Console.WriteLine($"\n{passed} passed; {failed} failed. Theme: {AppTheme.Preference}");
             return failed == 0 ? 0 : 1;
         }
-        Test("default and detached snapshots", () => { var f = new Fixture(); Equal(1500, f.Engine.Snapshot.Timer.DurationSeconds); f.Engine.Snapshot.Prompts.Add(new(Guid.NewGuid(), 0, 30, 0, true)); Equal(0, f.Engine.Snapshot.Prompts.Count); });
+        Test("default and detached snapshots", () => { var f = new Fixture(); Equal(900, f.Engine.Snapshot.Timer.DurationSeconds); Equal(900, f.Engine.Snapshot.Timer.RemainingSeconds); f.Engine.Snapshot.Prompts.Add(new(Guid.NewGuid(), 0, 30, 0, true)); Equal(0, f.Engine.Snapshot.Prompts.Count); });
         TestOnboarding();
         TestInputLayout();
         TestSessionDetails();
@@ -751,7 +754,7 @@ internal static partial class Program
                     Equal(120, control.DefaultThresholdSeconds);
                 }
                 Is(!Descendants(control).OfType<Button>().Any(x => x.Text == "Save threshold"));
-                Equal(60, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
+                Equal(15, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
                 Descendants(main).OfType<Button>().Single(x => x.Text == "Save settings").PerformClick();
                 Equal(120, AudioSettings.From(app.Engine.Snapshot).LowTimeThresholdSeconds);
                 Equal(2, Descendants(main).OfType<LowTimeControl>().Count());
@@ -782,7 +785,7 @@ internal static partial class Program
                 Is(report.Contains("3.12.2")); Is(report.Contains("RetryProtected")); Is(report.Contains("ScheduleOverlap")); Equal(1, log.Recent().Count);
             });
             Test("diagnostic opt-out, retention and clear", () => { var log = new DiagnosticLog(Path.Combine(root, "retention")); log.Record(new Activity(DateTimeOffset.Now.AddDays(-8).ToUnixTimeMilliseconds(), "timer.started")); Equal(0, log.Recent().Count); log.Enabled = false; log.Record("timer.started"); Equal(0, log.Recent().Count); log.Enabled = true; log.Record("timer.paused"); log.Clear(); Equal(0, log.Recent().Count); Equal(0, new DiagnosticLog(Path.Combine(root, "retention")).Recent().Count); });
-            Test("duration input clears untouched 25-minute preset", () => { using var control = new DurationControl(); var numbers = Descendants(control).OfType<NumericUpDown>().ToArray(); numbers[0].Value = 1; Equal(3600, control.Seconds); Is(control.Dirty); control.LoadSeconds(1500, true); numbers[1].Value = 10; numbers[0].Value = 1; Equal(4200, control.Seconds); });
+            Test("duration input clears untouched 15-minute preset", () => { using var control = new DurationControl(); Equal(900, control.Seconds); var numbers = Descendants(control).OfType<NumericUpDown>().ToArray(); numbers[0].Value = 1; Equal(3600, control.Seconds); Is(control.Dirty); control.LoadSeconds(900, true); numbers[1].Value = 10; numbers[0].Value = 1; Equal(4200, control.Seconds); });
             Test("typed hours update immediately with a live preview subscriber", () => { using var control = new DurationControl(); var preview = 0; control.UserChanged += () => preview = control.Seconds; var numbers = Descendants(control).OfType<NumericUpDown>().ToArray(); numbers[0].Text = "1"; Equal(3600, preview); Equal(0m, numbers[1].Value); });
         }
         finally {

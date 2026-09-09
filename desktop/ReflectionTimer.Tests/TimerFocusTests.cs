@@ -128,6 +128,7 @@ internal static partial class Program
         Test("period conflict is reported and disposal releases only successfully registered chords", () => {
             var api = new FakeHotKey { BlockedKey = GlobalShortcut.CompactFocusKey };
             WithEndEarlyApp((app, _) => {
+                app.SetFloatingTimer(false);
                 app.EnableGlobalShortcut(api); app.EnableGlobalShortcut(api);
                 Is(!CompactFocusShortcut(app).Dispatch(GlobalShortcut.HotKeyMessage, GlobalShortcut.CompactFocusId));
                 var main = (MainWindow)typeof(TimerApplication).GetField("main", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
