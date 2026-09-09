@@ -1,6 +1,6 @@
 # Keyboard shortcuts and upgrading another PC
 
-The current repository is [AirealAce/Reflection-Timer](https://github.com/AirealAce/Reflection-Timer). The desktop update is 3.12.3; the old 3.6.4 build only had Ctrl+Alt+T. Downloading source or renaming a repository does not update an already installed app.
+The current repository is [AirealAce/Reflection-Timer](https://github.com/AirealAce/Reflection-Timer). The desktop update is 3.12.4; the old 3.6.4 build only had Ctrl+Alt+T. Downloading source or renaming a repository does not update an already installed app.
 
 ## Current mappings
 
@@ -19,9 +19,9 @@ Duration focus chooses the first value above zero from the left, or Hours if all
 ## Upgrade without replacing the Sheet connection
 
 1. Finish or pause active work, save reflection drafts, and **Quit** the old app from its tray menu. Closing the main window normally leaves it running.
-2. Extract the verified 3.12.3 Windows x64 release to a new folder. Do not overwrite files in a running app's folder.
+2. Extract the verified 3.12.4 Windows x64 release to a new folder. Do not overwrite files in a running app's folder.
 3. Run the extracted ReflectionTimer.exe. To replace the regular per-user install, choose **Guided setup → step 1 → Install on this PC**. The installer retains local settings/data and existing MP3 files. Do not import someone else's connection code.
-4. Launch the installed app and check its executable's **Properties → Details → Product version**. It should say 3.12.3. Existing desktop shortcuts should point to the installed copy, not an old extracted download.
+4. Launch the installed app and check its executable's **Properties → Details → Product version**. It should say 3.12.4. Existing desktop shortcuts should point to the installed copy, not an old extracted download.
 5. Check **Settings → Keyboard shortcuts** for individual registration failures. Another running copy or another app can own a chord. Quit the conflicting copy/app and reopen Reflection Timer; there is no need to change the Sheets URL or token.
 
 The update does not require changing an already working receiver deployment or credentials. Receiver 2.6.0 or newer is needed for sending check-in rows; if an older receiver is detected, the entry remains saved locally. A receiver source file in a download is not deployed automatically.
@@ -42,4 +42,4 @@ Punctuation bindings currently use Windows US-keyboard virtual keys (OEM grave, 
 
 Run `dotnet run --project desktop/ReflectionTimer.Tests -c Release -- --hotkeys` on Windows. These isolated tests use synthetic state and an injected registration backend, leaving the running user's timer and real global chords alone. They cover all five exact virtual-key/modifier mappings, independent conflicts/disposal, hidden/minimized window behavior, focus selection, compact cycling, early endings, and check-ins. They do not prove that another PC's real chords are free; check that PC's status panel as well.
 
-The public packaging script runs this gate before producing a ZIP, alongside onboarding/install, delivery-safety, and receiver checks. It includes the bundled soundtrack library and excludes local data, credentials, and additional personal soundtrack files.
+The public packaging script runs this gate before producing a ZIP, alongside onboarding/install, delivery-safety, and receiver checks. It includes original synthesized tones and excludes local data, credentials, and all MP3 recordings.

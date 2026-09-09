@@ -57,7 +57,7 @@
       return;
     }
     try {
-      const audio = new Audio(chrome.runtime.getURL('popup.mp3'));
+      const audio = new Audio(chrome.runtime.getURL('notification.wav'));
       audio.volume = sfxVolume;
       await audio.play();
       log('sound.result', { outcome: 'success' });

@@ -11,6 +11,9 @@ if (-not $RuntimeVersion) {
 }
 if ($RuntimeVersion -notmatch '^10\.0\.\d+$') { throw 'Choose a stable .NET 10 runtime patch version.' }
 
+& $Node (Join-Path $repoRoot 'scripts\check-public-source.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Public-source privacy scan failed; no package produced.' }
+
 # These setup/install/delivery checks never use live credentials or network services.
 & $DotNet run --project (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ReflectionTimer.Tests.csproj') -c Release -- --onboarding
 if ($LASTEXITCODE -ne 0) { throw 'Onboarding/installation tests failed; no package produced.' }
@@ -35,20 +38,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Clean public build failed; no ZIP produced.' }
 if ($LASTEXITCODE -ne 0) { throw 'Self-contained publish failed; no ZIP produced.' }
 
 $files = @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse)
-$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs', '.mp3')
-$bundledSounds = @('popup.mp3', 'pokemon-obtained-item.mp3', 'pokemon-level-up.mp3', 'pokemon-healed.mp3',
-    'pokemon-key-item.mp3', 'pokemon-battle-trainer.mp3', 'pokemon-battle-champion.mp3', 'kirby-out-of-health.mp3')
+$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs')
 foreach ($file in $files) {
     if ($file.Extension.ToLowerInvariant() -notin $allowedExtensions -or $file.Name -match '^state\.|^diagnostics\.|^\.env|\.pdb$') {
         throw "Unexpected public package file: $($file.Name). No ZIP produced."
     }
-    if ($file.Extension -eq '.mp3' -and ($file.Name -notin $bundledSounds -or $file.DirectoryName -ne $payloadRoot)) {
-        throw "Unexpected soundtrack file: $($file.Name). No ZIP produced."
-    }
 }
-# Only the bundled soundtrack files are permitted; user data is never copied. Check text and
+# Public downloads use original synthesized tones. User audio and state are never copied. Check text and
 # managed binaries for personalized config as a second safety net (UTF-8/UTF-16).
-$privacyPatterns = @('https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]{20,}', 'https://script\.google\.com/macros/s/[A-Za-z0-9_-]{20,}/exec')
+$privacyPatterns = @('https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]{20,}', 'https://script\.google\.com/macros/s/[A-Za-z0-9_-]{20,}/exec',
+    '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----', '\bgh[pousr]_[A-Za-z0-9]{30,}\b', '\bgithub_pat_[A-Za-z0-9_]{40,}\b', '\bAIza[A-Za-z0-9_-]{35}\b')
 foreach ($file in $files) {
     $bytes = [IO.File]::ReadAllBytes($file.FullName)
     foreach ($encoding in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
@@ -62,7 +61,7 @@ foreach ($file in $files) {
         }
     }
 }
-foreach ($required in (@('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt') + $bundledSounds)) {
+foreach ($required in @('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot $required))) { throw "Required self-contained package file is missing: $required" }
 }
 $manifestEntries = @($files | Sort-Object FullName | ForEach-Object {

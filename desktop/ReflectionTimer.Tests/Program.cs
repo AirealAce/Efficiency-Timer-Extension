@@ -789,7 +789,10 @@ internal static partial class Program
                         ReceiverUrl = Connection.WebAppUrl, RetryProtected = true, ActualDurationSeconds = 8, DurationSeconds = 30, EndedEarly = true }] };
                 var report = JsonSerializer.Serialize(log.Report(state)); Is(!report.Contains("private-sentinel")); Is(!report.Contains("private-reason"));
                 Is(!report.Contains(Connection.ApiToken)); Is(!report.Contains(Connection.SheetUrl)); Is(!report.Contains(Connection.WebAppUrl));
-                Is(report.Contains("3.12.2")); Is(report.Contains("RetryProtected")); Is(report.Contains("ScheduleOverlap")); Equal(1, log.Recent().Count);
+                using var reportJson = JsonDocument.Parse(report);
+                var executableVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(DiagnosticLog).Assembly.Location).FileVersion!;
+                Equal(Version.Parse(executableVersion).ToString(3), reportJson.RootElement.GetProperty("AppVersion").GetString());
+                Is(report.Contains("RetryProtected")); Is(report.Contains("ScheduleOverlap")); Equal(1, log.Recent().Count);
             });
             Test("diagnostic opt-out, retention and clear", () => { var log = new DiagnosticLog(Path.Combine(root, "retention")); log.Record(new Activity(DateTimeOffset.Now.AddDays(-8).ToUnixTimeMilliseconds(), "timer.started")); Equal(0, log.Recent().Count); log.Enabled = false; log.Record("timer.started"); Equal(0, log.Recent().Count); log.Enabled = true; log.Record("timer.paused"); log.Clear(); Equal(0, log.Recent().Count); Equal(0, new DiagnosticLog(Path.Combine(root, "retention")).Recent().Count); });
             Test("duration input clears untouched 15-minute preset", () => { using var control = new DurationControl(); Equal(900, control.Seconds); var numbers = Descendants(control).OfType<NumericUpDown>().ToArray(); numbers[0].Value = 1; Equal(3600, control.Seconds); Is(control.Dirty); control.LoadSeconds(900, true); numbers[1].Value = 10; numbers[0].Value = 1; Equal(4200, control.Seconds); });

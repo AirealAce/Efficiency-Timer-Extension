@@ -62,7 +62,6 @@ public sealed class TimerApplication : ApplicationContext
         tray = new NotifyIcon { Text = "Reflection Timer Desktop", Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Information,
             Visible = true, ContextMenuStrip = menu };
         tray.DoubleClick += (_, _) => Open();
-        tray.BalloonTipClicked += (_, _) => ShowReflections();
         Engine.ActivityRecorded += activity => {
             Log.Record(activity);
             if (activity.Event is "timer.paused" or "timer.reset" or "timer.started" or "timer.endedEarly") Sounds.Stop(SoundEvent.LowTime);
@@ -325,7 +324,6 @@ public sealed class TimerApplication : ApplicationContext
             Ui(() => EnsurePrompt());
         };
         Log.Record("prompt.shown", pending.Id);
-        if (!pending.IsCheckIn) tray.ShowBalloonTip(5000, pending.IsTest ? "Test reflection" : "Session complete", "Your reflection window is ready.", ToolTipIcon.Info);
         reflection.Show();
         reflection.Activate();
     }
