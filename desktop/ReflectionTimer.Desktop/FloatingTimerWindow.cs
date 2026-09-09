@@ -133,7 +133,10 @@ public sealed class FloatingTimerWindow : Form
             }
             // The duration/footer controls are already scaled by WinForms.
             // Reuse their width rather than applying the monitor DPI twice.
-            else countdown.Size = new(Duration.Width, EditorScale(64));
+            else {
+                countdown.Size = new(Duration.Width, EditorScale(64));
+                actions.MinimumSize = new(Duration.Width, 0);
+            }
             countdown.Cursor = tiny ? Cursors.SizeAll : Cursors.Default;
         }
         finally {

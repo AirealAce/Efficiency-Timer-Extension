@@ -103,13 +103,18 @@ public sealed class DurationControl : UserControl
     public DurationControl() : this(false) { }
     public DurationControl(bool compact)
     {
-        Size = new(compact ? 336 : 450, 80); Margin = new(0, 6, 0, 10);
-        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        MinimumSize = new(compact ? 336 : 450, 0); Margin = new(0, 6, 0, 10);
+        // Captions and themed input frames must determine the height at the
+        // current font and DPI; a fixed-height ancestor clips their bottom edge.
+        var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false, Margin = Padding.Empty };
         foreach (var pair in new[] { ("Hours", hours), ("Minutes", minutes), ("Seconds", seconds) }) {
             pair.Item2.AccessibleName = pair.Item1;
             pair.Item2.AccessibleDescription = "Whole numbers; values above 59 carry into the next unit when you finish editing or press Enter.";
             if (compact) pair.Item2.Width = 100;
-            var panel = new FlowLayoutPanel { Width = compact ? 108 : 140, Height = 78, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+            var panel = new FlowLayoutPanel { MinimumSize = new(compact ? 108 : 140, 0),
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown, WrapContents = false };
             var caption = new Label { Text = pair.Item1, AutoSize = true };
             AppTheme.SetTextColor(caption, ThemeTextRole.Muted);
             panel.Controls.Add(caption); panel.Controls.Add(pair.Item2); row.Controls.Add(panel);

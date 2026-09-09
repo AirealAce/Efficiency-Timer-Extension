@@ -156,6 +156,8 @@ The rolling log retains at most 1,200 events / 7 days and can be paused or clear
 
 ## Development
 
+`dotnet run --project ReflectionTimer.Tests -c Release -- --compact-layout` checks that the compact timer's input frames and native editors fit inside every parent panel at scaled sizes. The duration rows size to their contents so input borders remain visible at higher display scaling.
+
 Run `dotnet run --project ReflectionTimer.Tests -c Release -- --low-time` from `desktop/` for the focused low-time defaults, threshold boundaries, persistence, and audio-library checks. These checks use mocked playback.
 
 Audio tests cover default/override migration, low-time single-fire persistence, pause/resume/sleep and scheduled repeats, atomic failures, diagnostic redaction, all library decoders present locally, concurrent playback, Assertive priority/restoration, Disruptive cancellation, mute, and real PCM gain changes. Normal tests use mocked audio and do not emit sound. An explicit `dotnet run --project ReflectionTimer.Tests -c Release -- --audio-smoke` plays the Success and Failure defaults once at 5% to check the actual output device; it never reads production state or contacts Sheets. `TimerApplication` opts out of audio by default for tests; the desktop entry point explicitly opts in.

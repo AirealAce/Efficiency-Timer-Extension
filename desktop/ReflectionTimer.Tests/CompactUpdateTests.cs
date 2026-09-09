@@ -207,21 +207,7 @@ internal static partial class Program
                 mini.Location = new(100,100); mini.SavePosition(); Application.DoEvents(); Equal(0, select.SelectedIndex);
             });
         });
-        Test("compact autosizing contains fields and action buttons with larger fonts/scaling", () => {
-            WithEndEarlyApp((app, _) => {
-                app.SetFloatingTimer(true); Application.DoEvents(); var mini = Application.OpenForms.OfType<FloatingTimerWindow>().Single();
-                foreach (var factor in new[] { 1f, 1.5f }) {
-                    if (factor != 1) mini.Scale(new SizeF(factor, factor));
-                    mini.PerformLayout(); Application.DoEvents();
-                    foreach (var child in Descendants(mini).Where(x => x is Button or InputFrame or CheckBox)) {
-                        var rect = mini.RectangleToClient(child.RectangleToScreen(child.ClientRectangle));
-                        Is(rect.Top >= 0 && rect.Bottom <= mini.ClientSize.Height - mini.Padding.Bottom);
-                        Is(rect.Left >= 0 && rect.Right <= mini.ClientSize.Width);
-                    }
-                }
-                Is(!Descendants(mini).OfType<Label>().Any(x => x.Text.Contains("Session finished")));
-            });
-        });
+        TestCompactInputLayout();
         Test("completion display holds zero for one second without changing engine or reflection", () => {
             var f = new Fixture(); var view = new CountdownPresentation();
             f.Engine.Start(30, false, 0); Equal(30, view.Seconds(f.Engine.Snapshot.Timer, f.Engine.Now));
@@ -236,6 +222,29 @@ internal static partial class Program
             view.Seconds(f.Engine.Snapshot.Timer, f.Engine.Now); f.Move(10); f.Engine.Pause(); Equal(20, view.Seconds(f.Engine.Snapshot.Timer, f.Engine.Now));
             f.Engine.Resume(); view.Seconds(f.Engine.Snapshot.Timer, f.Engine.Now); f.Move(20); f.Engine.Advance(); Equal(30, view.Seconds(f.Engine.Snapshot.Timer, f.Engine.Now));
             f.Add(5,60); f.Move(5); f.Engine.Advance(); Equal(60, view.Seconds(f.Engine.Snapshot.Timer, f.Engine.Now));
+        });
+    }
+    private static void TestCompactInputLayout()
+    {
+        Test("compact autosizing contains fields and action buttons through every parent in scaled layouts", () => {
+            WithEndEarlyApp((app, _) => {
+                app.SetFloatingTimer(true); Application.DoEvents(); var mini = Application.OpenForms.OfType<FloatingTimerWindow>().Single();
+                foreach (var factor in new[] { 1f, 1.25f, 1.2f }) { // Original, 125%, then 150% of the original size.
+                    if (factor != 1) mini.Scale(new SizeF(factor, factor));
+                    mini.PerformLayout(); Application.DoEvents();
+                    foreach (var child in Descendants(mini).Where(x => x is Button or InputFrame or DurationPartInput or CheckBox)) {
+                        var rect = mini.RectangleToClient(child.RectangleToScreen(child.ClientRectangle));
+                        Is(rect.Top >= 0 && rect.Bottom <= mini.ClientSize.Height - mini.Padding.Bottom);
+                        Is(rect.Left >= 0 && rect.Right <= mini.ClientSize.Width);
+                        for (Control? parent = child.Parent; parent is not null && parent != mini; parent = parent.Parent) {
+                            var inside = parent.RectangleToClient(child.RectangleToScreen(child.ClientRectangle));
+                            if (!parent.ClientRectangle.Contains(inside))
+                                throw new Exception($"{child.GetType().Name} {child.AccessibleName} bounds {inside} exceed {parent.GetType().Name} client {parent.ClientRectangle}");
+                        }
+                    }
+                }
+                Is(!Descendants(mini).OfType<Label>().Any(x => x.Text.Contains("Session finished")));
+            });
         });
     }
     private static DurationPartInput CompactPart(DurationControl control, string name) =>
