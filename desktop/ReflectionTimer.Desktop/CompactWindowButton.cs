@@ -13,7 +13,22 @@ internal sealed class CompactWindowButton : Button
         Action = action; Name = name; AccessibleRole = AccessibleRole.PushButton;
         Text = ""; UseMnemonic = false; AutoSize = false;
         Size = new(26, 26); Margin = Padding.Empty; Padding = Padding.Empty;
-        AppTheme.ApplyButton(this, false); Click += click;
+        ApplyPalette(); Click += click;
+    }
+    internal static int SideForDpi(int dpi, bool tiny) =>
+        Math.Max(tiny ? 12 : 22, (int)Math.Round((tiny ? 16 : 26) * dpi / 96f));
+
+    internal void ApplyPalette()
+    {
+        AppTheme.ApplyButton(this, false);
+        if (Action != CompactWindowAction.Close) return;
+        // Keep the familiar red close action distinct in every app theme.
+        // White retains readable contrast in normal, hovered and pressed states.
+        BackColor = Color.FromArgb(0xC4, 0x2B, 0x1C); ForeColor = Color.White;
+        FlatAppearance.BorderColor = AppTheme.Palette.IsSystemContrast || AppTheme.Preference == ReflectionTimer.Core.AppColorTheme.HighContrast
+            ? Color.White : BackColor;
+        FlatAppearance.MouseOverBackColor = Color.FromArgb(0xE8, 0x11, 0x23);
+        FlatAppearance.MouseDownBackColor = Color.FromArgb(0xA4, 0x26, 0x2C);
     }
     protected override void OnPaint(PaintEventArgs e)
     {

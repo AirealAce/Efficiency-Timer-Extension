@@ -12,6 +12,10 @@ internal static partial class Program
             void Capture(Control control, string name) {
                 using var bitmap = new Bitmap(control.Width, control.Height);
                 control.DrawToBitmap(bitmap, new Rectangle(Point.Empty, control.Size));
+                // DrawToBitmap misses this overlapping child panel in its default
+                // traversal; composite the real control at its actual bounds.
+                foreach (var overlay in control.Controls.OfType<Panel>().Where(x => x.Visible && x.Name == "TinyWindowActions"))
+                    overlay.DrawToBitmap(bitmap, overlay.Bounds);
                 bitmap.Save(Path.Combine(directory, theme + "-" + name + ".png"), System.Drawing.Imaging.ImageFormat.Png);
             }
             Capture(main, "settings");
@@ -52,6 +56,11 @@ internal static partial class Program
                 mini.SetHoverControls(true);
                 var tinyExpand = WindowAction(mini, "TinyWindowExpand");
                 Is(tinyExpand.Visible); Equal(tinyBounds, mini.Bounds); Equal(handle, mini.Handle);
+                Is(tinyExpand.Width <= expand.Width * .65 && tinyExpand.Height <= expand.Height * .65);
+                var tinyClose = WindowAction(mini, "TinyWindowClose");
+                var tinyShrink = WindowAction(mini, "TinyWindowShrink");
+                Equal(tinyExpand.Size, tinyClose.Size); Equal(tinyExpand.Size, tinyShrink.Size);
+                Is(tinyShrink.Right <= tinyExpand.Left && tinyExpand.Right <= tinyClose.Left);
                 foreach (var button in Descendants(mini).OfType<CompactWindowButton>().Where(x => x.Visible)) {
                     var rect = mini.RectangleToClient(button.RectangleToScreen(button.ClientRectangle));
                     Is(mini.ClientRectangle.Contains(rect));
@@ -82,10 +91,27 @@ internal static partial class Program
                         AppTheme.Change(theme); Application.DoEvents();
                         Equal(size, button.Size); Equal(AppTheme.Text, button.ForeColor); Equal(AppTheme.Raised, button.BackColor);
                         Equal("Open main timer page", button.AccessibleName);
+                        foreach (var closeName in new[] { "CompactWindowClose", "TinyWindowClose" }) {
+                            var close = WindowAction(mini, closeName);
+                            Equal(Color.White, close.ForeColor); Equal(Color.FromArgb(0xC4, 0x2B, 0x1C), close.BackColor);
+                            foreach (var background in new[] { close.BackColor, close.FlatAppearance.MouseOverBackColor, close.FlatAppearance.MouseDownBackColor }) {
+                                Is(background.R > background.G * 2 && background.R > background.B * 2);
+                                Is(Contrast(close.ForeColor, background) >= 4.5);
+                            }
+                            Equal("Close compact view", close.AccessibleName);
+                        }
                     }
                 }
                 finally { AppTheme.Change(original); }
             });
+        });
+        Test("tiny caption buttons stay substantially smaller at common display scales", () => {
+            foreach (var dpi in new[] { 96, 120, 144, 192, 240, 288 }) {
+                var compact = CompactWindowButton.SideForDpi(dpi, tiny: false);
+                var tiny = CompactWindowButton.SideForDpi(dpi, tiny: true);
+                Equal((int)Math.Round(16 * dpi / 96f), tiny);
+                Is(tiny <= compact * .65);
+            }
         });
     }
 }

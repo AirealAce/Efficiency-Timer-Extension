@@ -18,7 +18,7 @@ public sealed class FloatingTimerWindow : Form
     private readonly Panel caption = new() { Width = 336, Height = 26, Margin = new(0, 0, 0, 6) };
     private readonly Label captionTitle = new() { Text = "Reflection Timer", AutoSize = false,
         TextAlign = ContentAlignment.MiddleLeft, AccessibleName = "Compact timer title" };
-    private readonly Panel hoverActions = new() { Visible = false, Size = new(78, 26), Margin = Padding.Empty };
+    private readonly Panel hoverActions = new() { Name = "TinyWindowActions", Visible = false, Size = new(48, 16), Margin = Padding.Empty };
     private readonly CompactWindowButton[] captionButtons, hoverButtons;
     private readonly System.Windows.Forms.Timer hoverCheck = new() { Interval = 100 };
     private readonly ContextMenuStrip quickActions = new();
@@ -143,15 +143,16 @@ public sealed class FloatingTimerWindow : Form
     }
     private void LayoutWindowActions()
     {
-        var side = Math.Max(22, (int)Math.Round(26 * DeviceDpi / 96f));
+        var side = CompactWindowButton.SideForDpi(DeviceDpi, tiny: false);
+        var tinySide = CompactWindowButton.SideForDpi(DeviceDpi, tiny: true);
         caption.Size = new(Duration.Width, side);
         captionTitle.Bounds = new(0, 0, Math.Max(0, caption.Width - side * 3), side);
         for (var i = 0; i < 3; i++) {
             captionButtons[i].Bounds = new(caption.Width - side * (3 - i), 0, side, side);
-            hoverButtons[i].Bounds = new(side * i, 0, side, side);
+            hoverButtons[i].Bounds = new(tinySide * i, 0, tinySide, tinySide);
         }
         var timerBounds = RectangleToClient(countdown.RectangleToScreen(countdown.ClientRectangle));
-        hoverActions.Bounds = new(Math.Max(0, timerBounds.Right - side * 3), timerBounds.Top + (timerBounds.Height - side) / 2, side * 3, side);
+        hoverActions.Bounds = new(Math.Max(0, timerBounds.Right - tinySide * 3), timerBounds.Top + (timerBounds.Height - tinySide) / 2, tinySide * 3, tinySide);
         hoverActions.BringToFront();
     }
     private void DragCaption(object? sender, MouseEventArgs e)

@@ -6,7 +6,7 @@ A focus timer with Google Sheets reflection logging. The new [Windows desktop ve
 
 ## Install the Windows app
 
-1. Open [the latest release](https://github.com/AirealAce/Reflection-Timer/releases/latest) and download **ReflectionTimer-3.12.5-win-x64.zip** under Assets. GitHub's **Code → Download ZIP** and **Source code** downloads are for developers.
+1. Open [the latest release](https://github.com/AirealAce/Reflection-Timer/releases/latest) and download **ReflectionTimer-3.12.6-win-x64.zip** under Assets. GitHub's **Code → Download ZIP** and **Source code** downloads are for developers.
 2. Right-click the ZIP → **Extract All**, then open the extracted folder and run **ReflectionTimer.exe**. The package includes .NET. No coding tools, Chrome extension or administrator account are required. It targets Windows 11 on Intel/AMD 64-bit PCs; other platforms are not verified.
 3. On the first screen, **Install on this PC** optionally creates Desktop/Start menu shortcuts. Close the portable copy using **Quit desktop app**, then open the installed shortcut.
 4. Follow **Guided setup** to connect **your own** Google spreadsheet. Allow about 5–10 minutes for the one-time Google Apps Script authorization and deployment. The included **START-HERE.html** walks through each step. Managed Google accounts may restrict web-app deployment.
