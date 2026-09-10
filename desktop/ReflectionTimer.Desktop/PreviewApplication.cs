@@ -10,12 +10,14 @@ internal sealed class PreviewApplication : ApplicationContext
     internal string? ProfileName { get; }
     internal bool StartInTray { get; }
     internal object ShortcutState => shortcuts.Status;
+    internal bool AppViewVisible => MainForm is { IsDisposed: false, Visible: true, WindowState: not FormWindowState.Minimized };
     internal PreviewServices Services { get; }
     internal string? RecoveryNotice { get; set; }
     private readonly List<PreviewWindow> windows = [];
     private readonly System.Windows.Forms.Timer pulse = new() { Interval = 1000 };
     private PreviewWindow? active;
     private bool closing, tickFailed;
+    private bool? publishedAppViewVisible;
     private long lastSync;
     private readonly NotifyIcon tray;
     private (AppColorTheme Theme, bool Contrast)? menuTheme;
@@ -82,6 +84,10 @@ internal sealed class PreviewApplication : ApplicationContext
         var window = new PreviewWindow(this, view, prompt);
         windows.Add(window); window.Activated += (_, _) => {active = window;Services.Log.Record("app.activated");};
         window.Deactivate+=(_,_)=>Services.Log.Record("app.deactivated");
+        if(view=="main") {
+            window.VisibleChanged+=(_,_)=>PublishAppViewVisibility();
+            window.Resize+=(_,_)=>PublishAppViewVisibility();
+        }
         window.FormClosed += (_, _) => { windows.Remove(window); if (active == window) active = null; };
         return window;
     }
@@ -102,6 +108,13 @@ internal sealed class PreviewApplication : ApplicationContext
         compact?.ApplyPosition();
     }
     internal void Broadcast(object message) { foreach (var window in windows.ToArray()) window.Post(message); }
+    private void PublishAppViewVisibility()
+    {
+        var visible=AppViewVisible;
+        if(publishedAppViewVisible==visible)return;
+        publishedAppViewVisible=visible;
+        Broadcast(new{type="appViewVisibility",visible});
+    }
     internal void Announce(string message)
     {
         if (message.Length == 0) return;

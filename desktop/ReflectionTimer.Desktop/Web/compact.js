@@ -8,6 +8,12 @@ function announce(text){setText($('status'),'');setTimeout(()=>setText($('status
 function duration(){return durationSeconds(['hours','minutes','seconds'].map(id=>$(id).value.trim()));}
 function repeatEnabled(){return $('repeat').getAttribute('aria-pressed')==='true';}
 function setRepeat(enabled){const value=String(Boolean(enabled));if($('repeat').getAttribute('aria-pressed')!==value)$('repeat').setAttribute('aria-pressed',value);}
+function setAppVisibility(visible){
+  const shown=Boolean(visible),value=String(shown);
+  if($('app').dataset.appVisible!==value)$('app').dataset.appVisible=value;
+  setText($('app-view-status'),shown?'App view is visible.':'App view is hidden or minimized.');
+  $('app').title=shown?'Bring App view to front':'Show App view';
+}
 function fill(seconds){$('hours').value=Math.floor(seconds/3600);$('minutes').value=Math.floor(seconds/60)%60;$('seconds').value=seconds%60;}
 function sharedDuration(parts){dirty=Array.isArray(parts);if(parts)['hours','minutes','seconds'].forEach((id,i)=>{if($(id).value!==parts[i])$(id).value=parts[i];});else if(state)fill(state.timer.durationSeconds);if(state?.clock.status!=='Running')renderDuration();}
 function renderDuration(){
@@ -32,7 +38,8 @@ function render(next){const previous=state;state=next;document.documentElement.d
   if(tiny&&['hours','minutes','seconds','toggle','repeat','app','reset','end'].includes(document.activeElement.id))$('read-time').focus();
 }
 bridge?.addEventListener('message',event=>{const m=event.data;if(m.type==='reply'){const p=requests.get(m.requestId);if(!p)return;clearTimeout(p.timeout);requests.delete(m.requestId);m.error?p.reject(new Error(m.error)):p.resolve();}
-  else if(m.type==='init'){render(m.state);if(m.state.durationDraft)sharedDuration(m.state.durationDraft);resize();}
+  else if(m.type==='init'){render(m.state);setAppVisibility(m.appViewVisible);if(m.state.durationDraft)sharedDuration(m.state.durationDraft);resize();}
+  else if(m.type==='appViewVisibility')setAppVisibility(m.visible);
   else if(m.type==='state')render(m.state);
   else if(m.type==='clock'){if(state?.clock.status==='Running'||!dirty)setText($('visual-clock'),formatClock(m.clock.seconds));}
   else if(m.type==='timeRead')snapshot(m.clock,true);

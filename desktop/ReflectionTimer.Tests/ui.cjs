@@ -74,6 +74,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
           return getComputedStyle(document.documentElement).backgroundColor===background&&getComputedStyle(input).backgroundColor===surface&&getComputedStyle(input).color===ink;
         },{background,surface,ink,field:view==='Session-end'?'#reflection-text':'#minutes'}),view+' uses the original '+name+' palette');
         check(await field.inputValue()===draft&&await field.evaluate(e=>document.activeElement===e),view+' theme switch retains the focused field and its draft: '+name);
+        if(view==='Compact')check(await target.locator('#app').evaluate(e=>e.dataset.appVisible==='true'&&getComputedStyle(e).backgroundColor===getComputedStyle(document.querySelector('#toggle')).backgroundColor),'App visibility highlight follows the '+name+' palette');
         if(view==='App'){
           await target.getByRole('tab',{name:'Settings',exact:true}).click();
           check(await target.getByRole('img',{name:new RegExp('^'+name+' theme preview')}).count()===1&&await target.locator('#theme-preview').locator('button,input,select,textarea,[tabindex]').count()===0,'Settings exposes a descriptive, non-interactive '+name+' theme sample');
@@ -90,6 +91,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
       if(view==='Compact'){
         await target.evaluate(state=>window.previewDispatch({type:'state',state}),{...state,timer:{...state.timer,autoRestart:true}});
         check(await target.locator('#repeat').evaluate(e=>e.getAttribute('aria-pressed')==='true'&&getComputedStyle(e).borderStyle==='double'),'Auto-start remains visibly distinct in Windows contrast mode');
+        check(await target.locator('#app').evaluate(e=>e.dataset.appVisible==='true'&&getComputedStyle(e).borderStyle==='double'),'App visibility remains distinct in Windows contrast mode');
         check(await target.locator('.transport svg').evaluateAll(icons=>icons.every(e=>getComputedStyle(e).stroke===getComputedStyle(e.closest('button')).color)),'Compact arrow icons preserve their button text colors in Windows contrast mode');
         await capture('Windows-contrast-Compact-auto-start-on',target);
       }
@@ -290,8 +292,19 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     check(await page.getByRole('tab',{name:'Timer',exact:true}).getAttribute('aria-selected')==='true'&&await page.locator('#minutes').evaluate(e=>e===document.activeElement),'Double-period action selects Timer and focuses its duration');
     await page.goto('https://reflection-timer.invalid/compact.html');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
-    await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);
+    await page.evaluate(state=>window.previewDispatch({type:'init',state,appViewVisible:true}),initial);
     check(await page.getByRole('spinbutton').count()===3&&await page.getByRole('button').count()===9&&await page.getByRole('button',{name:'Auto-start next session',pressed:false,exact:true}).count()===1,'Compact exposes its original actions with an accessible Auto-start toggle button');
+    const appButton=page.getByRole('button',{name:'App',exact:true});
+    check(await appButton.getAttribute('data-app-visible')==='true'&&await appButton.getAttribute('aria-describedby')==='app-view-status'&&await page.locator('#app-view-status').textContent()==='App view is visible.','Compact receives current App visibility on opening, including an accessible description');
+    await page.locator('#minutes').fill('12');
+    await page.evaluate(()=>window.previewDispatch({type:'appViewVisibility',visible:false}));
+    check(await appButton.getAttribute('data-app-visible')==='false'&&await page.locator('#app-view-status').textContent()==='App view is hidden or minimized.'&&await page.locator('#minutes').inputValue()==='12','Hiding or minimizing App view dims its button without losing the compact draft');
+    await page.evaluate(()=>{window.previewDispatch({type:'appViewVisibility',visible:true});window.previewDispatch({type:'clock',clock:{seconds:840}});});
+    check(await appButton.getAttribute('data-app-visible')==='true'&&await page.locator('#minutes').evaluate(e=>e===document.activeElement)&&await page.locator('#minutes').inputValue()==='12','App stays highlighted while the Compact input has focus and the clock updates');
+    await capture('Compact-App-visible');
+    await appButton.click();await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='main'));
+    check(await appButton.getAttribute('data-app-visible')==='true'&&!await appButton.getAttribute('aria-pressed'),'The highlighted App button still brings App view forward rather than toggling it closed');
+    await page.evaluate(()=>window.previewDispatch({type:'durationDraft',parts:null}));
     check(await page.locator('body').evaluate(body=>{
       const bounds=body.getBoundingClientRect(),fields=[...document.querySelectorAll('.duration input')],buttons=[...document.querySelector('.footer').children];
       return bounds.width<=228&&bounds.height<=200&&[...fields,...buttons].every(e=>{const r=e.getBoundingClientRect();return r.left>=bounds.left+3&&r.right<=bounds.right-3&&r.bottom<=bounds.bottom-3;})&&fields.every(e=>{const s=getComputedStyle(e);return parseFloat(s.lineHeight)+parseFloat(s.paddingTop)+parseFloat(s.paddingBottom)+2<=e.getBoundingClientRect().height;});

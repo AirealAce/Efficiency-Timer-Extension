@@ -11,11 +11,12 @@
     <label>Hours<input id="hours" type="number" min="0" step="1" inputmode="numeric" maxlength="6" value="0"></label>
     <label>Minutes<input id="minutes" type="number" min="0" step="1" inputmode="numeric" maxlength="8" value="15"></label>
     <label>Seconds<input id="seconds" type="number" min="0" step="1" inputmode="numeric" maxlength="10" value="0"></label>
-  </div><div class="footer"><button id="repeat" type="button" aria-label="Auto-start next session" aria-pressed="false" title="Auto-start next session"><span aria-hidden="true"><span>Auto</span><span>Start</span></span></button><button id="app" type="button">App</button>
+  </div><div class="footer"><button id="repeat" type="button" aria-label="Auto-start next session" aria-pressed="false" title="Auto-start next session"><span aria-hidden="true"><span>Auto</span><span>Start</span></span></button><button id="app" type="button" data-app-visible="false" aria-describedby="app-view-status" title="Show App view">App</button>
     <button id="reset" class="transport" type="button" aria-label="Reset timer" title="Reset timer"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M11 4 5 10l6 6M5 10h10"/></svg></button>
     <button id="toggle" class="transport" type="submit" aria-label="Start timer" title="Start timer"><span aria-hidden="true">▶</span></button>
     <button id="end" class="transport" type="button" aria-label="End timer early" title="End timer early" aria-disabled="true"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m9 4 6 6-6 6M5 10h10"/></svg></button>
   </div></form>
+  <span id="app-view-status" class="sr-only">Show App view.</span>
   <p id="status" class="sr-only" role="status" aria-atomic="true"></p><p id="error" role="alert"></p>
 </main>
 </body></html>
