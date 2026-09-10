@@ -1,4 +1,4 @@
-# Reflection Timer accessibility preview 0.4.1
+# Reflection Timer accessibility preview 0.4.2
 
 This local preview adds semantic HTML in WebView2 to the existing C# timer, storage, audio, and Sheets services. It retains the original window model and control layout. Development is on `accessibility/webview2-prototype`; production remains 3.12.9. Do not merge into master, update the public repository page, publish a release, or replace an installed copy until reviewed.
 
@@ -26,6 +26,28 @@ Closing App hides it. Reopen it from the preview tray icon; choose **Quit deskto
 The original Ctrl+Alt shortcuts are registered when available: T for App, slash to shrink/hide floating controls, period to focus Compact (twice for App), comma for a check-in, and backtick to end early. Another running timer can already own those chords. Failures are recorded in diagnostics; they do not replace another app's registration. Tray and App controls remain available.
 
 This build does not access the installed app’s profile or change its startup registration. Its optional Windows sign-in checkbox registers only this preview executable and named preview profile, using a separate registry value; it is off by default. Keep the extracted folder in place if enabling it. No startup registration is changed during installation or ordinary launch.
+
+## Defaults, themes, and shortcuts in 0.4.2
+
+New profiles use the original AppState defaults and contain no demonstration schedules or Outbox entries. Existing preview records and explicitly saved preferences are retained.
+
+| Default | Value |
+| --- | --- |
+| Duration / low-time warning | 15 minutes / enabled at 15 seconds, inherited by sessions |
+| Views | App centered; Compact enabled at bottom left; reflections bottom right |
+| Appearance / volume | Dark; App sound 50%; event volumes 100% |
+| Repeat / cutoff / fade / sign-in startup | Off; fade duration 10 seconds when enabled |
+| Schedule overlap | End current session with a reflection |
+| Session-end audio | Original extension sound (popup.mp3) |
+| Success audio | Level Up — Pokémon |
+| Failure audio | Out of Health — Kirby |
+| Low-time audio | Battle (Trainer) — Pokémon |
+
+All eight MP3s are included and decoded by the automated checks. Default resolves to the named event MP3; selecting Default does not mean silence or a built-in tone while these files are present. Each event initially uses Disruptive playback.
+
+Dark, Light, High Contrast, and Glamour apply to App, Compact, Time-only, and session-end views. The original selection and warning colors, Glamour italic heading/rose-gold bow, descriptive passive theme sample, native title bars, borders, and tray menu are implemented. Windows contrast takes priority. Theme switches update existing controls and preserve focus/drafts.
+
+The five original Ctrl+Alt chords are T (App toggle), backtick (start/resume/end), slash (Compact → Time-only → hidden), period (Compact; twice within 800 ms for Timer in App), and comma (check-in without stopping). Settings shows registration conflicts. Unavailable chords retry every 15 seconds and recover after the competing app exits. Registered chords are left alone; no keyboard hook or takeover is used. Reopening an existing reflection focuses its text, and owned dialogs retain focus.
 
 ## Tab sizing and page space in 0.4.1
 
@@ -56,7 +78,7 @@ The user reported that text and table navigation in 0.1 worked well. That suppor
 
 ## Preview data and connection
 
-A fresh profile contains two example schedules and two example Outbox records. Reflections saved before a valid connection exists remain **Local preview only** permanently. Enabling a connection cannot adopt or upload them. **Simulate success** is available only for these records and makes no request.
+Fresh profiles start empty. Example records from earlier previews are preserved. Reflections saved before a valid connection exists remain **Local preview only** permanently. Enabling a connection cannot adopt or upload them. **Simulate success** is available only for these records and makes no request.
 
 Save & test connection explicitly performs an authenticated ping. Confirming the extension is off and saving a valid connection enables delivery. Settings can also be saved incomplete; invalid connections never send. New connected reflections then use the existing request-ID/retry protocol; practice reflections use the receiver's test tab. Pausing prevents the next write but cannot retract a request already sent. Uncertain writes require explicit review before retrying or marking already sent. Entries retain their destination; the shared engine blocks unsafe account changes.
 
@@ -68,8 +90,8 @@ The host allows only exact packaged resources under its local virtual origin. It
 
 | Check | Result |
 | --- | --- |
-| Engine, adapter, storage, and service checks | 52 passed |
-| Browser semantics, behavior, and view checks (0.4.1) | 91 passed |
+| Engine, defaults, audio decoding, themes, shortcuts, storage, and service checks (0.4.2) | 90 passed |
+| Browser semantics, themes, behavior, and view checks (0.4.2) | 132 passed |
 | Shared production delivery safety checks | 40 passed |
 | Full legacy suite | 477 passed; 16 native focus/theme failures |
 | Untouched 3.12.9 theme comparison | Same 13 theme failures |

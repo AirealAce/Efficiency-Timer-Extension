@@ -22,7 +22,7 @@ internal sealed partial class PreviewWindow : Form
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · accessibility preview 0.4.1" : view == "compact" ? "Reflection Timer — Compact view · accessibility preview 0.4.1" : "Reflection Timer — Session end · accessibility preview 0.4.1";
+        Text = view == "main" ? "Reflection Timer — App view · accessibility preview 0.4.2" : view == "compact" ? "Reflection Timer — Compact view · accessibility preview 0.4.2" : "Reflection Timer — Session end · accessibility preview 0.4.2";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(368, 284) : new(560, app.Session.Engine.Snapshot.Prompts.Any(p=>p.Id==prompt&&p.EndedEarly)?525:440);
         MinimumSize = view == "main" ? new(420, 400) : view == "compact" ? new(80,32) : new(420,360);
@@ -48,16 +48,15 @@ internal sealed partial class PreviewWindow : Form
     }
     protected override bool ShowWithoutActivation => View is "compact" or "reflection";
     protected override CreateParams CreateParams {get{var value=base.CreateParams;if(View=="compact")value.ExStyle=(value.ExStyle|0x80)&~0x40000;return value;}}
-    internal void FocusControls(bool timerPage=false){if(!ready){focusOnReady=true;selectTimerOnReady=timerPage;return;}Post(new{type=View=="compact"?"expandCompact":"focusTimer",selectTimer=timerPage});}
+    internal void FocusControls(bool timerPage=false){if(!ready){focusOnReady=true;selectTimerOnReady=timerPage;return;}Post(new{type=View=="compact"?"expandCompact":View=="reflection"?"focusReflection":"focusTimer",selectTimer=timerPage});}
     internal void ApplyWindowTheme()
     {
         if(!IsHandleCreated)return;var theme=app.Session.Engine.Snapshot.Theme;var contrast=SystemInformation.HighContrast;
         if(appliedTheme==(theme,contrast))return;appliedTheme=(theme,contrast);
-        var colors=(int)theme switch{1=>(0xF3F6FA,0xE5EBF2,0x182537),2=>(0,0,0xFFFFFF),3=>(0xFFF1F7,0xF9D6E5,0x4A1934),_=>(0x161A22,0x2C3543,0xEFF4FA)};
-        static Color C(int rgb)=>Color.FromArgb((rgb>>16)&255,(rgb>>8)&255,rgb&255);
-        BackColor=contrast?SystemColors.Control:C(colors.Item1);browser.DefaultBackgroundColor=BackColor;
-        int dark=!contrast&&(int)theme is 0 or 2?1:0,caption=contrast?-1:ColorTranslator.ToWin32(C(colors.Item2)),text=contrast?-1:ColorTranslator.ToWin32(C(colors.Item3));
-        DwmSetWindowAttribute(Handle,20,ref dark,4);DwmSetWindowAttribute(Handle,35,ref caption,4);DwmSetWindowAttribute(Handle,36,ref text,4);
+        var colors=PreviewTheme.Palette(theme,contrast);
+        BackColor=colors.Background;browser.DefaultBackgroundColor=BackColor;
+        int dark=!contrast&&(int)theme is 0 or 2?1:0,caption=contrast?-1:ColorTranslator.ToWin32(colors.Raised),text=contrast?-1:ColorTranslator.ToWin32(colors.Text),border=contrast?-1:ColorTranslator.ToWin32(colors.Border);
+        DwmSetWindowAttribute(Handle,20,ref dark,4);DwmSetWindowAttribute(Handle,35,ref caption,4);DwmSetWindowAttribute(Handle,36,ref text,4);DwmSetWindowAttribute(Handle,34,ref border,4);
     }
     internal void ApplyPosition()
     {
@@ -101,7 +100,7 @@ internal sealed partial class PreviewWindow : Form
         catch { ShowFailure("The local web interface could not start. Close and reopen the preview. Your saved preview data is retained."); }
     }
     internal static bool Allowed(string address) => Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Scheme == "https" && uri.Host == "reflection-timer.invalid"
-        && uri.IsDefaultPort && uri.UserInfo.Length == 0 && uri.AbsolutePath is "/index.html" or "/app.js" or "/app.css" or "/ui.js" or "/settings.js" or "/audio.js" or "/setup.js" or "/low-time.js" or "/compact.html" or "/compact.js" or "/compact.css" or "/layout.js";
+        && uri.IsDefaultPort && uri.UserInfo.Length == 0 && uri.AbsolutePath is "/index.html" or "/app.js" or "/app.css" or "/ui.js" or "/settings.js" or "/audio.js" or "/setup.js" or "/low-time.js" or "/compact.html" or "/compact.js" or "/compact.css" or "/layout.js" or "/themes.css" or "/themes.js";
     private void ShowFailure(string text)
     {
         if (IsDisposed) return;
@@ -146,7 +145,7 @@ internal sealed partial class PreviewWindow : Form
                 if(View!="compact") throw new ArgumentException("Only the compact window can request this size.");
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · accessibility preview 0.4.1";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · accessibility preview 0.4.2";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }

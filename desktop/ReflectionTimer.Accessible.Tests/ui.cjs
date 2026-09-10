@@ -14,7 +14,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     let page = await context.newPage();
     await page.context().route('**/*', async route=>{
       const name=new URL(route.request().url()).pathname.slice(1);
-      if (!['index.html','app.js','app.css','ui.js','settings.js','setup.js','audio.js','low-time.js','layout.js','compact.html','compact.js','compact.css'].includes(name)) return route.abort();
+      if (!['index.html','app.js','app.css','ui.js','settings.js','setup.js','audio.js','low-time.js','layout.js','themes.js','themes.css','compact.html','compact.js','compact.css'].includes(name)) return route.abort();
       await route.fulfill({body:await fs.readFile(path.join(web,name)),contentType:name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html'});
     });
     await page.context().addInitScript(() => {
@@ -34,6 +34,38 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
     await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);
     async function capture(name,target=page){if(process.env.REFLECTION_PREVIEW_SCREENSHOTS){await fs.mkdir(process.env.REFLECTION_PREVIEW_SCREENSHOTS,{recursive:true});await target.locator('body').screenshot({path:path.join(process.env.REFLECTION_PREVIEW_SCREENSHOTS,name+'.png')});}}
+    async function themes(target,state,view){
+      const palettes=[
+        ['Dark','rgb(22, 26, 34)','rgb(35, 42, 54)','rgb(239, 244, 250)'],
+        ['Light','rgb(243, 246, 250)','rgb(255, 255, 255)','rgb(24, 37, 55)'],
+        ['High Contrast','rgb(0, 0, 0)','rgb(0, 0, 0)','rgb(255, 255, 255)'],
+        ['Glamour','rgb(255, 241, 247)','rgb(234, 220, 245)','rgb(74, 25, 52)']
+      ];
+      const field=target.locator(view==='Session-end'?'#reflection-text':'#minutes');
+      await field.focus();const draft=await field.inputValue();
+      for(const [theme,[name,background,surface,ink]] of palettes.entries()){
+        await target.evaluate(state=>window.previewDispatch({type:'state',state}),{...state,theme});
+        check(await target.evaluate(({background,surface,ink,field})=>{
+          const input=document.querySelector(field);
+          return getComputedStyle(document.documentElement).backgroundColor===background&&getComputedStyle(input).backgroundColor===surface&&getComputedStyle(input).color===ink;
+        },{background,surface,ink,field:view==='Session-end'?'#reflection-text':'#minutes'}),view+' uses the original '+name+' palette');
+        check(await field.inputValue()===draft&&await field.evaluate(e=>document.activeElement===e),view+' theme switch retains the focused field and its draft: '+name);
+        if(view==='App'){
+          await target.getByRole('tab',{name:'Settings',exact:true}).click();
+          check(await target.getByRole('img',{name:new RegExp('^'+name+' theme preview')}).count()===1&&await target.locator('#theme-preview').locator('button,input,select,textarea,[tabindex]').count()===0,'Settings exposes a descriptive, non-interactive '+name+' theme sample');
+          await target.locator('#theme-preview').scrollIntoViewIfNeeded();await capture('Theme-'+name+'-Settings',target);
+          await target.getByRole('tab',{name:'Timer',exact:true}).click();await field.focus();
+          if(theme===3){
+            check(await target.locator('#page-title').evaluate(e=>getComputedStyle(e).fontStyle==='italic')&&await target.locator('#page-title .theme-ornament').isVisible(),'Glamour restores the italic heading and decorative bow');
+          }
+        }
+        await capture('Theme-'+name+'-'+view,target);
+      }
+      await target.emulateMedia({forcedColors:'active'});
+      check(await target.locator('.theme-ornament').evaluateAll(elements=>elements.every(e=>getComputedStyle(e).display==='none'))&&await target.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--selection').trim()==='Highlight'),view+' honors Windows contrast and hides decorative ornaments');
+      await target.emulateMedia({forcedColors:'none'});
+      await target.evaluate(state=>window.previewDispatch({type:'state',state}),{...state,theme:0});
+    }
     await capture('App-view');
     check(await page.locator('#quick-schedule-form').evaluate(row=>{const [label,input,button]=[row.querySelector('label'),row.querySelector('input'),row.querySelector('button')].map(e=>e.getBoundingClientRect());return label.right<=input.left&&input.right<=button.left&&Math.abs((label.top+label.bottom-input.top-input.bottom)/2)<2&&Math.abs((button.top+button.bottom-input.top-input.bottom)/2)<2;}),'Start timer at keeps its label, input, and button on one centered horizontal row');
     for(const name of ['Timer','Scheduler','Outbox','Settings','Diagnostics']){await page.getByRole('tab',{name,exact:true}).click();check(await page.getByRole('button',{name:'Save settings',exact:true}).isVisible()===(name==='Settings'),'Save settings visibility matches original on '+name);}
@@ -193,11 +225,24 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     if(process.env.REFLECTION_PREVIEW_SCREENSHOTS){for(const id of ['sound-form-1','sound-form-2','sound-form-3','sound-form-0','startup']){await page.locator('#'+id).screenshot({path:path.join(process.env.REFLECTION_PREVIEW_SCREENSHOTS,id+'.png')});}}
     await page.setViewportSize({width:420,height:750});
     check(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Narrow view reflows without horizontal page overflow');
+    await page.setViewportSize({width:940,height:780});
+    await page.getByRole('combobox',{name:'Color theme',exact:true}).selectOption('3');
+    check(await page.evaluate(()=>window.previewMessages.some(m=>m.action==='displayOption'&&m.data.option==='theme'&&m.data.value===3)),'Choosing a theme reaches the native persistence command');
+    await page.getByRole('tab',{name:'Timer',exact:true}).click();
+    await themes(page,connected,'App');
+    await page.getByRole('tab',{name:'Settings',exact:true}).click();
+    await page.evaluate(()=>window.previewDispatch({type:'shortcuts',shortcuts:[0,1,2,3,4].map(id=>({id,available:id!==2}))}));
+    check(await page.locator('#shortcut-notices p').count()===5&&(await page.locator('#shortcut-notices p').nth(2).textContent()).includes('Unavailable'),'Settings identifies the particular unavailable global shortcut');
+    await page.evaluate(()=>window.previewDispatch({type:'shortcuts',shortcuts:[0,1,2,3,4].map(id=>({id,available:true}))}));
+    check(!(await page.locator('#shortcut-notices').textContent()).includes('Unavailable'),'Recovered shortcut availability updates in Settings');
+    await page.evaluate(()=>window.previewDispatch({type:'focusTimer',selectTimer:true}));
+    check(await page.getByRole('tab',{name:'Timer',exact:true}).getAttribute('aria-selected')==='true'&&await page.locator('#minutes').evaluate(e=>e===document.activeElement),'Double-period action selects Timer and focuses its duration');
     await page.goto('https://reflection-timer.invalid/compact.html');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
     await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);
     check(await page.getByRole('spinbutton').count()===3&&await page.getByRole('checkbox').count()===1&&await page.getByRole('button').count()===8,'Compact exposes only the original fields, Auto-start, App, transport, and caption actions');
     await capture('Compact-view');
+    await themes(page,initial,'Compact');
     const mode=page.getByRole('button',{name:'Shrink to time-only view',exact:true});await mode.click();
     check(await page.getByRole('spinbutton',{name:'Minutes',exact:true}).isHidden(),'Time-only and compact controls cannot appear together');
     await page.getByRole('button',{name:'Expand compact view',exact:true}).focus();await page.keyboard.press('Enter');
@@ -205,6 +250,11 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     const running=structuredClone(initial);running.clock.status='Running';running.timer.endTime=123456789;
     await page.evaluate(state=>window.previewDispatch({type:'state',state}),running);
     check(await page.getByRole('spinbutton',{name:'Minutes',exact:true}).isHidden()&&await page.locator('body').evaluate(e=>e.getBoundingClientRect().width<=100),'Starting automatically restores the original small time-only view');
+    for(const [theme,color] of [[0,'rgb(239, 244, 250)'],[1,'rgb(24, 37, 55)'],[2,'rgb(255, 255, 255)'],[3,'rgb(74, 25, 52)']]){
+      await page.evaluate(state=>window.previewDispatch({type:'state',state}),{...running,theme});
+      check(await page.locator('#read-time').evaluate((e,color)=>getComputedStyle(e).color===color,color)&&await page.locator('body').getAttribute('data-tiny')==='true','Time-only keeps its small layout with theme '+theme);
+      await capture('Theme-'+theme+'-Time-only');
+    }
     await page.mouse.move(400,700);await page.locator('#read-time').focus();
     await capture('Time-only-view');
     const quietBefore=await page.locator('#time-snapshot').textContent();
@@ -219,6 +269,10 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     const reflection=structuredClone(initial);reflection.prompts=[{id:'p1',isCheckIn:false,endedEarly:false,draft:'',earlyEndReason:'',actual:'2 minutes',allotted:'15 minutes',completed:'Today'}];
     await page.evaluate(state=>window.previewDispatch({type:'init',state,promptId:'p1'}),reflection);
     await page.getByRole('textbox',{name:'Your reflection',exact:true}).fill('Unsaved final keystroke');
+    await themes(page,reflection,'Session-end');
+    await page.locator('#later').focus();
+    await page.evaluate(()=>window.previewDispatch({type:'focusReflection'}));
+    check(await page.locator('#reflection-text').evaluate(e=>e===document.activeElement)&&await page.locator('#reflection-text').inputValue()==='Unsaved final keystroke','Check-in shortcut refocuses the existing reflection without replacing its draft');
     await capture('Session-end-view');
     check(await page.getByRole('button',{name:'Save & send',exact:true}).evaluate(e=>e.getBoundingClientRect().bottom<=innerHeight),'Session-end actions fit the original window size');
     await compactWindow.getByRole('button',{name:'Expand compact view',exact:true}).focus();await compactWindow.keyboard.press('Enter');

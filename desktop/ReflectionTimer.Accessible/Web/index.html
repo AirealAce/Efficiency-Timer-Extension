@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Reflection Timer accessibility preview</title>
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="themes.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -69,7 +70,7 @@
     </section>
     <section id="appearance" class="main-only" aria-labelledby="appearance-heading">
       <h2 id="appearance-heading">Display and behavior</h2>
-      <form id="appearance-form"><label>Color theme<select id="theme"><option value="0">Dark</option><option value="1">Light</option><option value="2">High contrast</option><option value="3">Glamour</option></select></label>
+      <form id="appearance-form"><label>Color theme<select id="theme"><option value="0">Dark</option><option value="1">Light</option><option value="2">High Contrast</option><option value="3">Glamour</option></select></label>
         <div id="theme-preview" aria-label="Theme preview"><span>Text</span><button type="button" tabindex="-1" aria-hidden="true" class="primary">Action</button><span class="theme-sample-field">Input</span></div><p id="theme-notice"></p>
         <div class="actions"><button id="guided-setup" class="primary" type="button">Guided setup / another PC</button><button id="setup-guide" type="button">Setup guide</button></div>
         <h2>Display</h2><label class="check"><input id="show-compact" type="checkbox" checked>Show compact floating timer (always on top)</label>
@@ -142,6 +143,6 @@
   <dialog id="entry-dialog" aria-labelledby="entry-title"><h2 id="entry-title" tabindex="-1">Saved reflection</h2><p id="entry-meta"></p><p id="entry-text" class="preserve-lines"></p><form method="dialog"><button>Close details</button></form></dialog>
   <dialog id="delivery-dialog" aria-labelledby="delivery-title"><h2 id="delivery-title" tabindex="-1">Review delivery</h2><p id="delivery-explanation"></p><div class="actions"><button id="delivery-confirm" type="button">Confirm</button><form method="dialog"><button>Cancel</button></form></div></dialog>
   <dialog id="clear-log-dialog" aria-labelledby="clear-log-title"><h2 id="clear-log-title" tabindex="-1">Clear diagnostics?</h2><p>Clear the local diagnostic log? Your timer, schedules, and reflections are unchanged.</p><div class="actions"><button id="clear-log-confirm" type="button">Clear log</button><form method="dialog"><button>Cancel</button></form></div></dialog>
-  <footer class="main-only" hidden><button id="save-settings" type="button">Save settings</button><span class="sr-only">Reflection Timer · accessibility preview 0.4.1</span></footer>
+  <footer class="main-only" hidden><button id="save-settings" type="button">Save settings</button><span class="sr-only">Reflection Timer · accessibility preview 0.4.2</span></footer>
 </body>
 </html>

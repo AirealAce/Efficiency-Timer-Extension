@@ -7,6 +7,7 @@ var passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception(name); passed++; Console.WriteLine("PASS " + name); }
 JsonElement Data(object value) => JsonSerializer.SerializeToElement(value, PreviewSession.Json);
 var now = DateTimeOffset.Now;
+DefaultsThemeShortcutTests.Run(Check);
 var store = new MemoryStore { State = PreviewSession.SampleState(now) };
 var session = new PreviewSession(store, () => now);
 Check(session.Engine.Snapshot.Timer.DurationSeconds == 900 && session.Engine.Snapshot.Timer.LowTime.Enabled, "Fresh timer and low-time defaults");

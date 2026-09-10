@@ -1,4 +1,5 @@
 import {setText} from './ui.js';
+import {mountTheme} from './themes.js';
 import {mountSetup} from './setup.js';
 import {mountAudio} from './audio.js';
 import {mountLowTime} from './low-time.js';
@@ -6,6 +7,7 @@ import {mountLowTime} from './low-time.js';
 export function settingsUI({send, run, bind, view, announce}) {
   const $ = id => document.getElementById(id);
   let settings, volumeRevision=0, volumeSaving=Promise.resolve();
+  const updateTheme=mountTheme(view);
   const setup=mountSetup({send,run});
   const audio=mountAudio({send,run});
   const lowTime=mountLowTime({send,run});
@@ -89,7 +91,7 @@ export function settingsUI({send, run, bind, view, announce}) {
     load() { if(view==='main') run(()=>send('settingsLoad')); },
     state(state) {
       lowTime.state(state);
-      document.documentElement.dataset.theme=String(state.theme??0);
+      updateTheme(state.theme??0);
       if(!dirty.has('appearance-form') && state.showFloatingTimer!==undefined) $('show-compact').checked=state.showFloatingTimer;
       if(!dirty.has('volume-form')&&!dirty.has('settings-volume-form') && state.appVolume!==undefined) setMasterVolume(state.appVolume);
       setText($('delivery-status'),state.connected?'Sheets delivery is enabled. Connected pending entries send automatically.':'Sheets delivery is off. Pending entries stay saved.');
@@ -98,10 +100,10 @@ export function settingsUI({send, run, bind, view, announce}) {
     },
     message(message) {
       if(view!=='main') return;
-      if(message.type==='settings') { settings=message.settings; ['appearance-form','volume-form','connection-form'].forEach(populate);audio.render(settings);lowTime.settings(settings);const theme=['Dark','Light','High Contrast','Glamour'][settings.theme]||'Dark';setText($('theme-notice'),theme+' theme. Saves immediately. Windows contrast themes take priority.');$('theme-preview').setAttribute('aria-label',theme+' theme preview');if(document.activeElement!==$('overlap'))$('overlap').value=settings.overlap; }
+      if(message.type==='settings') { settings=message.settings; ['appearance-form','volume-form','connection-form'].forEach(populate);audio.render(settings);lowTime.settings(settings);const theme=['Dark','Light','High Contrast','Glamour'][settings.theme]||'Dark';setText($('theme-notice'),theme+' theme. Saves immediately. Windows contrast themes take priority.');updateTheme(settings.theme);if(document.activeElement!==$('overlap'))$('overlap').value=settings.overlap; }
       else if(message.type==='shortcuts'){
         const descriptions=['Ctrl+Alt+T · hide or bring forward App.','Ctrl+Alt+` (backtick) · start, resume, or end the current session.','Ctrl+Alt+/ · cycle compact controls → time-only → hidden → controls.','Ctrl+Alt+. (period) · once for Compact input; twice within 0.8 seconds for App input.','Ctrl+Alt+, (comma) · open a check-in without stopping the timer.'];
-        $('shortcut-notices').replaceChildren(...descriptions.map((text,i)=>{const p=document.createElement('p');p.textContent=text+(message.shortcuts[i]?.available===false?' Unavailable: another app may already use this shortcut.':'');return p;}));
+        $('shortcut-notices').replaceChildren(...descriptions.map((text,i)=>{const p=document.createElement('p');p.textContent=text+(message.shortcuts[i]?.available===false?' Unavailable: quit another running timer or app using this shortcut. Retrying automatically.':'');return p;}));
       }
       else if(message.type==='scheduledLow')lowTime.scheduled(message.low);
       else if(message.type==='setupImported') {

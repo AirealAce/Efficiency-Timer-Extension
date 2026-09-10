@@ -1,4 +1,4 @@
-# App view comparison — accessibility preview 0.4.1
+# App view comparison — accessibility preview 0.4.2
 
 Compared against the original 3.12.9 `MainWindow.cs`, `Controls.cs`, `AudioControls.cs`, `SetupWindow.cs`, and `ReflectionWindow.cs`. This is an inventory of corresponding features and the corrections made, not a claim of pixel-identical rendering or completed screen-reader acceptance.
 
@@ -37,10 +37,14 @@ Compared against the original 3.12.9 `MainWindow.cs`, `Controls.cs`, `AudioContr
 
 The Scheduling tab is named Scheduler. All five headings remain visible; the row wraps when needed in narrow windows, with unchanged text size and keyboard navigation. Empty status space collapses outside Settings, while Save settings retains its footer. Outbox and diagnostic history expand into spare page height without rearranging their actions.
 
+## Themes and hotkeys in 0.4.2
+
+All four palettes cover the four original views, including text/row selection and warning colors. Glamour adds the original italic header and decorative bow. The theme sample is passive and descriptively labeled. Native frames and the tray menu follow the selection and Windows contrast. Browser checks verify theme changes preserve focused inputs and drafts, and Windows contrast suppresses decoration. All five original chords register through the shared Windows implementation; conflicts are shown in Settings and retry every 15 seconds. Existing reflection shortcuts return focus to its text without replacing its draft.
+
 ## Verification and remaining boundaries
 
-The 0.4.1 browser suite passes 91 behavior/semantic checks, including all five selected tab captions at 940, 739, 420, and 336 pixels, wrapped-row keyboard navigation, list growth with available height, and the Settings footer. The prior 52 engine/storage/service checks remain unchanged. Browser tests use a synthetic bridge and render the App tabs and audio groups. C# tests cover timer/delivery behavior, isolated storage, startup command construction, and read-only connection testing. Packaged audio is checked separately against source hashes.
+The 0.4.2 browser suite passes 132 behavior/semantic checks, including all five selected tab captions at 940, 739, 420, and 336 pixels, wrapped-row keyboard navigation, list growth with available height, and the Settings footer. The 90 C# checks now include original defaults, decoding all eight bundled MP3s, theme persistence/native palette colors, all five shortcut registrations, matching dispatch, collision recovery, release on exit, and period double-press timing. Browser tests use a synthetic bridge and render the App tabs and audio groups. C# tests cover timer/delivery behavior, isolated storage, startup command construction, and read-only connection testing. Packaged audio is checked separately against source hashes.
 
-This preview keeps its separate profile and local example records. Those records remain local, with a collapsed simulation action separate from the original Outbox toolbar. The production profile and Windows startup entry are never adopted. The guided setup uses file export/display for private setup material; its clipboard commands and production installer are outside this App-page restoration.
+This preview keeps its separate profile and preserves earlier local example records. New profiles start empty using the original defaults. Those records remain local, with a collapsed simulation action separate from the original Outbox toolbar. The production profile and Windows startup entry are never adopted. The guided setup uses file export/display for private setup material; its clipboard commands and production installer are outside this App-page restoration.
 
 Full native file-dialog, Windows sign-in, high-DPI/multiple-monitor, and JAWS/NVDA/Narrator acceptance remain manual checks. The prior legacy suite's native focus/theme failures are documented in PREVIEW-README.md; these are not represented as passing. No GitHub main update or production release is part of this change.

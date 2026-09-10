@@ -17,7 +17,7 @@ internal static class Program
         if (!first) { if(!launch.Tray) MessageBox.Show("This preview profile is already open. Switch to its window using Alt+Tab.", "Accessibility preview"); return; }
         try {
             var store = new EncryptedStore(root);
-            if (!File.Exists(Path.Combine(root, "state.dat"))) store.Save(PreviewSession.SampleState(DateTimeOffset.Now));
+            if (!File.Exists(Path.Combine(root, "state.dat"))) store.Save(new ReflectionTimer.Core.AppState());
             var session=new PreviewSession(store);
             using var app = new PreviewApplication(session, root, store.RecoveryNotice, launch.Tray);
             Application.Run(app);

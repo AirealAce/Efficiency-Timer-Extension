@@ -1,4 +1,4 @@
-Reflection Timer - accessibility preview 0.4.1
+Reflection Timer - accessibility preview 0.4.2
 
 Extract the whole folder, then run ReflectionTimer.AccessibilityPreview.exe.
 This is a separate local preview. The installed app and its settings are unchanged.
@@ -19,10 +19,18 @@ Default profile: %LOCALAPPDATA%\ReflectionTimerAccessibilityPreview\review
 For a fresh profile, launch with: --profile review-04
 Quit an older preview before opening another version with the same profile.
 Global shortcuts can be unavailable while another timer already owns them.
+Settings identifies unavailable chords; they retry automatically every 15 seconds.
 
 Requires Microsoft Edge WebView2 Evergreen Runtime; .NET and audio are included.
-The initial schedules and Outbox records are local examples. Sheets delivery is
-off until explicitly enabled. Local preview entries stay local.
+New profiles start empty with the original defaults. Sheets delivery is off until
+explicitly enabled. Existing local preview entries stay local.
+
+Defaults: 15 minutes; low-time warning on at 15 seconds; Compact enabled;
+Dark theme; App sound 50%; event volume 100%; repeat/cutoff/fade/startup off.
+Default MP3s: original extension sound (end), Pokemon Level Up (success),
+Kirby Out of Health (failure), Pokemon Battle (Trainer) (low time).
+All four themes and the five original Ctrl+Alt shortcuts are available.
+Saved preferences are retained when reopening an existing profile.
 
 Save settings appears only on Settings. Audio includes all four event groups,
 App sound, per-event volume, playback behavior, fade, preview, and Stop all app audio.

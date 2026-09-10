@@ -188,6 +188,7 @@ bridge?.addEventListener('message', event => {
   else if (message.type === 'timeRead') snapshot(message.clock,true);
   else if (message.type === 'announcement') announce(message.message);
   else if (message.type === 'durationDraft'&&view!=='reflection')sharedDuration(message.parts);
+  else if (message.type === 'focusReflection') {if(view==='reflection'&&!document.querySelector('dialog[open]'))$('reflection-text').focus();}
   else if (message.type === 'focusTimer') {if(document.querySelector('dialog[open]'))return;if(message.selectTimer)layout.select('timer');if(document.body.dataset.tab!=='timer')return;const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
   else if (message.type === 'flush') {
     saveDraft().then(()=>send('flushed')).catch(e=>{ error(e.message); send('flushFailed').catch(()=>{}); });
