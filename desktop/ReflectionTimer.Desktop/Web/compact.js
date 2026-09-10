@@ -1,11 +1,13 @@
 import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration} from './ui.js';
 const $=id=>document.getElementById(id),bridge=window.chrome?.webview,requests=new Map();
-let sequence=0,state,dirty=false,tiny=false,revealed=false,lastRunning=false,lastDeadline;
+let sequence=0,state,dirty=false,tiny=false,revealed=false,lastRunning=false,lastDeadline,repeatPending=false;
 function send(action,data={}){return new Promise((resolve,reject)=>{const requestId=String(++sequence);if(!bridge)return reject(new Error('Open the compact timer through Reflection Timer.'));const timeout=setTimeout(()=>{requests.delete(requestId);reject(new Error('The app did not respond.'));},35000);requests.set(requestId,{resolve,reject,timeout});bridge.postMessage({requestId,action,data});});}
 function run(action){setText($('error'),'');Promise.resolve().then(action).catch(e=>setText($('error'),e.message));}
 function bind(id,action){$(id).addEventListener('click',()=>{if($(id).getAttribute('aria-disabled')!=='true')run(action);});}
 function announce(text){setText($('status'),'');setTimeout(()=>setText($('status'),text),50);}
 function duration(){return durationSeconds(['hours','minutes','seconds'].map(id=>$(id).value.trim()));}
+function repeatEnabled(){return $('repeat').getAttribute('aria-pressed')==='true';}
+function setRepeat(enabled){const value=String(Boolean(enabled));if($('repeat').getAttribute('aria-pressed')!==value)$('repeat').setAttribute('aria-pressed',value);}
 function fill(seconds){$('hours').value=Math.floor(seconds/3600);$('minutes').value=Math.floor(seconds/60)%60;$('seconds').value=seconds%60;}
 function sharedDuration(parts){dirty=Array.isArray(parts);if(parts)['hours','minutes','seconds'].forEach((id,i)=>{if($(id).value!==parts[i])$(id).value=parts[i];});else if(state)fill(state.timer.durationSeconds);if(state?.clock.status!=='Running')renderDuration();}
 function renderDuration(){
@@ -21,7 +23,7 @@ function render(next){const previous=state;state=next;document.documentElement.d
   if(!previous||previous.clock.status!==state.clock.status)snapshot(state.clock);
   if(!previous||(!dirty&&state.timer.durationSeconds!==previous.timer.durationSeconds))fill(state.timer.durationSeconds);
   if(running!==lastRunning||lastDeadline!==state.timer.endTime){revealed=false;mode(running);}lastRunning=running;lastDeadline=state.timer.endTime;
-  $('repeat').checked=state.timer.autoRestart;['hours','minutes','seconds'].forEach(id=>$(id).readOnly=running);
+  if(!repeatPending)setRepeat(state.timer.autoRestart);['hours','minutes','seconds'].forEach(id=>$(id).readOnly=running);
   const action=running?'Pause':state.clock.status==='Paused'&&!dirty?'Resume':'Start';$('toggle').setAttribute('aria-label',`${action} timer`);$('toggle').title=`${action} timer`;setText($('toggle').firstElementChild,running?'Ⅱ':'▶');
   $('end').setAttribute('aria-disabled',String(!running));$('reset').setAttribute('aria-disabled',String(!dirty&&state.clock.status==='Ready'));
   setText($('visual-clock'),formatClock(state.clock.seconds));
@@ -44,8 +46,14 @@ bridge?.addEventListener('message',event=>{const m=event.data;if(m.type==='reply
   const changed=()=>{const parts=['hours','minutes','seconds'].map(id=>$(id).value);sharedDuration(parts);run(()=>send('durationDraft',{parts}));$('reset').setAttribute('aria-disabled','false');};
   $(id).addEventListener('input',changed);normalizeEmptyDuration($(id),changed);
 });
-$('timer-editor').addEventListener('submit',event=>{event.preventDefault();run(async()=>{await send('toggle',{seconds:duration(),repeat:$('repeat').checked,lowTime:state.timer.enabled,threshold:state.timer.threshold});dirty=false;fill(state.timer.durationSeconds);});});
-$('repeat').addEventListener('change',()=>run(()=>send('repeat',{enabled:$('repeat').checked})));
+$('timer-editor').addEventListener('submit',event=>{event.preventDefault();run(async()=>{await send('toggle',{seconds:duration(),repeat:repeatEnabled(),lowTime:state.timer.enabled,threshold:state.timer.threshold});dirty=false;fill(state.timer.durationSeconds);});});
+bind('repeat',async()=>{
+  if(repeatPending)return;
+  const enabled=!repeatEnabled();repeatPending=true;setRepeat(enabled);$('repeat').setAttribute('aria-disabled','true');
+  try{await send('repeat',{enabled});}
+  catch(error){setRepeat(state?.timer.autoRestart);throw error;}
+  finally{repeatPending=false;$('repeat').removeAttribute('aria-disabled');}
+});
 bind('read-time',()=>send('readTime'));bind('app',()=>send('main'));bind('end',()=>send('end'));
 bind('reset',async()=>{await send('reset',{seconds:duration()});dirty=false;fill(state.timer.durationSeconds);});
 bind('close',()=>send('close'));bind('shrink',()=>tiny?send('close'):mode(true));bind('expand',()=>tiny?expand():send('main'));

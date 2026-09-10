@@ -87,6 +87,11 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
       }
       await target.emulateMedia({forcedColors:'active'});
       check(await target.locator('.theme-ornament').evaluateAll(elements=>elements.every(e=>getComputedStyle(e).display==='none'))&&await target.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--selection').trim()==='Highlight'),view+' honors Windows contrast and hides decorative ornaments');
+      if(view==='Compact'){
+        await target.evaluate(state=>window.previewDispatch({type:'state',state}),{...state,timer:{...state.timer,autoRestart:true}});
+        check(await target.locator('#repeat').evaluate(e=>e.getAttribute('aria-pressed')==='true'&&getComputedStyle(e).borderStyle==='double'),'Auto-start remains visibly distinct in Windows contrast mode');
+        await capture('Windows-contrast-Compact-auto-start-on',target);
+      }
       await target.emulateMedia({forcedColors:'none'});
       await target.evaluate(state=>window.previewDispatch({type:'state',state}),{...state,theme:0});
     }
@@ -285,8 +290,36 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.goto('https://reflection-timer.invalid/compact.html');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
     await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);
-    check(await page.getByRole('spinbutton').count()===3&&await page.getByRole('checkbox').count()===1&&await page.getByRole('button').count()===8,'Compact exposes only the original fields, Auto-start, App, transport, and caption actions');
+    check(await page.getByRole('spinbutton').count()===3&&await page.getByRole('button').count()===9&&await page.getByRole('button',{name:'Auto-start next session',pressed:false,exact:true}).count()===1,'Compact exposes its original actions with an accessible Auto-start toggle button');
+    check(await page.locator('body').evaluate(body=>{
+      const bounds=body.getBoundingClientRect(),fields=[...document.querySelectorAll('.duration input')],buttons=[...document.querySelector('.footer').children];
+      return bounds.width<=228&&bounds.height<=200&&[...fields,...buttons].every(e=>{const r=e.getBoundingClientRect();return r.left>=bounds.left+3&&r.right<=bounds.right-3&&r.bottom<=bounds.bottom-3;})&&fields.every(e=>{const s=getComputedStyle(e);return parseFloat(s.lineHeight)+parseFloat(s.paddingTop)+parseFloat(s.paddingBottom)+2<=e.getBoundingClientRect().height;});
+    }),'Narrow compact fields and footer fit without taller layout or clipped input text');
+    await page.evaluate(state=>window.previewDispatch({type:'state',state}),{...initial,clock:{seconds:31536000,text:'365 days',status:'Ready'},timer:{...initial.timer,durationSeconds:31536000}});
+    check(await page.locator('#visual-clock').evaluate(e=>{const r=document.createRange();r.selectNodeContents(e);return r.getBoundingClientRect().width<=e.parentElement.clientWidth;}),'Compact still fits the longest supported countdown');
+    await page.evaluate(state=>window.previewDispatch({type:'state',state}),initial);
+    const autoStart=page.getByRole('button',{name:'Auto-start next session',exact:true});
+    const compactStarts=await page.evaluate(()=>window.previewMessages.filter(m=>m.action==='toggle').length);
+    await page.locator('#minutes').fill('12');await autoStart.focus();await page.keyboard.press('Space');
+    await page.waitForFunction(()=>document.querySelector('#repeat').getAttribute('aria-pressed')==='true'&&!document.querySelector('#repeat').hasAttribute('aria-disabled'));
+    check(await page.evaluate(()=>window.previewMessages.findLast(m=>m.action==='repeat').data.enabled===true)&&await autoStart.evaluate(e=>e===document.activeElement)&&await page.locator('#minutes').inputValue()==='12','Space enables Auto-start while retaining focus and the edited duration');
+    await capture('Compact-auto-start-on');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(()=>document.querySelector('#repeat').getAttribute('aria-pressed')==='false'&&!document.querySelector('#repeat').hasAttribute('aria-disabled'));
+    check(await page.evaluate(()=>window.previewMessages.findLast(m=>m.action==='repeat').data.enabled===false&&window.previewMessages.filter(m=>m.action==='toggle').length===0),'Enter turns Auto-start off without starting the timer');
+    for(const enabled of [true,false]){
+      await page.evaluate(state=>window.previewDispatch({type:'state',state}),{...initial,timer:{...initial.timer,autoRestart:enabled}});
+      check(await autoStart.getAttribute('aria-pressed')===String(enabled),'Compact reflects Auto-start changes from another view: '+enabled);
+    }
+    await page.evaluate(()=>{window.compactNormalPost=window.chrome.webview.postMessage;window.chrome.webview.postMessage=message=>{if(message.action!=='repeat')return window.compactNormalPost(message);window.previewMessages.push(message);queueMicrotask(()=>window.previewDispatch({type:'reply',requestId:message.requestId,error:'Auto-start could not be saved.'}));};});
+    await autoStart.click();await page.waitForFunction(()=>document.querySelector('#error').textContent==='Auto-start could not be saved.');
+    check(await autoStart.getAttribute('aria-pressed')==='false'&&await page.locator('#minutes').inputValue()==='12'&&await page.evaluate(()=>window.previewMessages.filter(m=>m.action==='toggle').length)===compactStarts,'Failed Auto-start save restores its previous state and keeps the timer draft');
+    await page.evaluate(()=>window.chrome.webview.postMessage=window.compactNormalPost);
+    await page.locator('#minutes').fill('15');
+    await autoStart.focus();await page.keyboard.press('Space');
+    await page.waitForFunction(()=>document.querySelector('#repeat').getAttribute('aria-pressed')==='true'&&!document.querySelector('#repeat').hasAttribute('aria-disabled'));
     await emptyDurationFields(page,'Compact');
+    check(await page.evaluate(()=>window.previewMessages.findLast(m=>m.action==='toggle').data.repeat===true),'Starting from Compact uses the Auto-start toggle state');
     await capture('Compact-view');
     await themes(page,initial,'Compact');
     const mode=page.getByRole('button',{name:'Shrink to time-only view',exact:true});await mode.click();

@@ -3,7 +3,7 @@
 :root[data-theme="2"]{background:#000;color:#fff;--field:#000;--raised:#000;--border:#fff;--text:#fff;--muted:#fff;--accent:#ff0;--accent-text:#000}
 :root[data-theme="3"]{background:#fff1f7;color:#4a1934;color-scheme:light;--field:#eadcf5;--raised:#f9d6e5;--border:#965172;--text:#4a1934;--muted:#6e3b55;--accent:#a51d5c;--accent-text:#fff}
 *{box-sizing:border-box}
-body{width:320px;margin:0;padding:8px;overflow:hidden}
+body{width:228px;margin:0;padding:8px;overflow:hidden}
 header{height:26px;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;cursor:move}
 h1{font:inherit;margin:0}
 .window-actions{display:flex;gap:1px}
@@ -12,15 +12,17 @@ button{border:1px solid var(--border);border-radius:2px;background:var(--raised)
 button:hover{filter:brightness(1.15)}
 .window-actions button{width:24px;height:24px;font-size:18px;padding:0;line-height:1}
 #close{background:#c42b1c;color:#fff}
-.clock{display:block;font:bold 40px/1.4 Consolas,monospace;background:transparent;color:var(--text);border:0;width:100%;height:56px;padding:0;text-align:center;margin:0 0 4px;cursor:default}
-.duration{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:6px 0 10px}
+.clock{display:block;font:bold 34px/1.4 Consolas,monospace;background:transparent;color:var(--text);border:0;width:100%;height:48px;padding:0;text-align:center;margin:0 0 4px;cursor:default}
+.duration{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:4px 0 8px}
 .duration label{color:var(--muted)}
-.duration input{display:block;width:100%;margin:3px 0 0;height:38px;padding:5px;text-align:center;font-size:20px;line-height:1.2;color:var(--text);background:var(--field);border:1px solid var(--border);border-radius:0}
-.footer{display:flex;align-items:center;gap:6px;height:34px}
-.check{display:flex;gap:6px;align-items:center;white-space:nowrap;margin-right:auto;min-height:34px}
-input[type=checkbox]{margin:0;accent-color:var(--accent);width:14px;height:14px}
-#app{height:34px;min-width:52px}
-.transport{height:34px;width:34px;flex:none;padding:0;font-size:20px;background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.duration input{display:block;width:100%;margin:3px 0 0;height:32px;padding:4px 3px;text-align:center;font-size:18px;line-height:1.2;color:var(--text);background:var(--field);border:1px solid var(--border);border-radius:0}
+.footer{display:flex;align-items:center;gap:4px;height:34px}
+#repeat,#app{height:34px;width:44px;flex:none;padding:0}
+#repeat{font-size:12px;line-height:13px;font-weight:600;color:var(--muted);background:var(--field)}
+#repeat span span{display:block}
+#repeat[aria-pressed=true]{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:700;box-shadow:inset 0 0 0 1px var(--accent-text)}
+.transport{height:34px;width:36px;flex:none;padding:0;display:grid;place-items:center;font-size:20px;background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.transport svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
 #toggle{font-size:18px}
 button[aria-disabled=true]{opacity:.5;cursor:default}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
@@ -28,4 +30,4 @@ button[aria-disabled=true]{opacity:.5;cursor:default}
 #error:empty{display:none}
 #error{font-size:12px;color:#ff979f;margin:8px 0 0;overflow-wrap:anywhere}
 body[data-tiny=true]{width:var(--tiny-width,96px);padding:4px 8px}body[data-tiny=true] header{position:absolute;right:0;top:0;height:16px;margin:0;z-index:1}body[data-tiny=true] h1,body[data-tiny=true] #timer-editor{display:none}body[data-tiny=true] .window-actions{opacity:0;gap:0}body[data-tiny=true]:hover .window-actions,body[data-tiny=true] .window-actions:focus-within{opacity:1}body[data-tiny=true] .window-actions button{width:16px;height:16px;font-size:13px}body[data-tiny=true] .clock{font-size:24px;line-height:32px;height:32px;margin:0;cursor:move}body[data-tiny=true] #error:not(:empty){position:relative;background:var(--raised)}
-@media(forced-colors:active){:root{background:Canvas;color:CanvasText;--field:Canvas;--raised:ButtonFace;--border:ButtonText;--text:CanvasText;--muted:CanvasText;--accent:Highlight;--accent-text:HighlightText}button[aria-disabled=true]{opacity:1;color:GrayText}}
+@media(forced-colors:active){:root{background:Canvas;color:CanvasText;--field:Canvas;--raised:ButtonFace;--border:ButtonText;--text:CanvasText;--muted:CanvasText;--accent:Highlight;--accent-text:HighlightText}button[aria-disabled=true]{opacity:1;color:GrayText}#repeat[aria-pressed=true]{border:3px double Highlight;box-shadow:none}}
