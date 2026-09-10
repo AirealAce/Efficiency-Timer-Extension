@@ -12,8 +12,16 @@ diagnostics.dat*
 reflection-timer-diagnostics*.json
 private-setup*
 
-# Personal soundtrack recordings stay local; public sounds are synthesized.
+# Only the approved bundled clips are tracked; custom MP3s stay local.
 *.mp3
+!/popup.mp3
+!/desktop/Sounds/pokemon-obtained-item.mp3
+!/desktop/Sounds/pokemon-level-up.mp3
+!/desktop/Sounds/pokemon-healed.mp3
+!/desktop/Sounds/pokemon-key-item.mp3
+!/desktop/Sounds/pokemon-battle-trainer.mp3
+!/desktop/Sounds/pokemon-battle-champion.mp3
+!/desktop/Sounds/kirby-out-of-health.mp3
 
 # Dependencies
 node_modules/

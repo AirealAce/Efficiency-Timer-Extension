@@ -1,21 +1,22 @@
-# Personal soundtrack support
+# Bundled audio
 
-Public desktop downloads use original synthesized notification tones. Game soundtrack recordings are not included. Downloading a recording or paying for download access does not establish permission to redistribute it in this repository or a release.
+The repository and Windows release include the eight recordings below. The project maintainer confirmed redistribution permission on 2026-09-09. Credits and a notice that these assets are separate from software-library licenses are included in [AUDIO-NOTICES.txt](AUDIO-NOTICES.txt).
 
-Your existing local recordings and sound selections remain supported. Local developer builds copy MP3 files already present in this folder; public packaging excludes them. The installer preserves MP3s already present in an existing installation. You can also use **Choose MP3** in Audio settings to select your own local file.
+| File | Track | Default use |
+| --- | --- | --- |
+| pokemon-obtained-item.mp3 | Obtained an Item — Pokémon | Optional library selection |
+| pokemon-level-up.mp3 | Level Up — Pokémon | Success |
+| pokemon-healed.mp3 | Pokémon Healed | Optional library selection |
+| pokemon-key-item.mp3 | Obtained a Key Item — Pokémon | Optional library selection |
+| pokemon-battle-trainer.mp3 | Battle (Trainer) — Pokémon | Low on time |
+| pokemon-battle-champion.mp3 | Battle (Champion) — Pokémon | Optional library selection |
+| kirby-out-of-health.mp3 | Out of Health — Kirby | Failure |
+| ../../popup.mp3 | Original extension sound | Session end |
 
-The app recognizes these optional local filenames:
+[sources.json](sources.json) records provenance, repository paths, exact file sizes and SHA-256 hashes. Public packaging includes only these clips, validates the hashes and decodes all eight recordings. Other MP3s remain ignored by Git and are never included through a wildcard.
 
-| Filename | Optional local track |
-| --- | --- |
-| pokemon-obtained-item.mp3 | Obtained an Item |
-| pokemon-level-up.mp3 | Level Up |
-| pokemon-healed.mp3 | Pokemon Healed |
-| pokemon-key-item.mp3 | Obtained a Key Item |
-| pokemon-battle-trainer.mp3 | Battle (Trainer) |
-| pokemon-battle-champion.mp3 | Battle (Champion) |
-| kirby-out-of-health.mp3 | Out of Health |
+Fresh installations select these defaults automatically, without downloading audio at runtime. Existing user selections remain in effect. Users can choose any library track, select their own local MP3, or select **None**. If a default file is missing, the desktop falls back to its original synthesized tone.
 
-When these files exist locally, the established defaults remain Level Up for Success, Out of Health for Failure, Battle (Trainer) for Low on time, and `popup.mp3` for Session end. Otherwise Default uses a synthesized tone. The app never downloads recordings at runtime.
+The installer retains extra user MP3s and backs up the previous installation. Bundled filenames are updated from the verified package; old copies remain in that backup. Custom files outside the installation are not modified.
 
-The repository's `notification.wav` is an original synthesized chime for the Chrome extension, reproducible with `node scripts/generate-notification.cjs`. The desktop generates its tones directly in `BuiltInTone.cs`.
+The Chrome extension remains disabled for desktop users. Its separate `notification.wav` is an original synthesized chime, reproducible with `node scripts/generate-notification.cjs`.

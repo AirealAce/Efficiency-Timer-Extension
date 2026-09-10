@@ -38,13 +38,18 @@ if ($LASTEXITCODE -ne 0) { throw 'Clean public build failed; no ZIP produced.' }
 if ($LASTEXITCODE -ne 0) { throw 'Self-contained publish failed; no ZIP produced.' }
 
 $files = @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse)
-$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs')
+$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs', '.mp3')
 foreach ($file in $files) {
     if ($file.Extension.ToLowerInvariant() -notin $allowedExtensions -or $file.Name -match '^state\.|^diagnostics\.|^\.env|\.pdb$') {
         throw "Unexpected public package file: $($file.Name). No ZIP produced."
     }
 }
-# Public downloads use original synthesized tones. User audio and state are never copied. Check text and
+# Accept only catalogued, byte-for-byte verified recordings, never additional user audio.
+& $Node (Join-Path $repoRoot 'scripts\bundled-audio.cjs') $payloadRoot
+if ($LASTEXITCODE -ne 0) { throw 'Bundled audio verification failed; no ZIP produced.' }
+& $DotNet run --project (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ReflectionTimer.Tests.csproj') -c Release --no-build -- --verify-bundled-audio $payloadRoot
+if ($LASTEXITCODE -ne 0) { throw 'Packaged audio/default tests failed; no ZIP produced.' }
+# User audio and state are never copied. Check text and
 # managed binaries for personalized config as a second safety net (UTF-8/UTF-16).
 $privacyPatterns = @('https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]{20,}', 'https://script\.google\.com/macros/s/[A-Za-z0-9_-]{20,}/exec',
     '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----', '\bgh[pousr]_[A-Za-z0-9]{30,}\b', '\bgithub_pat_[A-Za-z0-9_]{40,}\b', '\bAIza[A-Za-z0-9_-]{35}\b')
@@ -61,7 +66,7 @@ foreach ($file in $files) {
         }
     }
 }
-foreach ($required in @('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt')) {
+foreach ($required in @('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt', 'AUDIO-NOTICES.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot $required))) { throw "Required self-contained package file is missing: $required" }
 }
 $manifestEntries = @($files | Sort-Object FullName | ForEach-Object {

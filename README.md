@@ -6,14 +6,14 @@ A focus timer with Google Sheets reflection logging. The new [Windows desktop ve
 
 ## Install the Windows app
 
-1. Open [the latest release](https://github.com/AirealAce/Reflection-Timer/releases/latest) and download **ReflectionTimer-3.12.7-win-x64.zip** under Assets. GitHub's **Code → Download ZIP** and **Source code** downloads are for developers.
+1. Open [the latest release](https://github.com/AirealAce/Reflection-Timer/releases/latest) and download **ReflectionTimer-3.12.8-win-x64.zip** under Assets. GitHub's **Code → Download ZIP** and **Source code** downloads are for developers.
 2. Right-click the ZIP → **Extract All**, then open the extracted folder and run **ReflectionTimer.exe**. The package includes .NET. No coding tools, Chrome extension or administrator account are required. It targets Windows 11 on Intel/AMD 64-bit PCs; other platforms are not verified.
 3. On the first screen, **Install on this PC** optionally creates Desktop/Start menu shortcuts. Close the portable copy using **Quit desktop app**, then open the installed shortcut.
 4. Follow **Guided setup** to connect **your own** Google spreadsheet. Allow about 5–10 minutes for the one-time Google Apps Script authorization and deployment. The included **START-HERE.html** walks through each step. Managed Google accounts may restrict web-app deployment.
 
 The timer can run while setup is unfinished and reflections can remain saved locally; Google Sheets delivery requires completing the connection. Each person creates their own private token. Never send other users your private setup code or personalized script.
 
-Fresh installations start at **15 minutes**, with the **compact view at bottom left**, **reflection popups at bottom right**, and **Low on time audio enabled at 15 seconds**. The public desktop download uses original synthesized sounds. You can select your own local MP3s in Audio settings. Upgrades preserve saved preferences and installed personal audio.
+Fresh installations start at **15 minutes**, with the **compact view at bottom left**, **reflection popups at bottom right**, and **Low on time audio enabled at 15 seconds**. The desktop download includes eight bundled MP3s: defaults are Level Up for Success, Out of Health for Failure, Battle (Trainer) for Low on time, and the original extension sound for Session end. You can select your own local MP3s in Audio settings. Upgrades preserve saved preferences and installed personal audio.
 
 **Upgrading:** quit the old app from its tray menu, extract the new package, and use **Install on this PC**. Your existing Google connection, drafts and settings remain in place. Disable the Chrome timer extension manually if you switch to desktop.
 

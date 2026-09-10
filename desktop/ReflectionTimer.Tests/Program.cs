@@ -18,6 +18,15 @@ internal static partial class Program
             _ => AppColorTheme.Dark
         };
         AppTheme.Initialize(() => smokeTheme);
+        if (args is ["--verify-bundled-audio", var audioDirectory]) {
+            TestBundledAudio(Path.GetFullPath(audioDirectory));
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
+        if (args is ["--audio-regression"]) {
+            TestBundledAudio(AppContext.BaseDirectory); TestLowTime();
+            Task.Run(TestAlertSounds).GetAwaiter().GetResult(); Task.Run(TestAudioPolicies).GetAwaiter().GetResult();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
         if (args is ["--window-actions-preview", var windowPreviewDirectory]) {
             RenderWindowActionsPreview(windowPreviewDirectory); return 0;
         }

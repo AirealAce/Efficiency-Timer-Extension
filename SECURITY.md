@@ -12,6 +12,6 @@ If a token is exposed, disable the deployment or replace `REFLECTION_API_TOKEN` 
 
 For security reports, use GitHub's private vulnerability reporting option on the repository Security page when available. If unavailable, open an issue asking for a private reporting channel without including exploit details, credentials or personal data. Ordinary issues can include reproduction steps, app version and a reviewed diagnostic export.
 
-Public desktop packages use original synthesized tones and contain no soundtrack recordings. Local audio selections are preserved on upgrade. Download access to a third-party recording does not establish permission to redistribute it with an app.
+Public desktop packages include only the eight MP3s listed and hashed in `desktop/Sounds/sources.json`, with redistribution permission confirmed by the project maintainer. Packaging rejects additional or changed audio files, scans for private data, and includes `AUDIO-NOTICES.txt`. Custom audio selections remain local and are preserved on upgrade; the app never uploads audio paths or recordings. Built-in tones remain available as a fallback when a default file is missing.
 
 Keyboard controls and accessible names exist, but full JAWS compatibility has not been verified. Do not describe this release as fully JAWS accessible.

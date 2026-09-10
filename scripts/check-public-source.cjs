@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const {approvedTracks, validateBundledAudio} = require('./bundled-audio.cjs');
 const root = path.join(__dirname, '..');
 const files = execFileSync('git', ['ls-files', '-z'], {cwd:root}).toString().split('\0').filter(Boolean);
 const rules = [
@@ -13,11 +14,13 @@ const rules = [
   ['personal receiver URL', /https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{40,}/],
   ['private build path', /[A-Z]:\\Users\\[A-Za-z0-9._-]+\\/i]
 ];
-const findings = [];
+const approvedAudio = new Set(approvedTracks().map(track => track.repositoryPath));
+const findings = validateBundledAudio();
 for (const file of files) {
-  if (/(?:^|\/)(?:\.env(?:\..+)?|state\.dat.*|diagnostics\.dat.*|credentials.*\.json|private-setup.*)$|\.(?:mp3|pem|key|pdb)$/i.test(file) && !file.endsWith('.env.example'))
-    findings.push({file, problem:'private or unlicensed package input'});
-  if (/\.(?:png|webp|ico|gif|jpe?g|wav|mp3)$/i.test(file)) continue;
+  if (/(?:^|\/)(?:\.env(?:\..+)?|state\.dat.*|diagnostics\.dat.*|credentials.*\.json|private-setup.*)$|\.(?:pem|key|pdb)$/i.test(file) && !file.endsWith('.env.example'))
+    findings.push({file, problem:'private package input'});
+  if (/\.mp3$/i.test(file) && !approvedAudio.has(file)) findings.push({file, problem:'unapproved audio input'});
+  if (/\.(?:png|webp|ico|gif|jpe?g|wav)$/i.test(file)) continue;
   const bytes = fs.readFileSync(path.join(root, file));
   for (const encoding of ['utf8', 'utf16le']) {
     const text = bytes.toString(encoding);
