@@ -14,8 +14,16 @@ const rules = [
   ['personal receiver URL', /https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{40,}/],
   ['private build path', /[A-Z]:\\Users\\[A-Za-z0-9._-]+\\/i]
 ];
-const approvedAudio = new Set(approvedTracks().map(track => track.repositoryPath));
+const tracks = approvedTracks();
+const approvedAudio = new Set(tracks.flatMap(track => [track.repositoryPath, 'inaccessible-version-useless/' + track.repositoryPath]));
+approvedAudio.add('extension-version-useless/popup.mp3');
 const findings = validateBundledAudio();
+for (const track of tracks) {
+  for (const relative of ['inaccessible-version-useless/' + track.repositoryPath, ...(track.file === 'popup.mp3' ? ['extension-version-useless/popup.mp3'] : [])]) {
+    if (!fs.readFileSync(path.join(root, relative)).equals(fs.readFileSync(path.join(root, track.repositoryPath))))
+      findings.push({file:relative, problem:'archived audio differs from reviewed catalog'});
+  }
+}
 for (const file of files) {
   if (/(?:^|\/)(?:\.env(?:\..+)?|state\.dat.*|diagnostics\.dat.*|credentials.*\.json|private-setup.*)$|\.(?:pem|key|pdb)$/i.test(file) && !file.endsWith('.env.example'))
     findings.push({file, problem:'private package input'});

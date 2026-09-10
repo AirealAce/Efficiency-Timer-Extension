@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Reflection Timer</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="themes.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to main content</a>
+  <header class="page-header">
+    <p class="eyebrow">Reflection Timer 4.0.0</p>
+    <h1 id="page-title" tabindex="-1">Reflection Timer</h1>
+    <p class="main-only">Your timer, saved reflections, and Google Sheets connection are kept on this device.</p>
+    <nav aria-label="Page sections" class="main-only"><a href="#timer">Timer</a><a href="#pending">Reflections</a><a href="#schedules">Scheduler</a><a href="#outbox">Outbox</a><a href="#appearance">Display and behavior</a><a href="#audio">Audio</a><a href="#connection">Connection setup</a><a href="#diagnostics">Diagnostics</a><a href="#review">Review guide</a></nav>
+  </header>
+  <div class="messages"><p id="status" role="status" aria-atomic="true"></p><p id="error" role="alert" aria-atomic="true"></p></div>
+  <main id="main" tabindex="-1">
+    <section id="timer" class="timer-view" aria-labelledby="timer-heading">
+      <h2 id="timer-heading">Focus timer</h2>
+      <p id="timer-state">Ready</p>
+      <div id="visual-clock" class="clock" aria-hidden="true">15:00</div>
+      <p id="time-snapshot">Time checked: 15 minutes remaining. Ready.</p>
+      <p class="hint">The visual countdown stays quiet. Read the current time whenever you need it.</p>
+      <div class="actions"><button id="read-time" type="button">Read remaining time</button><button id="compact-mode" class="compact-only" type="button" aria-expanded="true" aria-controls="timer-editor">Time-only view</button></div>
+      <form id="timer-editor" novalidate>
+        <fieldset><legend>Session duration</legend><div class="duration">
+          <label>Hours<input id="hours" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" maxlength="6" value="0" aria-describedby="duration-help"></label>
+          <label>Minutes<input id="minutes" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" maxlength="8" value="15" aria-describedby="duration-help"></label>
+          <label>Seconds<input id="seconds" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" maxlength="10" value="0" aria-describedby="duration-help"></label>
+        </div><p id="duration-help" class="hint">Whole numbers. Pause to change the duration. Extra seconds and minutes carry into the next unit.</p></fieldset>
+        <div class="options"><label class="check"><input id="repeat" type="checkbox">Auto-start next session</label><label class="check"><input id="low-time" type="checkbox" checked>Low-time warning</label><label>Warn with this many seconds remaining<input id="threshold" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" value="15"></label></div>
+        <div class="actions"><button id="toggle" class="primary" type="submit">Start timer</button><button id="reset" type="button">Reset timer</button><button id="end" type="button" aria-disabled="true">End early and reflect</button></div>
+      </form>
+      <form id="cutoff-form" class="main-only"><div class="option-row"><label class="check"><input id="cutoff-enabled" type="checkbox">Disable auto-start at</label><label><span class="sr-only">Auto-start cutoff date and time</span><input id="cutoff" type="datetime-local" aria-describedby="cutoff-help" disabled></label></div><p id="cutoff-help">Local date/time · MM/DD/YYYY hh:mm AM/PM. The current session still finishes.</p><button type="submit" hidden>Save auto-start cutoff</button></form>
+      <div class="actions"><button id="check-in" type="button" aria-disabled="true">Check in</button><button id="open-compact" class="main-only" type="button">Open compact timer</button><button id="open-main" class="compact-only" type="button">Open main window</button><button id="close-compact" class="compact-only" type="button">Close compact window</button></div>
+    </section>
+    <section id="pending" class="main-only" aria-labelledby="pending-heading">
+      <h2 id="pending-heading">Pending reflections</h2><p id="pending-count">No pending reflections.</p>
+      <p>When a session finishes, its reflection waits here. It will not take focus away from your current work.</p>
+      <ul id="pending-list"></ul><button id="practice" type="button">Open a practice reflection</button>
+    </section>
+    <section id="schedules" class="main-only" aria-labelledby="schedule-heading">
+      <h2 id="schedule-heading">Session scheduling</h2>
+      <p>Each appointment keeps its own duration, repeat, cutoff and audio options. Choose how a due appointment handles a running or paused session. After downtime, only the latest newly missed appointment is kept.</p>
+      <label>When a scheduled session overlaps<select id="overlap"><option value="0">End current with a reflection, then start scheduled</option><option value="1">Ask me what to do</option><option value="2" selected>Wait until the current session ends</option></select></label>
+      <div class="table-scroll" role="region" aria-label="Scheduled sessions table" tabindex="0"><table>
+        <caption>Scheduled sessions</caption><thead><tr><th scope="col">Start time</th><th scope="col">Duration</th><th scope="col">Auto-start</th><th scope="col">Auto-start cutoff</th><th scope="col">Sound</th><th scope="col">Low on time</th><th scope="col">Status</th></tr></thead><tbody id="schedule-rows"></tbody>
+      </table></div><p id="schedule-empty" hidden>No sessions scheduled.</p>
+      <div class="actions"><button id="edit-schedule" type="button">Edit selected</button><button id="remove-schedule" type="button">Remove selected</button><button id="import-schedules" type="button">Import extension schedules…</button></div>
+      <div id="schedule-decision" hidden><p>This scheduled session needs a choice.</p><div class="actions"><button id="schedule-start-now" type="button">Start now</button><button id="schedule-wait" type="button">Wait</button><button id="schedule-skip" type="button">Skip</button></div></div>
+      <form id="schedule-form" novalidate><fieldset><legend id="schedule-legend">Add a scheduled session</legend>
+        <label>Start date and time (your local time zone)<input id="schedule-start" type="datetime-local" required aria-describedby="schedule-help"></label><p id="schedule-help" class="hint">Use your local date and time.</p>
+        <div class="duration"><label>Hours<input id="schedule-hours" type="number" min="0" step="1" value="0"></label><label>Minutes<input id="schedule-minutes" type="number" min="0" step="1" value="15"></label><label>Seconds<input id="schedule-seconds" type="number" min="0" step="1" value="0"></label></div>
+        <label class="check"><input id="schedule-repeat" type="checkbox">Auto-start next session</label>
+        <div class="option-row"><label class="check"><input id="schedule-cutoff-enabled" type="checkbox">Disable auto-start at</label><label><span class="sr-only">Scheduled auto-start cutoff date and time</span><input id="schedule-cutoff" type="datetime-local" disabled></label></div>
+        <label class="check"><input id="schedule-low" type="checkbox" checked>Low-time warning for this schedule</label>
+        <label class="volume-control"><span id="schedule-volume-caption">App sound (50%)</span><input id="schedule-volume" aria-label="Scheduled app sound volume" type="range" min="0" max="100" value="50"></label>
+      </fieldset><div class="actions"><button id="schedule-save" type="submit">Add session</button><button id="schedule-cancel" type="button">Cancel edit / new session</button></div></form><p>Auto-start repeats this duration until its optional cutoff; it does not move the next appointment earlier. Cutoffs must follow the scheduled start. Pausing, resetting, or reaching a cutoff does not remove future appointments.</p>
+    </section>
+    <section id="outbox" class="main-only" aria-labelledby="outbox-heading">
+      <h2 id="outbox-heading">Outbox</h2><p>Reflections save locally first. With the updated receiver, temporary failures retry automatically using the same entry ID, with increasing delays up to five minutes. Partial writes, legacy uploads and changed receivers still need review. After eight attempts, automatic retries stop.</p><p id="delivery-status" class="sr-only">Sheets delivery is off.</p>
+
+      <div class="table-scroll" role="region" aria-label="Outbox table" tabindex="0"><table><caption>Saved reflections and delivery</caption><thead><tr><th scope="col">Saved locally</th><th scope="col">Destination</th><th scope="col">Status</th><th scope="col">Attempts</th></tr></thead><tbody id="outbox-rows"></tbody></table></div>
+      <p id="outbox-empty" hidden>No local entries.</p><div id="outbox-detail" role="region" aria-label="Selected reflection" tabindex="0" class="preserve-lines"></div>
+      <div class="actions"><button id="send-pending" class="primary" type="button">Send pending now</button><button id="retry-selected" type="button">Retry selected…</button><button id="mark-selected" type="button">Already in Sheet</button><button id="open-sheet" type="button">Open Google Sheet</button></div><details id="local-preview-actions" hidden><summary>Local preview entry</summary><p>This entry stays local. Simulating delivery makes no request.</p><button id="simulate-selected" type="button">Simulate success</button></details>
+    </section>
+    <section id="appearance" class="main-only" aria-labelledby="appearance-heading">
+      <h2 id="appearance-heading">Display and behavior</h2>
+      <form id="appearance-form"><label>Color theme<select id="theme"><option value="0">Dark</option><option value="1">Light</option><option value="2">High Contrast</option><option value="3">Glamour</option></select></label>
+        <div id="theme-preview" aria-label="Theme preview"><span>Text</span><button type="button" tabindex="-1" aria-hidden="true" class="primary">Action</button><span class="theme-sample-field">Input</span></div><p id="theme-notice"></p>
+        <div class="actions"><button id="guided-setup" class="primary" type="button">Guided setup / another PC</button><button id="setup-guide" type="button">Setup guide</button></div>
+        <h2>Display</h2><label class="check"><input id="show-compact" type="checkbox" checked>Show compact floating timer (always on top)</label>
+        <label>Compact timer position<select id="placement"><option value="0">Remember dragged position</option><option value="1">Center</option><option value="2">Top left</option><option value="3">Top right</option><option value="4" selected>Bottom left</option><option value="5">Bottom right</option><option value="6">Top center</option><option value="7">Bottom center</option></select></label>
+        <p>Dragging saves a custom position, including across app and PC restarts. Presets use that screen; if it is disconnected, the timer stays on an available screen. Duration fields are shared with the main timer and editable while stopped or paused.</p><h3>Keyboard shortcuts</h3><div id="shortcut-notices"></div><label>Reflection popup position<select id="popup"><option value="0">Center</option><option value="1">Top left</option><option value="2">Top right</option><option value="3">Bottom left</option><option value="4" selected>Bottom right</option></select></label><p>Saves immediately for regular, scheduled, and test reflections. Uses the screen containing your mouse pointer when the popup opens, leaving space for the taskbar. An already-open reflection stays where it is.</p>
+
+
+        <button type="submit" hidden>Save display and behavior</button>
+      </form>
+    </section>
+    <section id="audio" class="main-only" aria-labelledby="audio-heading">
+      <h2 id="audio-heading">Audio</h2>
+      <form id="volume-form"><label class="volume-control"><span id="app-volume-caption">App sound (50%)</span><input id="app-volume" aria-label="App sound volume" type="range" min="0" max="100" required value="50"></label><button type="submit" hidden>Save app volume</button></form>
+      <p>Disruptive stops other app audio. Assertive lowers other app audio to 25% until it finishes. Polite plays alongside other app audio. The latest Assertive sound takes priority; earlier sounds recover when it finishes. Other apps are unaffected.</p>
+      <label for="default-threshold">Default low-time warning</label><div class="option-row"><input id="default-threshold" form="appearance-form" aria-label="Default low-time threshold in seconds" type="number" min="1" max="31536000" value="15" required><span>seconds remaining</span></div>
+      <p>Save this default with Save settings or Ctrl+Enter. Enter leaves this field.</p><p>A timer/session can follow this default or set its own threshold. Low on time audio is checked by default and can be turned off per session. It plays once per session and never plays a stale warning after the session ends. If a session starts within its threshold, it alerts on its first tick.</p>
+      <form id="settings-volume-form"><label class="volume-control"><span id="settings-volume-caption">App sound (50%)</span><input id="settings-volume" type="range" min="0" max="100" value="50" aria-label="Settings app sound volume"></label></form>
+      <p>App sound controls all app audio and matches the Timer slider. Each audio volume below scales this level.</p>
+      <form id="sound-form"><label>Sound event<select id="sound-kind"><option value="0">Session end</option><option value="1">Success</option><option value="2">Failure</option><option value="3">Low time</option></select></label>
+        <p id="sound-default"></p><label>Track<select id="sound-track" aria-describedby="sound-default"></select></label>
+        <label>Playback behavior<select id="sound-behavior"><option value="0">Disruptive</option><option value="1">Assertive</option><option value="2">Polite</option></select></label>
+        <label class="volume-control"><span id="sound-volume-caption">Volume (100%)</span><input id="sound-volume" aria-label="Audio volume" type="range" min="0" max="100" value="100" required></label>
+        <div class="option-row"><label class="check"><input id="sound-fade" type="checkbox">Fade out after</label><input id="sound-fade-seconds" aria-label="Fade out after seconds" type="number" min="1" max="31536000" value="10" required disabled><span>seconds, then fade out over 1 second</span></div>
+        <div class="actions"><button type="submit">Save sound</button><button id="browse-sound" type="button">Choose MP3…</button><button id="preview-sound" type="button">Preview audio</button><button id="stop-sound" type="button">Stop audio</button></div>
+      </form>
+      <button id="stop-all-audio" type="button">Stop all app audio</button><p>Sound selections, volume levels, playback modes, and fade-out settings autosave silently. Volume changes apply to playing audio too. Fade out after applies to each new playback; unchecked sounds play to their normal end. Selecting a sound previews it for up to 5 seconds, including any fade; None is silent. Each new preview replaces the previous one. All audio uses App sound × its audio volume. A scheduled session adopts its saved App sound level when it starts. Custom files stay at their selected location; audio paths are never uploaded.</p>
+    </section>
+    <section id="duplicate-timers" class="main-only"><h2>Avoid duplicate timers</h2><p>Never used the Chrome extension? Check the confirmation below. If you have it, turn it off in chrome://extensions first. This desktop app is independent and does not read Chrome profiles or browsing activity.</p><label class="check"><input id="extension-off" form="connection-form" type="checkbox">The Chrome timer extension is off, or I never installed it</label></section>
+    <section id="startup" class="main-only"><h2>Startup &amp; diagnostics</h2><label class="check"><input id="start-at-login" form="appearance-form" type="checkbox">Start in the tray when I sign in to Windows</label><p class="preview-note">Reflection Timer starts in the tray using your saved settings.</p><label class="check"><input id="logging" form="appearance-form" type="checkbox" checked>Record local diagnostic events</label><h2>Save settings</h2><p>Ctrl+Enter or the bottom-right Save settings button saves your settings from anywhere on this page.</p><p>The API token, reflections, and drafts are encrypted for your Windows account in LocalAppData. Connection settings may be saved incomplete; sending waits until they are valid. Windows sign-in startup is optional and off by default.</p></section>
+    <section id="connection" class="main-only" aria-labelledby="connection-heading">
+      <h2 id="connection-heading">Google Sheets connection</h2>
+      <p>Your existing desktop connection is retained when upgrading. You can also use the timer and save reflections before connecting to Google Sheets.</p>
+      <details id="setup-guide-content"><summary>Set up a new Google Sheets receiver</summary><ol>
+        <li>Create or choose your own Google spreadsheet. Enter its URL below.</li>
+        <li>Choose Save private receiver script. A new token is generated if the token field is blank and none is saved.</li>
+        <li>In your spreadsheet, open Extensions, then Apps Script. Paste the saved script into the editor and save it.</li>
+        <li>Run <code>setupReflectionTimer</code> once and authorize it with the Google account that owns the sheet.</li>
+        <li>Deploy a new web app that executes as you, with access set to Anyone. Copy its deployed URL ending in <code>/exec</code> into the Receiver URL field.</li>
+        <li>Stop the other timer or browser extension from sending to this sheet, select Enable Sheets delivery, then choose Save &amp; test connection. The app verifies the receiver before enabling delivery.</li>
+      </ol><p>The token protects requests to the receiver. Keep your personalized script and setup code private.</p></details>
+      <form id="connection-form" novalidate><label>Google Sheets URL<input id="sheet-url" type="url" autocomplete="off" required></label><label>Apps Script deployment URL (must end in /exec)<input id="receiver-url" type="url" autocomplete="off"></label>
+        <label>Private Reflection API token — Guided setup creates one, or reuse your existing connection<input id="connection-token" type="password" autocomplete="new-password" maxlength="512" aria-describedby="token-help"></label><p id="token-help">Leave blank to keep the saved token. No saved token yet.</p>
+        <label>Destination tab<select id="sheet-mode"><option value="date">Automatically match the date when I save</option><option value="fixed">Always use a fixed tab</option></select></label><label>Fixed tab name<input id="sheet-name" type="text" maxlength="100" value="Reflections"></label>
+        <label class="check"><input id="connection-enabled" type="checkbox">Enable Sheets delivery; other timer senders are stopped</label>
+        <div class="actions"><button type="submit">Save & test connection</button><button id="pause-delivery" type="button">Pause Sheets delivery</button><button id="save-script" type="button">Save private receiver script</button><button id="new-token" type="button">Generate new token in setup draft</button><button id="restore-setup" type="button" aria-disabled="true">Restore saved setup draft</button></div>
+      </form>
+      <details><summary>Transfer a private connection setup code</summary><p>A setup code contains your sheet connection and token. It is not encrypted. Keep it private.</p><form id="import-form"><label>Private setup code<textarea id="setup-import" rows="3" maxlength="16000" autocomplete="off"></textarea></label><button type="submit">Load code into setup form</button></form><button id="export-setup" type="button">Show saved setup code</button><div id="setup-export-group" hidden><label>Saved private setup code<textarea id="setup-export" rows="3" readonly></textarea></label><button id="hide-setup" type="button">Hide setup code</button></div></details>
+    </section>
+    <section id="diagnostics" class="main-only" aria-labelledby="diagnostics-heading">
+      <h2 id="diagnostics-heading">Diagnostics</h2><p>Local event history: timer actions, app focus, schedules, prompt actions, upload outcomes, sleep/resume, and issue markers. No reflection text, credentials, URLs, window titles, or activity from other apps is included in exports. Up to 1,200 events / 7 days.</p><p id="diagnostic-summary"></p><pre id="diagnostic-recent" tabindex="0" aria-label="Recent diagnostic events"></pre>
+      <div class="actions"><button id="mark-issue" type="button">Mark issue</button><button id="show-diagnostics" type="button">Refresh</button><button id="export-diagnostics" type="button">Export diagnostic report…</button><button id="clear-diagnostics" type="button">Clear log…</button></div>
+      <details id="diagnostic-result"><summary>Full diagnostic report</summary><h3 tabindex="-1" id="diagnostic-title">Current diagnostic report</h3><pre id="diagnostic-report" class="preserve-lines"></pre></details>
+    </section>
+    <section id="review" class="main-only" aria-labelledby="review-heading">
+      <h2 id="review-heading">Review guide</h2>
+      <ol><li>Enter a duration, leave the input, and read the surrounding text at your own pace.</li><li>Start the timer. Read this page or another app for a minute. The countdown should not interrupt you.</li><li>Use Read remaining time. You should hear the current time once.</li><li>Open the compact timer and try both views using the keyboard.</li><li>Navigate individual Scheduler and Outbox cells using your reader's table commands.</li><li>Write a practice reflection, choose Later, and reopen it to check that the draft is preserved.</li></ol>
+      <p>Settings, audio, connection setup, delivery, and diagnostics use your saved desktop profile. Practice reflections are sent to the test tab when delivery is enabled.</p>
+      <p>App, the floating timer, and session-end prompts are separate windows. Compact and Time-only share one floating window. App opens centered, the floating timer bottom left, and session-end prompts bottom right. Closing App hides it in the tray; choose Quit desktop app to exit.</p>
+      <p>The original Ctrl+Alt shortcuts are available when another running app has not already registered them: T for App, / to shrink or hide the floating timer, . to focus Compact (twice for App), , for a check-in, and ` to end early. You can also open views from the tray icon.</p>
+    </section>
+    <section id="reflection" class="reflection-only" aria-labelledby="reflection-heading">
+      <h2 id="reflection-heading" tabindex="-1">Session reflection</h2><p id="reflection-context"></p>
+      <p id="reflection-help">What went well? What would you change next time? Write up to 5,000 characters. Later keeps your draft for another time.</p>
+      <form id="reflection-form" novalidate><label for="reflection-text">Your reflection</label><textarea id="reflection-text" rows="7" maxlength="5000" aria-describedby="reflection-help"></textarea>
+        <div id="reason-group" hidden><label for="early-reason">Reason for ending early (optional)</label><textarea id="early-reason" rows="2" maxlength="1000"></textarea></div>
+        <p id="reflection-delivery">Saving keeps this entry in the Outbox.</p><p id="draft-status">Draft not yet changed.</p><div class="actions"><button id="skip-reflection" type="button">Skip</button><button id="later" type="button">Later</button><button type="submit" class="primary">Save &amp; send</button></div>
+      </form>
+    </section>
+  </main>
+  <dialog id="entry-dialog" aria-labelledby="entry-title"><h2 id="entry-title" tabindex="-1">Saved reflection</h2><p id="entry-meta"></p><p id="entry-text" class="preserve-lines"></p><form method="dialog"><button>Close details</button></form></dialog>
+  <dialog id="delivery-dialog" aria-labelledby="delivery-title"><h2 id="delivery-title" tabindex="-1">Review delivery</h2><p id="delivery-explanation"></p><div class="actions"><button id="delivery-confirm" type="button">Confirm</button><form method="dialog"><button>Cancel</button></form></div></dialog>
+  <dialog id="clear-log-dialog" aria-labelledby="clear-log-title"><h2 id="clear-log-title" tabindex="-1">Clear diagnostics?</h2><p>Clear the local diagnostic log? Your timer, schedules, and reflections are unchanged.</p><div class="actions"><button id="clear-log-confirm" type="button">Clear log</button><form method="dialog"><button>Cancel</button></form></div></dialog>
+  <footer class="main-only" hidden><button id="save-settings" type="button">Save settings</button><span class="sr-only">Reflection Timer · 4.0.0</span></footer>
+</body>
+</html>

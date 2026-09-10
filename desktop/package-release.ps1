@@ -14,17 +14,16 @@ if ($RuntimeVersion -notmatch '^10\.0\.\d+$') { throw 'Choose a stable .NET 10 r
 & $Node (Join-Path $repoRoot 'scripts\check-public-source.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Public-source privacy scan failed; no package produced.' }
 
-# These setup/install/delivery checks never use live credentials or network services.
-& $DotNet run --project (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ReflectionTimer.Tests.csproj') -c Release -- --onboarding
-if ($LASTEXITCODE -ne 0) { throw 'Onboarding/installation tests failed; no package produced.' }
-& $DotNet run --project (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ReflectionTimer.Tests.csproj') -c Release --no-build -- --sync-safety
-if ($LASTEXITCODE -ne 0) { throw 'Delivery safety tests failed; no package produced.' }
-& $DotNet run --project (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ReflectionTimer.Tests.csproj') -c Release --no-build -- --hotkeys
-if ($LASTEXITCODE -ne 0) { throw 'Global hotkey tests failed; no package produced.' }
+# Engine, upgrade, delivery, browser accessibility, and receiver checks use synthetic data.
+& $DotNet run --project (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ReflectionTimer.Tests.csproj') -c Release
+if ($LASTEXITCODE -ne 0) { throw 'Desktop tests failed; no package produced.' }
+& $Node (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ui.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Browser accessibility tests failed; no package produced.' }
 Push-Location $repoRoot
-try { & $Node --test; if ($LASTEXITCODE -ne 0) { throw 'Receiver/extension tests failed; no package produced.' } }
-finally { Pop-Location }
-
+try {
+    & $Node --test test/apps-script.test.js test/receiver-setup.test.js test/release-assets.test.js
+    if ($LASTEXITCODE -ne 0) { throw 'Receiver/package tests failed; no package produced.' }
+} finally { Pop-Location }
 # Fresh staging prevents a prior private build from leaking into a public release.
 $runRoot = Join-Path $PSScriptRoot ('artifacts\public-' + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 $packageName = "ReflectionTimer-$version-win-x64"
@@ -38,7 +37,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Clean public build failed; no ZIP produced.' }
 if ($LASTEXITCODE -ne 0) { throw 'Self-contained publish failed; no ZIP produced.' }
 
 $files = @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse)
-$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs', '.mp3')
+$allowedExtensions = @('.exe', '.dll', '.json', '.txt', '.html', '.gs', '.mp3', '.js', '.css', '.md', '.xml')
 foreach ($file in $files) {
     if ($file.Extension.ToLowerInvariant() -notin $allowedExtensions -or $file.Name -match '^state\.|^diagnostics\.|^\.env|\.pdb$') {
         throw "Unexpected public package file: $($file.Name). No ZIP produced."
@@ -47,8 +46,6 @@ foreach ($file in $files) {
 # Accept only catalogued, byte-for-byte verified recordings, never additional user audio.
 & $Node (Join-Path $repoRoot 'scripts\bundled-audio.cjs') $payloadRoot
 if ($LASTEXITCODE -ne 0) { throw 'Bundled audio verification failed; no ZIP produced.' }
-& $DotNet run --project (Join-Path $PSScriptRoot 'ReflectionTimer.Tests\ReflectionTimer.Tests.csproj') -c Release --no-build -- --verify-bundled-audio $payloadRoot
-if ($LASTEXITCODE -ne 0) { throw 'Packaged audio/default tests failed; no ZIP produced.' }
 # User audio and state are never copied. Check text and
 # managed binaries for personalized config as a second safety net (UTF-8/UTF-16).
 $privacyPatterns = @('https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]{20,}', 'https://script\.google\.com/macros/s/[A-Za-z0-9_-]{20,}/exec',
@@ -66,7 +63,7 @@ foreach ($file in $files) {
         }
     }
 }
-foreach ($required in @('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt', 'AUDIO-NOTICES.txt')) {
+foreach ($required in @('ReflectionTimer.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll', 'START-HERE.html', 'google-sheets-script.gs', 'THIRD-PARTY-NOTICES.txt', 'AUDIO-NOTICES.txt', 'Web\index.html', 'Web\app.js', 'Web\compact.html', 'Web\themes.css', 'Web\themes.js', 'Microsoft.Web.WebView2.WinForms.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot $required))) { throw "Required self-contained package file is missing: $required" }
 }
 $manifestEntries = @($files | Sort-Object FullName | ForEach-Object {

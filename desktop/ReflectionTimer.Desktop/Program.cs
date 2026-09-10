@@ -1,63 +1,51 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using ReflectionTimer.Core;
+using ReflectionTimer.Desktop;
+using System.Text.Json;
 
-namespace ReflectionTimer.Desktop;
+namespace ReflectionTimer.Accessible;
 
 internal static class Program
 {
     [STAThread]
     private static void Main(string[] args)
     {
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReflectionTimerDesktop");
-        var index = Array.IndexOf(args, "--data-dir");
-        if (index >= 0 && index + 1 < args.Length) directory = Path.GetFullPath(args[index + 1]);
-        var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(directory)))[..16];
-        using var mutex = new Mutex(true, @"Local\ReflectionTimerDesktop-" + suffix, out var first);
-        using var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ReflectionTimerDesktopShow-" + suffix);
-        if (!first) { show.Set(); return; }
-        try
-        {
-            var store = new EncryptedStore(directory);
-            if (args.Contains("--import-connection"))
-            {
-                // Explicit stdin import for a user-provided connection, never Chrome profile access.
-                var connection = JsonSerializer.Deserialize<ConnectionSettings>(Console.In.ReadToEnd(), DataJson.Options) ?? throw new InvalidDataException("No connection supplied.");
-                var error = SheetsClient.Validate(connection);
-                if (error is not null) throw new InvalidDataException(error);
-                var engine = new TimerEngine(store); var saved = engine.Snapshot;
-                engine.SaveSettings(connection, saved.LoggingEnabled, saved.StartAtLogin, saved.ExtensionDisabledConfirmed);
-                return;
-            }
-            if (args.Contains("--check-connection"))
-            {
+        ApplicationConfiguration.Initialize();
+        (string? Profile, bool Tray, bool CheckConnection) launch;
+        try { launch = PreviewStartup.Parse(args); }
+        catch (ArgumentException error) { MessageBox.Show(error.Message, "Reflection Timer"); Environment.ExitCode = 1; return; }
+        var root = PreviewStartup.DirectoryFor(launch.Profile);
+        // Verification must not recover or save another running instance's state.
+        if (launch.CheckConnection) {
+            try {
+                var state = EncryptedStore.Read<AppState>(Path.Combine(root, "state.dat")) ?? throw new InvalidDataException();
                 using var client = new SheetsClient();
-                var reply = client.Ping(store.Load().Connection).GetAwaiter().GetResult();
-                Console.WriteLine(JsonSerializer.Serialize(reply, DataJson.Options));
+                var reply = client.Ping(state.Connection).GetAwaiter().GetResult();
+                Console.WriteLine(JsonSerializer.Serialize(new { reply.Success, reply.ErrorKind, reply.SupportsSafeRetry, reply.SupportsCheckIns }));
                 Environment.ExitCode = reply.Success ? 0 : 1;
-                return;
             }
-            AppTheme.Initialize(() => store.Load().Theme);
-            using var wheelGuard = new ClickToScrollInputs();
-            using var app = new TimerApplication(store, directory, show, enableAudio: true,
-                updateStartup: args.Contains("--no-startup-registration") ? _ => { } : null);
-            if (!args.Contains("--no-global-shortcut")) app.EnableGlobalShortcut();
-            Application.ThreadException += (_, _) => app.ShowError("An unexpected app error occurred. Your last committed state is retained. Export diagnostics if this repeats.");
-            app.OpenUnlessTray(args.Contains("--tray"));
-            if (!args.Contains("--no-setup")) app.OfferInitialSetup();
-            Application.Run(app);
+            catch { Console.Error.WriteLine("Connection check failed. No credentials were printed or settings changed."); Environment.ExitCode = 1; }
+            return;
         }
-        catch (Exception)
-        {
+        using var mutex = new Mutex(true, PreviewStartup.MutexName(launch.Profile), out var first);
+        using var show = new EventWaitHandle(false, EventResetMode.AutoReset, PreviewStartup.ShowEventName(launch.Profile));
+        if (!first) { if (!launch.Tray) show.Set(); return; }
+        try {
+            var store = new EncryptedStore(root);
+            var session = new PreviewSession(store, isolatedProfile: launch.Profile is not null);
+            using var app = new PreviewApplication(session, root, store.RecoveryNotice, launch.Tray, launch.Profile);
+            _ = app.MainForm!.Handle;
+            var showRegistration = ThreadPool.RegisterWaitForSingleObject(show, (_, _) => {
+                try { app.MainForm?.BeginInvoke(() => app.Open("main")); }
+                catch (InvalidOperationException) { /* The window is already closing. */ }
+            }, null, Timeout.Infinite, false);
+            ThreadExceptionEventHandler handler = (_, _) => app.Announce("An unexpected app error occurred. Your last saved state is retained. Export diagnostics if this repeats.");
+            Application.ThreadException += handler;
+            try { Application.Run(app); }
+            finally { showRegistration.Unregister(null); Application.ThreadException -= handler; }
+        }
+        catch {
             Environment.ExitCode = 1;
-            if (args.Contains("--import-connection") || args.Contains("--check-connection"))
-            {
-                Console.Error.WriteLine("Connection command failed. Check the supplied settings and local data access; no credentials were printed.");
-                return;
-            }
-            MessageBox.Show("Reflection Timer could not open its local data. Nothing has been reset or erased. Check disk access and keep the data files for recovery.",
-                "Reflection Timer — unable to start", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("Reflection Timer could not open its local data. Nothing has been reset or erased. Check disk access and keep the data files for recovery.", "Reflection Timer — unable to start", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally { mutex.ReleaseMutex(); }
     }

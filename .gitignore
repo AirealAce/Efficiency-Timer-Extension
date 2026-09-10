@@ -35,6 +35,16 @@ build/
 Thumbs.db
 
 # Desktop build output (local state lives encrypted in LocalAppData, never here)
-desktop/**/bin/
-desktop/**/obj/
-desktop/artifacts/
+**/bin/
+**/obj/
+**/artifacts/
+
+!/extension-version-useless/popup.mp3
+!/inaccessible-version-useless/desktop/Sounds/kirby-out-of-health.mp3
+!/inaccessible-version-useless/desktop/Sounds/pokemon-battle-champion.mp3
+!/inaccessible-version-useless/desktop/Sounds/pokemon-battle-trainer.mp3
+!/inaccessible-version-useless/desktop/Sounds/pokemon-healed.mp3
+!/inaccessible-version-useless/desktop/Sounds/pokemon-key-item.mp3
+!/inaccessible-version-useless/desktop/Sounds/pokemon-level-up.mp3
+!/inaccessible-version-useless/desktop/Sounds/pokemon-obtained-item.mp3
+!/inaccessible-version-useless/popup.mp3

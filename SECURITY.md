@@ -1,6 +1,6 @@
 # Security and privacy
 
-Use the latest Windows desktop package from [GitHub Releases](https://github.com/AirealAce/Reflection-Timer/releases/latest). Packages are unsigned. They include .NET, a SHA-256 checksum and a file manifest; checksums detect corruption and do not establish publisher identity or guarantee safety. No administrator access is required.
+The accessible desktop app is the primary source in this branch. Its local builds are not automatically published to [GitHub Releases](https://github.com/AirealAce/Reflection-Timer/releases/latest); the latest published release may still be the earlier native version. Packages are unsigned. They include .NET, a SHA-256 checksum and a file manifest; checksums detect corruption and do not establish publisher identity or guarantee safety. No administrator access is required.
 
 Each person supplies their own Google spreadsheet, Apps Script deployment and randomly generated token. Fresh installations have no connection credentials. The desktop app sends reflections only to the configured Google Apps Script service, with HTTPS and restricted redirects. It has no analytics or automatic diagnostic uploads. The developer is not added to the user's spreadsheet.
 
@@ -14,4 +14,4 @@ For security reports, use GitHub's private vulnerability reporting option on the
 
 Public desktop packages include only the eight MP3s listed and hashed in `desktop/Sounds/sources.json`, with redistribution permission confirmed by the project maintainer. Packaging rejects additional or changed audio files, scans for private data, and includes `AUDIO-NOTICES.txt`. Custom audio selections remain local and are preserved on upgrade; the app never uploads audio paths or recordings. Built-in tones remain available as a fallback when a default file is missing.
 
-Keyboard controls and accessible names exist, but full JAWS compatibility has not been verified. Do not describe this release as fully JAWS accessible.
+The primary interface uses semantic HTML in WebView2 with labels, headings, tables, keyboard focus and restrained announcements. Automated checks and initial screen-reader feedback support the approach; complete compatibility with every screen reader has not been verified. The older native app and extension are archived in their named folders and are not part of the current app package.

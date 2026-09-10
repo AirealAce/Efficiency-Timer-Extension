@@ -1,0 +1,8 @@
+Reflection Timer 4.0.0
+
+Open ReflectionTimer.exe. Keep the entire application folder together, including Web and the MP3 files.
+Microsoft Edge WebView2 Runtime is required. The self-contained package includes .NET.
+
+Upgrading retains the existing desktop profile, Google Sheets connection and preferences automatically.
+For a new connection, open Settings and Guided setup. Read START-HERE.html for details.
+Close hides App in the tray. Quit desktop app exits. The usual desktop shortcut opens App again.
