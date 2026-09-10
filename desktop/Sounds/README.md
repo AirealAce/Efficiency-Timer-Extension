@@ -4,13 +4,13 @@ The repository and Windows release include the eight recordings below. The proje
 
 | File | Track | Default use |
 | --- | --- | --- |
-| pokemon-obtained-item.mp3 | Obtained an Item — Pokémon | Optional library selection |
-| pokemon-level-up.mp3 | Level Up — Pokémon | Success |
+| pokemon-obtained-item.mp3 | Obtained an Item | Optional library selection |
+| pokemon-level-up.mp3 | Level Up | Success |
 | pokemon-healed.mp3 | Pokémon Healed | Optional library selection |
-| pokemon-key-item.mp3 | Obtained a Key Item — Pokémon | Optional library selection |
-| pokemon-battle-trainer.mp3 | Battle (Trainer) — Pokémon | Low on time |
-| pokemon-battle-champion.mp3 | Battle (Champion) — Pokémon | Optional library selection |
-| kirby-out-of-health.mp3 | Out of Health — Kirby | Failure |
+| pokemon-key-item.mp3 | Obtained a Key Item | Optional library selection |
+| pokemon-battle-trainer.mp3 | Battle (Trainer) | Low on time |
+| pokemon-battle-champion.mp3 | Battle (Champion) | Optional library selection |
+| kirby-out-of-health.mp3 | Out of Health | Failure |
 | ../../popup.mp3 | Original extension sound | Session end |
 
 [sources.json](sources.json) records provenance, repository paths, exact file sizes and SHA-256 hashes. Public packaging includes only these clips, validates the hashes and decodes all eight recordings. Other MP3s remain ignored by Git and are never included through a wildcard.

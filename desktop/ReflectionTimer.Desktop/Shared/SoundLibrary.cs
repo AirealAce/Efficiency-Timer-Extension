@@ -13,10 +13,10 @@ public static class SoundLibrary
         SoundEvent.LowTime => LibrarySound.TrainerBattle, _ => LibrarySound.SessionEnd
     };
     public static string Name(LibrarySound track) => track switch {
-        LibrarySound.SessionEnd => "Original extension sound", LibrarySound.ObtainedItem => "Obtained an Item — Pokémon",
-        LibrarySound.LevelUp => "Level Up — Pokémon", LibrarySound.PokemonHealed => "Pokémon Healed",
-        LibrarySound.KeyItem => "Obtained a Key Item — Pokémon", LibrarySound.TrainerBattle => "Battle (Trainer) — Pokémon",
-        LibrarySound.ChampionBattle => "Battle (Champion) — Pokémon", LibrarySound.OutOfHealth => "Out of Health — Kirby",
+        LibrarySound.SessionEnd => "Original extension sound", LibrarySound.ObtainedItem => "Obtained an Item",
+        LibrarySound.LevelUp => "Level Up", LibrarySound.PokemonHealed => "Pokémon Healed",
+        LibrarySound.KeyItem => "Obtained a Key Item", LibrarySound.TrainerBattle => "Battle (Trainer)",
+        LibrarySound.ChampionBattle => "Battle (Champion)", LibrarySound.OutOfHealth => "Out of Health",
         LibrarySound.None => "None", _ => "Default"
     };
     public static string FileName(LibrarySound track) => track switch {
