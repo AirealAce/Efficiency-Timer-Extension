@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ReflectionTimer.AccessibilityPreview</AssemblyName>
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>../../favicon.ico</ApplicationIcon>
   </PropertyGroup>

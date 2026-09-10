@@ -1,4 +1,4 @@
-# App view comparison — accessibility preview 0.4
+# App view comparison — accessibility preview 0.4.1
 
 Compared against the original 3.12.9 `MainWindow.cs`, `Controls.cs`, `AudioControls.cs`, `SetupWindow.cs`, and `ReflectionWindow.cs`. This is an inventory of corresponding features and the corrections made, not a claim of pixel-identical rendering or completed screen-reader acceptance.
 
@@ -33,9 +33,13 @@ Compared against the original 3.12.9 `MainWindow.cs`, `Controls.cs`, `AudioContr
 | Settings | Save settings button and Ctrl+Enter | Available only on Settings, matching the original. Visibility checked on all five tabs; shortcut checked outside Settings as well. |
 | Diagnostics | Explanation, recording/event/storage summary, recent history, Mark issue, Refresh, Export, Clear log | Present. Summary/history are readable text. Export uses the existing redaction rules; clearing requires the existing confirmation. |
 
+## Tab sizing and space in 0.4.1
+
+The Scheduling tab is named Scheduler. All five headings remain visible; the row wraps when needed in narrow windows, with unchanged text size and keyboard navigation. Empty status space collapses outside Settings, while Save settings retains its footer. Outbox and diagnostic history expand into spare page height without rearranging their actions.
+
 ## Verification and remaining boundaries
 
-52 engine/storage/service checks and 64 browser behavior/semantic checks pass. Browser tests use a synthetic bridge, exercise the restored controls, and render the App tabs and audio groups. C# tests cover timer/delivery behavior, isolated storage, startup command construction, and read-only connection testing. Packaged audio is checked separately against source hashes.
+The 0.4.1 browser suite passes 91 behavior/semantic checks, including all five selected tab captions at 940, 739, 420, and 336 pixels, wrapped-row keyboard navigation, list growth with available height, and the Settings footer. The prior 52 engine/storage/service checks remain unchanged. Browser tests use a synthetic bridge and render the App tabs and audio groups. C# tests cover timer/delivery behavior, isolated storage, startup command construction, and read-only connection testing. Packaged audio is checked separately against source hashes.
 
 This preview keeps its separate profile and local example records. Those records remain local, with a collapsed simulation action separate from the original Outbox toolbar. The production profile and Windows startup entry are never adopted. The guided setup uses file export/display for private setup material; its clipboard commands and production installer are outside this App-page restoration.
 

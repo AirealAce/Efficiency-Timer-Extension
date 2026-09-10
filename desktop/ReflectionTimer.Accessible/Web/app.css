@@ -22,6 +22,23 @@ footer.main-only{height:64px;align-items:center;padding:8px 20px}body[data-tab=s
 #duplicate-timers h2,#startup h2{padding:8px 10px;background:var(--raised)}#cutoff-help{position:static;width:auto;height:auto;overflow:visible;clip-path:none;white-space:normal;color:var(--muted)}
 @media(min-width:800px){.clock{font-size:76px}.page-header h1{font-size:44px}nav[role=tablist]{gap:14px}button{border-radius:3px;min-height:44px}#timer{max-width:750px}#timer-editor .duration{margin-top:6px}}
 @media(max-width:640px){#quick-schedule-form>input{width:100%;max-width:300px}.audio-source-row{gap:8px}.audio-source-row select{max-width:100%}}
-.messages{height:64px;min-height:64px;flex:none}.messages:has(p:empty):not(:has(p:not(:empty))){padding:8px 24px}body[data-tab=settings] .messages{padding-right:190px}footer.main-only{position:absolute;right:0;bottom:0;width:auto;height:64px;padding:8px 20px}#save-settings{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.messages{height:auto;min-height:0;flex:none}.messages:has(p:empty):not(:has(p:not(:empty))){padding:0}body[data-tab=settings] .messages{min-height:64px;padding:8px 190px 8px 24px}footer.main-only{position:absolute;right:0;bottom:0;width:auto;height:64px;padding:8px 20px}#save-settings{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+/* Keep every App tab visible without shrinking its text. Wrap on narrow windows. */
+body[data-view=main] .page-header{flex:none}
+body[data-view=main] nav[role=tablist]{gap:8px;flex-wrap:wrap;overflow:visible;padding:3px 0 5px}
+body[data-view=main] nav[role=tablist] button{flex:0 0 auto;min-width:100px;padding:8px 16px;white-space:nowrap;min-height:40px;font-weight:400}
+body[data-view=main] nav[role=tablist] button[aria-selected=true]{font-weight:400}
+@media(max-width:560px){body[data-view=main] nav[role=tablist]{gap:6px}body[data-view=main] nav[role=tablist] button{min-width:0;padding:8px 12px}}
+/* Let short list pages use spare height while long pages keep ordinary scrolling. */
+#panel-outbox,#panel-diagnostics{min-height:100%;display:flex;flex-direction:column}
+#panel-outbox>#outbox,#panel-diagnostics>#diagnostics{flex:1;display:flex;flex-direction:column;margin-bottom:0}
+#panel-outbox>#outbox>*,#panel-diagnostics>#diagnostics>*{flex-shrink:0}
+#panel-outbox>#outbox>p,#panel-diagnostics>#diagnostics>p{margin:0 0 12px}
+#panel-diagnostics #diagnostic-recent{margin:0 0 18px}
+#panel-diagnostics #diagnostics>.actions{margin:0 0 18px}
+#panel-diagnostics #diagnostics>details{margin:0 0 20px}
+#outbox>.table-scroll{flex:1 0 230px}
+#diagnostic-recent{flex:1 0 280px;height:280px;min-height:280px}
+#panel-diagnostics>details{flex:none;margin:0}
 #guided-dialog{width:min(940px,96vw);height:min(800px,94vh);max-height:94vh;padding:20px}#guided-dialog[open]{display:flex;flex-direction:column}#guided-pages{flex:1;min-height:0;overflow:auto;padding:12px 4px}#guided-dialog [role=tablist]{display:flex;gap:10px;flex-wrap:wrap}#guided-dialog [role=tab][aria-selected=true]{background:var(--accent);color:var(--accent-text)}#guided-dialog>.actions{margin-bottom:0}
 body[data-view=reflection] .messages{height:auto;min-height:0;padding:0 20px!important}

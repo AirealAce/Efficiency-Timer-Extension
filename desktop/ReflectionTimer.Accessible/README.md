@@ -1,4 +1,4 @@
-# Reflection Timer accessibility preview 0.4
+# Reflection Timer accessibility preview 0.4.1
 
 This local preview adds semantic HTML in WebView2 to the existing C# timer, storage, audio, and Sheets services. It retains the original window model and control layout. Development is on `accessibility/webview2-prototype`; production remains 3.12.9. Do not merge into master, update the public repository page, publish a release, or replace an installed copy until reviewed.
 
@@ -6,7 +6,7 @@ This local preview adds semantic HTML in WebView2 to the existing C# timer, stor
 
 | View | Initial position | Behavior |
 | --- | --- | --- |
-| App | Center | Five tabs: Timer, Scheduling session times, Outbox, Settings, Diagnostics. Closing hides it in the tray. |
+| App | Center | Five tabs: Timer, Scheduler, Outbox, Settings, Diagnostics. Closing hides it in the tray. |
 | Compact | Bottom left | Duration, Auto-start, App, reset/start/pause/end, and the original caption actions. Borderless and always on top. |
 | Time-only | Bottom left | Another mode of the same floating window. Starts automatically with a running timer; controls can be expanded again. |
 | Session end | Bottom right | Independent reflection prompt with text, optional early-end reason, Skip, Later, and Save & send. |
@@ -26,6 +26,10 @@ Closing App hides it. Reopen it from the preview tray icon; choose **Quit deskto
 The original Ctrl+Alt shortcuts are registered when available: T for App, slash to shrink/hide floating controls, period to focus Compact (twice for App), comma for a check-in, and backtick to end early. Another running timer can already own those chords. Failures are recorded in diagnostics; they do not replace another app's registration. Tray and App controls remain available.
 
 This build does not access the installed app’s profile or change its startup registration. Its optional Windows sign-in checkbox registers only this preview executable and named preview profile, using a separate registry value; it is off by default. Keep the extracted folder in place if enabling it. No startup registration is changed during installation or ordinary launch.
+
+## Tab sizing and page space in 0.4.1
+
+Scheduler is the shorter tab name. App tabs use content-sized widths and wrap on narrow windows, keeping Diagnostics fully visible without reducing the text size. Empty status space collapses outside Settings; Save settings keeps its reserved footer on Settings. Outbox and diagnostic history use spare page height, and long pages still scroll normally.
 
 ## Restored App pages in 0.4
 
@@ -65,7 +69,7 @@ The host allows only exact packaged resources under its local virtual origin. It
 | Check | Result |
 | --- | --- |
 | Engine, adapter, storage, and service checks | 52 passed |
-| Browser semantics, behavior, and view checks | 64 passed |
+| Browser semantics, behavior, and view checks (0.4.1) | 91 passed |
 | Shared production delivery safety checks | 40 passed |
 | Full legacy suite | 477 passed; 16 native focus/theme failures |
 | Untouched 3.12.9 theme comparison | Same 13 theme failures |

@@ -4,7 +4,7 @@ export function arrangeApp(view) {
   const $=id=>document.getElementById(id);
   if(view!=='main') return {select(){}};
   const nav=document.querySelector('nav'),main=$('main');nav.replaceChildren();nav.setAttribute('role','tablist');nav.setAttribute('aria-label','App views');
-  const definitions=[['timer','Timer'],['schedules','Scheduling session times'],['outbox','Outbox'],['settings','Settings'],['diagnostics','Diagnostics']];
+  const definitions=[['timer','Timer'],['schedules','Scheduler'],['outbox','Outbox'],['settings','Settings'],['diagnostics','Diagnostics']];
   const panels=new Map(),buttons=new Map(),scroll=new Map();let current='timer';
   for(const [id,label] of definitions){const button=document.createElement('button');button.type='button';button.id=`tab-${id}`;button.textContent=label;button.setAttribute('role','tab');button.setAttribute('aria-controls',`panel-${id}`);nav.append(button);buttons.set(id,button);
     const panel=document.createElement('div');panel.id=`panel-${id}`;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);panels.set(id,panel);
@@ -27,7 +27,7 @@ export function arrangeApp(view) {
   editor.after(options);$('repeat').closest('label').after($('cutoff-form'));$('end').hidden=true;$('check-in').classList.add('sr-only');
   const quick=document.createElement('form');quick.id='quick-schedule-form';quick.className='option-row';quick.innerHTML='<label for="quick-start">Start timer at</label><input id="quick-start" type="datetime-local" required><button type="submit">Schedule session</button>';
   const later=new Date(Date.now()+3600000);quick.querySelector('input').value=new Date(later-later.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  editor.after(quick);const help=document.createElement('p');help.textContent='Uses the duration and options on this page. View or cancel it in Scheduling session times.';quick.after(help);
+  editor.after(quick);const help=document.createElement('p');help.textContent='Uses the duration and options on this page. View or cancel it in Scheduler.';quick.after(help);
   options.after($('volume-form'));
   const pending=$('pending');pending.querySelector('h2').classList.add('sr-only');pending.querySelectorAll('p')[1].hidden=true;$('pending-list').hidden=true;
   const buttonsRow=document.createElement('div');buttonsRow.className='actions';buttonsRow.append($('practice'));

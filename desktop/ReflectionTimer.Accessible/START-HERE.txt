@@ -1,4 +1,4 @@
-Reflection Timer - accessibility preview 0.4
+Reflection Timer - accessibility preview 0.4.1
 
 Extract the whole folder, then run ReflectionTimer.AccessibilityPreview.exe.
 This is a separate local preview. The installed app and its settings are unchanged.

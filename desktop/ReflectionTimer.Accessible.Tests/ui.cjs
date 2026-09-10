@@ -36,9 +36,40 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     async function capture(name,target=page){if(process.env.REFLECTION_PREVIEW_SCREENSHOTS){await fs.mkdir(process.env.REFLECTION_PREVIEW_SCREENSHOTS,{recursive:true});await target.locator('body').screenshot({path:path.join(process.env.REFLECTION_PREVIEW_SCREENSHOTS,name+'.png')});}}
     await capture('App-view');
     check(await page.locator('#quick-schedule-form').evaluate(row=>{const [label,input,button]=[row.querySelector('label'),row.querySelector('input'),row.querySelector('button')].map(e=>e.getBoundingClientRect());return label.right<=input.left&&input.right<=button.left&&Math.abs((label.top+label.bottom-input.top-input.bottom)/2)<2&&Math.abs((button.top+button.bottom-input.top-input.bottom)/2)<2;}),'Start timer at keeps its label, input, and button on one centered horizontal row');
-    for(const name of ['Timer','Scheduling session times','Outbox','Settings','Diagnostics']){await page.getByRole('tab',{name,exact:true}).click();check(await page.getByRole('button',{name:'Save settings',exact:true}).isVisible()===(name==='Settings'),'Save settings visibility matches original on '+name);}
+    for(const name of ['Timer','Scheduler','Outbox','Settings','Diagnostics']){await page.getByRole('tab',{name,exact:true}).click();check(await page.getByRole('button',{name:'Save settings',exact:true}).isVisible()===(name==='Settings'),'Save settings visibility matches original on '+name);}
     await page.getByRole('tab',{name:'Timer',exact:true}).click();
-    check(await page.getByRole('tab').allTextContents().then(t=>JSON.stringify(t)===JSON.stringify(['Timer','Scheduling session times','Outbox','Settings','Diagnostics'])),'App preserves the original five tabs');
+    check(await page.getByRole('tab').allTextContents().then(t=>JSON.stringify(t)===JSON.stringify(['Timer','Scheduler','Outbox','Settings','Diagnostics'])),'App exposes the five tabs with the renamed Scheduler');
+    for(const width of [940,739,420,336]){
+      await page.setViewportSize({width,height:642});
+      for(const name of ['Timer','Scheduler','Outbox','Settings','Diagnostics']){
+        await page.getByRole('tab',{name,exact:true}).click();
+        check(await page.locator('nav[role=tablist]').evaluate(nav=>{
+          const bounds=nav.getBoundingClientRect();
+          return nav.scrollWidth<=nav.clientWidth&&[...nav.children].every(button=>{
+            const box=button.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(button);
+            const text=range.getBoundingClientRect();
+            return box.left>=0&&box.right<=innerWidth&&box.top>=bounds.top&&box.bottom<=bounds.bottom&&text.left>box.left&&text.right<box.right&&text.top>=box.top&&text.bottom<=box.bottom;
+          });
+        }),`All tab captions fit at ${width}px with ${name} selected`);
+      }
+      await capture('Diagnostics-'+width);
+    }
+    await page.getByRole('tab',{name:'Timer',exact:true}).focus();await page.keyboard.press('End');
+    check(await page.getByRole('tab',{name:'Diagnostics',exact:true}).evaluate(e=>e===document.activeElement&&e.getAttribute('aria-selected')==='true'),'End reaches and selects Diagnostics on the wrapped tab row');
+    await page.keyboard.press('Home');
+    check(await page.getByRole('tab',{name:'Timer',exact:true}).evaluate(e=>e===document.activeElement&&e.getAttribute('aria-selected')==='true'),'Home returns to Timer on the wrapped tab row');
+    for(const [name,list] of [['Outbox','#outbox .table-scroll'],['Diagnostics','#diagnostic-recent']]){
+      await page.getByRole('tab',{name,exact:true}).click();
+      await page.setViewportSize({width:940,height:900});const before=(await page.locator(list).boundingBox()).height;
+      await page.setViewportSize({width:940,height:1200});const after=(await page.locator(list).boundingBox()).height;
+      check(after-before>=290,name+' list uses spare height when the window grows');
+      check(await page.locator('.messages').evaluate(e=>e.getBoundingClientRect().height===0),name+' does not reserve an empty footer');
+      await capture(name+'-tall');
+    }
+    await page.getByRole('tab',{name:'Settings',exact:true}).click();
+    check(await page.locator('#save-settings').evaluate(e=>{const button=e.getBoundingClientRect(),main=document.querySelector('main').getBoundingClientRect();return button.top>=main.bottom&&button.bottom<=innerHeight;}),'Settings keeps Save settings below the scrolling content');
+    await page.setViewportSize({width:940,height:780});
+    await page.getByRole('tab',{name:'Timer',exact:true}).click();
     check(await page.getByRole('heading',{name:'Reflection Timer',exact:true}).count()===1,'Document exposes its main heading');
     check(await page.getByRole('spinbutton',{name:'Minutes',exact:true}).inputValue()==='15','Duration has a native label');
     await page.getByRole('spinbutton',{name:'Minutes',exact:true}).fill('12');
@@ -58,7 +89,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     await page.evaluate(()=>window.previewDispatch({type:'timeRead',clock:{seconds:780,text:'13 minutes',status:'Running'}}));
     await page.waitForFunction(()=>document.getElementById('status').textContent.includes('13 minutes'));
     check((await page.locator('#status').textContent())==='13 minutes remaining. Running.','Time request provides human-readable status');
-    await page.getByRole('tab',{name:'Scheduling session times',exact:true}).click();
+    await page.getByRole('tab',{name:'Scheduler',exact:true}).click();
     check(await page.getByRole('table',{name:'Scheduled sessions',exact:true}).count()===1 && await page.getByRole('columnheader',{name:'Duration',exact:true}).count()===1,'Schedule has native table and header semantics');
     await page.getByRole('tab',{name:'Outbox',exact:true}).click();
     const success=page.getByRole('radio',{name:'Select entry saved 09/10/2026 10:00 AM'});
@@ -138,7 +169,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     await page.locator('#timer-low-track').selectOption('3');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='lowTime'&&m.data.track===3));
     check(await page.evaluate(()=>{const options=window.previewMessages.findLast(m=>m.action==='lowTime').data;return !options.inherit&&options.threshold===27&&options.track===3;}),'Session low-time changes retain the explicit threshold and sound');
-    await page.getByRole('tab',{name:'Scheduling session times',exact:true}).click();
+    await page.getByRole('tab',{name:'Scheduler',exact:true}).click();
     check(await page.locator('#schedules thead th').allTextContents().then(labels=>JSON.stringify(labels)===JSON.stringify(['Start time','Duration','Auto-start','Auto-start cutoff','Sound','Low on time','Status'])),'Scheduling columns match the original');
     check(await page.locator('#schedules>.actions button').allTextContents().then(labels=>JSON.stringify(labels)===JSON.stringify(['Edit selected','Remove selected','Import extension schedules…']))&&await page.locator('#schedule-rows button').count()===0,'Scheduling actions are below the table and act on the selected entry');
     await page.getByRole('button',{name:'Edit selected',exact:true}).click();
@@ -158,7 +189,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Accessible/Web');
     await page.evaluate(()=>window.previewDispatch({type:'diagnostics',report:{privacy:'Synthetic diagnostic test',events:[]}}));
     check(await page.locator('#diagnostic-summary').textContent().then(text=>text.includes('/1200 events'))&&await page.getByRole('button',{name:'Refresh',exact:true}).isVisible(),'Diagnostics restores its readable event summary, history, and Refresh action');
     await capture('Diagnostics');
-    for(const [tab,name] of [['Scheduling session times','Scheduling'],['Outbox','Outbox'],['Settings','Settings']]){await page.getByRole('tab',{name:tab,exact:true}).click();await page.locator('main').evaluate(e=>e.scrollTop=0);await capture(name);}
+    for(const [tab,name] of [['Scheduler','Scheduler'],['Outbox','Outbox'],['Settings','Settings']]){await page.getByRole('tab',{name:tab,exact:true}).click();await page.locator('main').evaluate(e=>e.scrollTop=0);await capture(name);}
     if(process.env.REFLECTION_PREVIEW_SCREENSHOTS){for(const id of ['sound-form-1','sound-form-2','sound-form-3','sound-form-0','startup']){await page.locator('#'+id).screenshot({path:path.join(process.env.REFLECTION_PREVIEW_SCREENSHOTS,id+'.png')});}}
     await page.setViewportSize({width:420,height:750});
     check(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Narrow view reflows without horizontal page overflow');

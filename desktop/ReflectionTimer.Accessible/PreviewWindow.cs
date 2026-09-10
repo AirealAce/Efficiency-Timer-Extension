@@ -22,7 +22,7 @@ internal sealed partial class PreviewWindow : Form
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · accessibility preview 0.4" : view == "compact" ? "Reflection Timer — Compact view · accessibility preview 0.4" : "Reflection Timer — Session end · accessibility preview 0.4";
+        Text = view == "main" ? "Reflection Timer — App view · accessibility preview 0.4.1" : view == "compact" ? "Reflection Timer — Compact view · accessibility preview 0.4.1" : "Reflection Timer — Session end · accessibility preview 0.4.1";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(368, 284) : new(560, app.Session.Engine.Snapshot.Prompts.Any(p=>p.Id==prompt&&p.EndedEarly)?525:440);
         MinimumSize = view == "main" ? new(420, 400) : view == "compact" ? new(80,32) : new(420,360);
@@ -146,7 +146,7 @@ internal sealed partial class PreviewWindow : Form
                 if(View!="compact") throw new ArgumentException("Only the compact window can request this size.");
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · accessibility preview 0.4";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · accessibility preview 0.4.1";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }
