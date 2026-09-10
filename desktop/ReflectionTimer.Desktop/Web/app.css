@@ -25,6 +25,8 @@ footer.main-only{height:64px;align-items:center;padding:8px 20px}body[data-tab=s
 .messages{height:auto;min-height:0;flex:none}.messages:has(p:empty):not(:has(p:not(:empty))){padding:0}body[data-tab=settings] .messages{min-height:64px;padding:8px 190px 8px 24px}footer.main-only{position:absolute;right:0;bottom:0;width:auto;height:64px;padding:8px 20px}#save-settings{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
 /* Keep every App tab visible without shrinking its text. Wrap on narrow windows. */
 body[data-view=main] .page-header{flex:none}
+/* Keep visually hidden reading text inside the page's scrolling container. */
+main{position:relative}
 body[data-view=main] nav[role=tablist]{gap:8px;flex-wrap:wrap;overflow:visible;padding:3px 0 5px}
 body[data-view=main] nav[role=tablist] button{flex:0 0 auto;min-width:100px;padding:8px 16px;white-space:nowrap;min-height:40px;font-weight:400}
 body[data-view=main] nav[role=tablist] button[aria-selected=true]{font-weight:400}

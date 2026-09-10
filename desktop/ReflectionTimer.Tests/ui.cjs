@@ -124,6 +124,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
             return box.left>=0&&box.right<=innerWidth&&box.top>=bounds.top&&box.bottom<=bounds.bottom&&text.left>box.left&&text.right<box.right&&text.top>=box.top&&text.bottom<=box.bottom;
           });
         }),`All tab captions fit at ${width}px with ${name} selected`);
+        check(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1),`${name} at ${width}px keeps hidden reading text from creating a blank outer scroll area`);
       }
       await capture('Diagnostics-'+width);
     }
