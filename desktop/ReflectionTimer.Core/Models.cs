@@ -57,6 +57,8 @@ public enum AppColorTheme { Dark = 0, Light = 1, HighContrast = 2, Glamour = 3 }
 public enum FloatingTimerPlacement { Custom = 0, Center = 1, TopLeft = 2, TopRight = 3, BottomLeft = 4, BottomRight = 5, TopCenter = 6, BottomCenter = 7 }
 public record OutboxItem
 {
+    // Explicitly local records must never be bound to a receiver or uploaded.
+    public bool LocalOnly { get; init; }
     public Guid Id { get; init; } = Guid.NewGuid();
     public string Message { get; init; } = "";
     public DateTimeOffset SubmittedAt { get; init; }

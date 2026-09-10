@@ -314,7 +314,7 @@ public sealed class TimerEngine
         }
     }
     public void SkipPrompt(Guid id) => Change("prompt.skipped", s => s.Prompts.RemoveAll(x => x.Id == id), id);
-    public void QueueReflection(Guid promptId, string text, string? earlyEndReason = null)
+    public void QueueReflection(Guid promptId, string text, string? earlyEndReason = null, bool localOnly = false)
     {
         text = text.Trim();
         if (text.Length is < 1 or > 5000) throw new ArgumentException("Write a reflection between 1 and 5,000 characters.");
@@ -325,7 +325,7 @@ public sealed class TimerEngine
             var actual = prompt.IsCheckIn && prompt.CheckInSessionId is not null && prompt.CheckInSessionId == s.Timer.SessionId
                 ? ActualSeconds(s.Timer, submittedAt.ToUnixTimeMilliseconds()) : prompt.ActualDurationSeconds;
             s.Outbox.Add(new() {
-                Id = promptId, Message = text, SubmittedAt = submittedAt, DurationSeconds = prompt.DurationSeconds,
+                Id = promptId, Message = text, SubmittedAt = submittedAt, DurationSeconds = prompt.DurationSeconds, LocalOnly = localOnly,
                 ActualDurationSeconds = actual, EndedEarly = prompt.EndedEarly, IsCheckIn = prompt.IsCheckIn,
                 EarlyEndReason = prompt.EndedEarly ? (earlyEndReason ?? prompt.EarlyEndReason).Trim() : "",
                 ReceiverUrl = s.Connection.WebAppUrl,
@@ -341,7 +341,7 @@ public sealed class TimerEngine
     {
         lock (gate)
         {
-            var item = state.Outbox.FirstOrDefault(x => x.Status == DeliveryStatus.Pending && !(x.NextAttemptAt > Now));
+            var item = state.Outbox.FirstOrDefault(x => !x.LocalOnly && x.Status == DeliveryStatus.Pending && !(x.NextAttemptAt > Now));
             if (item is null) return null;
             if ((item.RetryProtected && !supportsSafeRetry) || (item.ReceiverUrl.Length > 0 && !ConnectionSetup.SameReceiver(item.ReceiverUrl, state.Connection.WebAppUrl))) {
                 Change("upload.needsReview", s => s.Outbox = s.Outbox.Select(x => x.Id == item.Id
@@ -426,6 +426,7 @@ public sealed class TimerEngine
     private static bool NeverAttempted(OutboxItem item) => item.Attempts == 0 && !item.RetryProtected && item.Status == DeliveryStatus.Pending;
     private static bool CanUseConnection(OutboxItem item, ConnectionSettings connection)
     {
+        if (item.LocalOnly) return true;
         var sameSheet = ConnectionSetup.SameSpreadsheet(item.SheetUrl, connection.SheetUrl);
         var sameReceiver = ConnectionSetup.SameReceiver(item.ReceiverUrl, connection.WebAppUrl);
         return (sameSheet && sameReceiver) || (NeverAttempted(item)
@@ -452,7 +453,7 @@ public sealed class TimerEngine
     {
         if (SheetsClient.Validate(connection) is not null) return;
         s.Outbox = s.Outbox.Select(x => {
-            if (!NeverAttempted(x) || !CanUseConnection(x, connection)) return x;
+            if (x.LocalOnly || !NeverAttempted(x) || !CanUseConnection(x, connection)) return x;
             var hasSheet = ConnectionSetup.HasSpreadsheet(x.SheetUrl); var hasReceiver = ConnectionSetup.IsReceiverUrl(x.ReceiverUrl);
             if (hasSheet && hasReceiver) return x;
             return x with {

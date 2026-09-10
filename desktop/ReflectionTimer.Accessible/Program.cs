@@ -19,7 +19,8 @@ internal static class Program
         try {
             var store = new EncryptedStore(root);
             if (!File.Exists(Path.Combine(root, "state.dat"))) store.Save(PreviewSession.SampleState(DateTimeOffset.Now));
-            using var app = new PreviewApplication(new PreviewSession(store), root);
+            var session=new PreviewSession(store);
+            using var app = new PreviewApplication(session, root, store.RecoveryNotice);
             Application.Run(app);
         }
         catch {

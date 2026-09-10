@@ -6,15 +6,28 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ReflectionTimer.AccessibilityPreview</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.3.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>../../favicon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../ReflectionTimer.Core/ReflectionTimer.Core.csproj" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" GeneratePathProperty="true" />
+    <PackageReference Include="NAudio" Version="3.0.1" />
+    <PackageReference Include="System.Numerics.Tensors" Version="9.0.0" GeneratePathProperty="true" />
     <Compile Include="../ReflectionTimer.Desktop/Storage.cs" Link="Shared/Storage.cs" />
+    <Compile Include="../ReflectionTimer.Desktop/GlobalShortcut.cs" Link="Shared/GlobalShortcut.cs" />
+    <Compile Include="../ReflectionTimer.Desktop/AlertSoundPlayer.cs;../ReflectionTimer.Desktop/SoundLibrary.cs;../ReflectionTimer.Desktop/BuiltInTone.cs" Link="Shared/%(Filename)%(Extension)" />
+    <Content Include="../../popup.mp3" Link="popup.mp3" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Sounds/pokemon-obtained-item.mp3;../Sounds/pokemon-level-up.mp3;../Sounds/pokemon-key-item.mp3;../Sounds/pokemon-healed.mp3;../Sounds/pokemon-battle-trainer.mp3;../Sounds/pokemon-battle-champion.mp3;../Sounds/kirby-out-of-health.mp3;../Sounds/AUDIO-NOTICES.txt" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="../../google-sheets-script.gs" LogicalName="ReflectionTimer.Receiver.gs" />
+    <Content Include="../THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(PkgSystem_Numerics_Tensors)/THIRD-PARTY-NOTICES.TXT" Link="Tensors-THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(PkgMicrosoft_Web_WebView2)/LICENSE.txt" Link="WebView2-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(PkgMicrosoft_Web_WebView2)/NOTICE.txt" Link="WebView2-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Web/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="START-HERE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="README.md" Link="PREVIEW-README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="RemoveUnusedWpfWebView" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup><Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" /></ItemGroup>

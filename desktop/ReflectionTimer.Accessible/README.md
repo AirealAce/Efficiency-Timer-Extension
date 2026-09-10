@@ -1,76 +1,95 @@
-# Reflection Timer accessibility preview 0.1
+# Reflection Timer accessibility preview 0.3
 
-An isolated WebView2 prototype using the production C# timer engine. It implements the first acceptance checkpoint of the accessibility plan, based on the three findings in the 3.12.9 audit. It is not a replacement for the installed app yet.
+This local preview adds semantic HTML in WebView2 to the existing C# timer, storage, audio, and Sheets services. It retains the original window model and control layout. Development is on `accessibility/webview2-prototype`; production remains 3.12.9. Do not merge into master, update the public repository page, publish a release, or replace an installed copy until reviewed.
 
-## Run the preview
+## The four original views
 
-Extract the entire portable folder and run `ReflectionTimer.AccessibilityPreview.exe`. The portable build includes .NET. It needs the Microsoft Edge WebView2 Evergreen Runtime, normally present on Windows 11. If missing, the preview displays readable installation instructions.
+| View | Initial position | Behavior |
+| --- | --- | --- |
+| App | Center | Five tabs: Timer, Scheduling session times, Outbox, Settings, Diagnostics. Closing hides it in the tray. |
+| Compact | Bottom left | Duration, Auto-start, App, reset/start/pause/end, and the original caption actions. Borderless and always on top. |
+| Time-only | Bottom left | Another mode of the same floating window. Starts automatically with a running timer; controls can be expanded again. |
+| Session end | Bottom right | Independent reflection prompt with text, optional early-end reason, Skip, Later, and Save & send. |
 
-The preview uses a separate encrypted profile under `%LOCALAPPDATA%\ReflectionTimerAccessibilityPreview\review`. It does not read the installed Reflection Timer's profile, register global shortcuts, change startup registration, install itself, or send data to Google Sheets. Optional `--profile review-name` selects another profile under the same dedicated preview root; arbitrary data-directory arguments are not accepted.
+App, the floating timer, and session-end windows can coexist. Only Compact and Time-only are mutually exclusive. Switching between them keeps the bottom-left anchor. Saved placement choices are respected; App opens centered. Moving App does not force it back to center during ordinary updates.
 
-The timer and Scheduling actions use the real engine. Reflection drafts persist, and saving a reflection moves it into the local Outbox. “Simulate success” updates an Outbox row without making a network request. The two initial schedules and two initial Outbox records are examples in this test profile.
+The original four color palettes, flat App tabs, separate audio sections, three duration fields, and centered inline checkboxes are retained. Settings and connection controls belong to App, never Compact. Standard HTML fields and focus indicators support reading and keyboard access; this is not a claim of pixel-identical rendering.
 
-Close the main window to quit the preview. Close the compact window to leave the timer running in the main window. Main-window exit waits for open reflection windows to save their latest drafts. Existing saved timer deadlines and drafts survive reopening.
+## Run and exit
 
-## What to try with your reader
+Extract the entire portable folder and run `ReflectionTimer.AccessibilityPreview.exe`. .NET is included; Microsoft Edge WebView2 Evergreen Runtime must be installed. A startup error explains how to obtain it if missing.
 
-1. Tab to Minutes. Leave the edit field using your reader's normal forms-mode command, then read surrounding text with reading commands. Read headings and paragraphs at your own pace.
-2. Start a short session. Continue reading for at least a minute, first in this app and then another app. The visual countdown should not generate speech or move focus. “Read remaining time” should report current time and state once. The “Time checked” text is explicitly a snapshot, not a silently stale live value.
-3. Open the compact window and use “Time-only view,” “Read remaining time,” and “Show timer controls.” These actions remain available without hovering. This prototype keeps ordinary window chrome and Alt+Tab visibility to make the windows discoverable.
-4. Navigate Scheduling and Outbox with the reader's table commands. Verify the individual cells, column/row headers, and action names. Simulate an Outbox update and check that reading position remains stable.
-5. Open a practice reflection. Read the context, type a draft, choose Later, and reopen it. Then save it to the local Outbox and open its Details dialog. Try Escape and verify return focus.
-6. Try enlarged text, browser zoom, narrow windows, and Windows contrast themes.
+The default preview profile is `%LOCALAPPDATA%\ReflectionTimerAccessibilityPreview\review`. `--profile review-03` selects a separate fresh profile. Names accept only letters, digits, and hyphens. Only one process can use a profile. Earlier preview data can be reopened after quitting the earlier process using that profile.
 
-Record the app, OS, WebView2 runtime, and reader versions, relevant reader settings, exact keys, expected behavior, and observed speech/focus. A useful result distinguishes keyboard focus from the screen reader's reading cursor.
+Closing App hides it. Reopen it from the preview tray icon; choose **Quit desktop app** or **Quit accessibility preview** in the tray to exit. Open reflection drafts are flushed before exit. Closing Compact hides only the floating window. Compact/Time-only do not appear in Alt+Tab, matching the original; App and session-end windows do.
 
-## Current scope
+The original Ctrl+Alt shortcuts are registered when available: T for App, slash to shrink/hide floating controls, period to focus Compact (twice for App), comma for a check-in, and backtick to end early. Another running timer can already own those chords. Failures are recorded in diagnostics; they do not replace another app's registration. Tray and App controls remain available.
 
-Included: main timer; a separate compact/time-only window; on-demand time speech through a status region; one-window announcements for significant events; local reflection/check-in forms; persistent drafts; native HTML tables with stable rows/cells; schedule addition/removal; local Outbox and details; local simulation of a status change.
+This build does not access the installed app's profile or change its startup registration. It does not install itself or start automatically with Windows.
 
-Deferred until the reader checkpoint passes: production audio playback, real Sheets delivery, setup/connection screens, full settings and diagnostics, existing-profile migration, production tray/hotkey integration, and final window presentation. The production project and release metadata remain at 3.12.9.
+## Functions available for review
 
-The host restricts web messages to its packaged local origin and validates command inputs. It blocks other navigation, new windows, downloads, and web permission requests. Connection credentials and custom audio paths are excluded from the view data. The prototype deliberately has no Sheets client.
+- A 15-minute initial timer, compact visibility enabled, and low-time warning enabled at 15 seconds. Duration drafts are shared between App and Compact without starting or resetting a session.
+- Start/pause/resume/reset, repeat and optional cutoff, check-ins, end early, practice prompts, saved drafts, and independent automatic session-end windows. No readiness toast is generated.
+- Four audio events, eight existing MP3 files, custom MP3 selection, master/event volumes, mixing behavior, fade duration, preview and stop. Track changes preview automatically; audio and display changes save immediately. Save settings or Ctrl+Enter commits default threshold and diagnostics changes.
+- Scheduling with hours/minutes/seconds, edit/remove, repeat/cutoff, volume, inherited or individual low-time threshold and sound, overlap choices, and extension schedule import.
+- Connection instructions, receiver script/token generation, saved setup drafts, private setup-code import/export, opt-in verified delivery, Outbox details/retry/review, and opening the configured sheet.
+- Local diagnostics, issue markers, readable report, export, and clear log.
 
-## Development and verification
+## Accessible reading
 
-Build using the .NET 10 SDK:
+Headings, labels, paragraphs, native tables, and native HTML dialogs expose readable structure. Table rows, cells, controls, and unchanged audio options retain their identities during updates. Ticks change only the visual countdown, excluded from the accessibility tree. A **Time checked** snapshot changes on explicit request or timer-status transition. In Compact/Time-only, the clock is a button with the stable name **Read remaining time**. Significant events use one window's status region.
+
+The user reported that text and table navigation in 0.1 worked well. That supports continuing this approach; it is not full JAWS, NVDA, or Narrator acceptance.
+
+## Preview data and connection
+
+A fresh profile contains two example schedules and two example Outbox records. Reflections saved before a valid connection exists remain **Local preview only** permanently. Enabling a connection cannot adopt or upload them. **Simulate success** is available only for these records and makes no request.
+
+No Sheets requests occur until the user saves a valid connection and explicitly enables delivery. Verification uses an authenticated ping. New connected reflections then use the existing request-ID/retry protocol; practice reflections use the receiver's test tab. Pausing prevents the next write but cannot retract a request already sent. Uncertain writes require explicit review before retrying or marking already sent. Entries retain their destination; the shared engine blocks unsafe account changes.
+
+`LocalOnly` is enforced by upload selection and the HTTP client. It defaults to false, preserving normal production offline binding. Service tests use a simulated receiver and silent audio; no real spreadsheet was used for automated verification.
+
+The host allows only exact packaged resources under its local virtual origin. It blocks external navigation, downloads, permission requests, new windows, and host objects. Pages use a restrictive Content Security Policy. Timer/compact/reflection updates omit connection credentials and custom file paths. Saved tokens are omitted from ordinary settings responses. Explicit setup-draft restoration and setup-code export can reveal the user's private token; setup codes are not encrypted.
+
+## Verification recorded September 10, 2026
+
+| Check | Result |
+| --- | --- |
+| Engine, adapter, storage, and service checks | 44 passed |
+| Browser semantics, behavior, and view checks | 39 passed |
+| Shared production delivery safety checks | 40 passed |
+| Full legacy suite | 477 passed; 16 native focus/theme failures |
+| Untouched 3.12.9 theme comparison | Same 13 theme failures |
+| Legacy focus comparison | Untouched baseline 11/11; current rerun 10/11, with an owned-modal draft focus failure still unresolved |
+| Initial 0.1 text/table reading checkpoint | Positive informal user feedback |
+| Complete JAWS/NVDA/Narrator acceptance | Pending |
+
+Preview checks cover quiet ticks, shared/unfinished drafts, table/option identity, dialog focus return, narrow reflow, the original Compact controls, exclusive Compact/Time-only mode, independent page state, placement calculations, reflection action fit, encrypted storage, failed-save behavior, isolated sample data, pause races, retry safety, and diagnostic redaction. Browser checks use a synthetic host bridge; they do not prove native focus, multi-monitor/DPI behavior, or reader speech.
+
+The native computer-use tool could not reliably capture the foreground preview or return its WebView2 accessibility tree during earlier checks. These limitations and the legacy focus failure are reasons to keep this as a local preview.
+
+## Reader and functional acceptance
+
+1. Leave an input using your reader's forms-mode command. Read surrounding text, headings, and labels in every App tab and reflection prompt.
+2. Run a timer while reading in this app and another app for a minute. Ticks must not speak or move focus. Request remaining time and check that it speaks once.
+3. Open App, Compact, and a practice reflection together. Switch Compact to Time-only and back. Confirm other windows and drafts remain intact and default positions are correct.
+4. Read individual Scheduling and Outbox cells. Edit an entry and check headers, action names, and retained reading position.
+5. Try audio, low-time overrides, schedules, cutoff, setup drafts, diagnostics, and native file dialogs. Check foreground behavior when a dialog is already open and a global shortcut is pressed.
+6. Check Later, Skip, Save & send, and exit with unfinished drafts. Use a tester-owned sheet only after deliberately enabling delivery.
+7. Try JAWS, NVDA, Narrator, keyboard-only use, contrast themes, enlarged text, zoom, and different monitor/DPI arrangements. Record versions, exact keys, expected behavior, and observed speech/focus.
+
+Before production adoption: resolve native focus findings, complete reader and functional acceptance, and implement reviewed existing-profile migration and installer/startup integration. Do not present this preview as complete production parity or universally screen-reader compatible.
+
+## Development
 
 ```text
 dotnet build desktop/ReflectionTimer.Accessible -c Release
 dotnet run --project desktop/ReflectionTimer.Accessible.Tests -c Release
+node desktop/ReflectionTimer.Accessible.Tests/ui.cjs
 dotnet publish desktop/ReflectionTimer.Accessible -c Release -r win-x64 --self-contained true -o desktop/artifacts/accessibility-preview
 ```
 
-The WebView2 SDK is pinned to 1.0.4191.47. Its unused WPF assembly reference is removed before resolving references, since this host uses WinForms.
+Browser checks require Playwright on Node's module path and Microsoft Edge. `REFLECTION_PREVIEW_SCREENSHOTS` optionally selects a directory for the four view renderings.
 
-The browser checks require Playwright available to Node and Microsoft Edge installed:
-
-```text
-node desktop/ReflectionTimer.Accessible.Tests/ui.cjs
-```
-
-If using a shared dependency runtime, set `NODE_PATH` to its `node_modules` directory. The browser fixture loads the actual packaged HTML/JS/CSS with a synthetic bridge and does not contact an external page.
-
-Validation on September 10, 2026:
-
-| Check | Result |
-| --- | --- |
-| C# build and portable publish | Passed without warnings |
-| Engine/adapter/storage tests | 19 passed |
-| Browser behavior/semantics tests | 18 passed |
-| Windows WebView2 startup and visual inspection | Preview loaded successfully |
-| Screen-reader speech and reading navigation | Pending manual acceptance; not established by the automated checks |
-
-The browser tests include 120 clock updates without DOM focus changes, stable table row/cell/action identities, native headings and table roles, narrow-window reflow, dialog return focus, keyboard access to compact controls, and flushing the final draft before close acknowledgment. The storage tests include invalid input, failed saves, encrypted persistence, clock boundaries, and excluded connection fields.
-
-Windows computer-use tooling returned no accessibility tree for this WebView2 window, including after launching installed JAWS 2026. Its launcher also failed before creating the process; direct executable launch succeeded. These are limitations of the observed verification, not a screen-reader pass or proof of a WebView2 accessibility defect. Actual JAWS/NVDA/Narrator results determine whether to continue with this host or compare Electron.
-
-## Design references
-
-- [WebView2 in WinForms](https://learn.microsoft.com/en-us/microsoft-edge/webview2/get-started/winforms)
-- [WebView2 security](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security)
-- [Native table semantics](https://www.w3.org/WAI/ARIA/apg/patterns/table/)
-- [Live-region behavior, including focused regions](https://www.w3.org/TR/wai-aria-1.2/#aria-live)
-- [Status messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html)
-
-Development stays on `accessibility/webview2-prototype`. Do not merge into master, change the public README, publish a release, or update an installed copy until functionality and reader acceptance have been reviewed.
+References: [WebView2 WinForms](https://learn.microsoft.com/en-us/microsoft-edge/webview2/get-started/winforms), [WebView2 security](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security), [native tables](https://www.w3.org/WAI/ARIA/apg/patterns/table/), [ARIA live regions](https://www.w3.org/TR/wai-aria-1.2/#aria-live), [status messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html).

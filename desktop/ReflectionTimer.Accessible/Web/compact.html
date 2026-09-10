@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Reflection Timer · compact</title><link rel="stylesheet" href="compact.css"><script type="module" src="compact.js"></script></head>
+<body>
+<header id="caption"><h1>Reflection Timer</h1><div class="window-actions"><button id="shrink" type="button" aria-label="Shrink to time-only view" title="Shrink to time-only view">−</button><button id="expand" type="button" aria-label="Open main timer page" title="Open main timer page">+</button><button id="close" type="button" aria-label="Close compact view" title="Close compact view">×</button></div></header>
+<main aria-label="Compact timer">
+  <button id="read-time" type="button" class="clock" aria-label="Read remaining time" title="Read remaining time"><span id="visual-clock" aria-hidden="true">15:00</span></button>
+  <p id="time-snapshot" class="sr-only">Time checked: 15 minutes remaining. Ready.</p>
+  <form id="timer-editor" novalidate><div class="duration">
+    <label>Hours<input id="hours" type="number" min="0" step="1" inputmode="numeric" maxlength="6" value="0"></label>
+    <label>Minutes<input id="minutes" type="number" min="0" step="1" inputmode="numeric" maxlength="8" value="15"></label>
+    <label>Seconds<input id="seconds" type="number" min="0" step="1" inputmode="numeric" maxlength="10" value="0"></label>
+  </div><div class="footer"><label class="check"><input id="repeat" type="checkbox">Auto-start</label><button id="app" type="button">App</button>
+    <button id="reset" class="transport" type="button" aria-label="Reset timer" title="Reset timer">←</button>
+    <button id="toggle" class="transport" type="submit" aria-label="Start timer" title="Start timer"><span aria-hidden="true">▶</span></button>
+    <button id="end" class="transport" type="button" aria-label="End timer early" title="End timer early" aria-disabled="true">→</button>
+  </div></form>
+  <p id="status" class="sr-only" role="status" aria-atomic="true"></p><p id="error" role="alert"></p>
+</main>
+</body></html>

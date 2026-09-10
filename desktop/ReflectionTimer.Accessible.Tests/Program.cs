@@ -11,8 +11,24 @@ var store = new MemoryStore { State = PreviewSession.SampleState(now) };
 var session = new PreviewSession(store, () => now);
 Check(session.Engine.Snapshot.Timer.DurationSeconds == 900 && session.Engine.Snapshot.Timer.LowTime.Enabled, "Fresh timer and low-time defaults");
 Check(session.Engine.Snapshot.FloatingPlacement == FloatingTimerPlacement.BottomLeft && session.Engine.Snapshot.PopupPosition == ReflectionPopupPosition.BottomRight, "Fresh window positions");
+var area=new Rectangle(0,0,1920,1040);
+Check(ViewPlacement.Calculate(area,new(940,810),1)==new Point(490,115),"App view opens centered in the working area");
+var compactPosition=ViewPlacement.Calculate(area,new(356,258),4);var tinyPosition=ViewPlacement.Calculate(area,new(96,40),4);
+Check(compactPosition.X==16&&tinyPosition.X==16&&compactPosition.Y+258==1024&&tinyPosition.Y+40==1024,"Compact and time-only share the bottom-left anchor across resizing");
+var reflectionPosition=ViewPlacement.Calculate(area,new(560,490),5);
+Check(reflectionPosition.X+560==1904&&reflectionPosition.Y+490==1024,"Session-end prompt opens at bottom right");
+session.SetDurationDraft(["1","2","3"]);
+Check(JsonSerializer.Serialize(session.View(),PreviewSession.Json).Contains("\"durationDraft\":[\"1\",\"2\",\"3\"]")&&session.Engine.Snapshot.Timer.DurationSeconds==900,"Shared duration draft is available to both views without committing a timer change");
+session.SetDurationDraft(null);
 session.Execute("toggle", Data(new { seconds = 20, threshold = 15, repeat = false, lowTime = true }));
 Check(session.Engine.Snapshot.Timer.IsRunning, "Real engine starts from bridge command");
+var deadline = session.Engine.Snapshot.Timer.EndTime;
+session.Execute("repeat", Data(new { enabled = true }));
+Check(session.Engine.Snapshot.Timer.AutoRestart && session.Engine.Snapshot.Timer.EndTime == deadline, "Auto-start edits apply without restarting the timer");
+session.Execute("repeat", Data(new { enabled = false }));
+session.Execute("lowTime", Data(new { enabled = false, threshold = 10 }));
+Check(!session.Engine.Snapshot.Timer.LowTime.Enabled && session.Engine.Snapshot.Timer.EndTime == deadline, "Low-time edits preserve the running session");
+session.Execute("lowTime", Data(new { enabled = true, threshold = 15 }));
 now = now.AddSeconds(3); session.Execute("toggle", Data(new { }));
 Check(!session.Engine.Snapshot.Timer.IsRunning && TimerEngine.Remaining(session.Engine.Snapshot.Timer, session.Engine.Now) == 17, "Pause retains elapsed time");
 session.Execute("toggle", Data(new { seconds = 20, threshold = 15, repeat = false, lowTime = true }));
@@ -38,6 +54,14 @@ Check(session.Engine.Snapshot.Schedules.Count == 3, "Schedule saved through engi
 var scheduleId = session.Engine.Snapshot.Schedules.First(s => s.DurationSeconds == 60).Id;
 session.Execute("removeSchedule", Data(new { id = scheduleId }));
 Check(session.Engine.Snapshot.Schedules.All(s => s.Id != scheduleId), "Schedule removed by stable ID");
+session.Execute("lowTime",Data(new{enabled=true,inherit=true,threshold=27,track=3,keepCustom=false}));
+Check(session.Engine.Snapshot.Timer.LowTime.ThresholdSeconds is null&&(int)session.Engine.Snapshot.Timer.LowTime.Track==3,"Inherited low-time threshold and selected track remain separate preferences");
+session.Execute("schedule",Data(new{start,seconds=4509,fromTimer=true,lowOptions=new{enabled=true,inherit=false,threshold=27,track=3,keepCustom=false}}));
+var withLow=session.Engine.Snapshot.Schedules.Single(s=>s.DurationSeconds==4509);
+Check(withLow.LowTime.ThresholdSeconds==27&&(int)withLow.LowTime.Track==3,"Scheduled duration and individual low-time sound survive saving");
+session.SelectScheduleDraft(withLow.Id);
+Check(session.ScheduledLowDraft==withLow.LowTime,"Editing restores the schedule's individual low-time options");
+session.Execute("removeSchedule",Data(new{id=withLow.Id}));
 var before = JsonSerializer.Serialize(session.Engine.Snapshot);
 try { session.Execute("toggle", Data(new { seconds = -10 })); throw new Exception("Invalid duration accepted"); } catch (ArgumentException) { }
 Check(JsonSerializer.Serialize(session.Engine.Snapshot) == before, "Invalid bridge input leaves state untouched");
@@ -53,6 +77,7 @@ try {
     Check(!File.ReadAllText(Path.Combine(directory, "state.dat")).Contains("Saved local reflection."), "Preview uses encrypted storage");
     Check(new PreviewSession(encrypted).Engine.Snapshot.Outbox.Last().Message == "Saved local reflection.", "Encrypted preview data survives reopening");
 } finally { File.Delete(Path.Combine(directory, "state.dat")); if (Directory.Exists(directory)) Directory.Delete(directory); }
+await ServiceTests.Run(Check);
 Console.WriteLine($"{passed} tests passed.");
 
 sealed class MemoryStore : IStateStore

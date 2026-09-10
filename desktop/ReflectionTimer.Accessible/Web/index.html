@@ -13,8 +13,8 @@
   <header class="page-header">
     <p class="eyebrow">Accessibility preview · local test profile</p>
     <h1 id="page-title" tabindex="-1">Reflection Timer</h1>
-    <p class="main-only">Try the timer, read a table, or write a practice reflection. Everything here stays in this separate preview.</p>
-    <nav aria-label="Page sections" class="main-only"><a href="#timer">Timer</a><a href="#pending">Reflections</a><a href="#schedules">Scheduling</a><a href="#outbox">Outbox</a><a href="#review">Review guide</a></nav>
+    <p class="main-only">This preview uses a separate profile. Sheets delivery is off until you set up and enable a connection.</p>
+    <nav aria-label="Page sections" class="main-only"><a href="#timer">Timer</a><a href="#pending">Reflections</a><a href="#schedules">Scheduling</a><a href="#outbox">Outbox</a><a href="#appearance">Display and behavior</a><a href="#audio">Audio</a><a href="#connection">Connection setup</a><a href="#diagnostics">Diagnostics</a><a href="#review">Review guide</a></nav>
   </header>
   <div class="messages"><p id="status" role="status" aria-atomic="true"></p><p id="error" role="alert" aria-atomic="true"></p></div>
   <main id="main" tabindex="-1">
@@ -27,13 +27,14 @@
       <div class="actions"><button id="read-time" type="button">Read remaining time</button><button id="compact-mode" class="compact-only" type="button" aria-expanded="true" aria-controls="timer-editor">Time-only view</button></div>
       <form id="timer-editor" novalidate>
         <fieldset><legend>Session duration</legend><div class="duration">
-          <label>Hours<input id="hours" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" value="0" aria-describedby="duration-help"></label>
-          <label>Minutes<input id="minutes" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" value="15" aria-describedby="duration-help"></label>
-          <label>Seconds<input id="seconds" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="10" value="0" aria-describedby="duration-help"></label>
+          <label>Hours<input id="hours" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" maxlength="6" value="0" aria-describedby="duration-help"></label>
+          <label>Minutes<input id="minutes" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" maxlength="8" value="15" aria-describedby="duration-help"></label>
+          <label>Seconds<input id="seconds" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" maxlength="10" value="0" aria-describedby="duration-help"></label>
         </div><p id="duration-help" class="hint">Whole numbers. Pause to change the duration. Extra seconds and minutes carry into the next unit.</p></fieldset>
         <div class="options"><label class="check"><input id="repeat" type="checkbox">Auto-start the next session</label><label class="check"><input id="low-time" type="checkbox" checked>Low-time warning</label><label>Warn with this many seconds remaining<input id="threshold" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" value="15"></label></div>
         <div class="actions"><button id="toggle" class="primary" type="submit">Start timer</button><button id="reset" type="button">Reset timer</button><button id="end" type="button" aria-disabled="true">End early and reflect</button></div>
       </form>
+      <form id="cutoff-form" class="main-only"><div class="option-row"><label class="check"><input id="cutoff-enabled" type="checkbox">Disable auto-start at</label><label><span class="sr-only">Auto-start cutoff date and time</span><input id="cutoff" type="datetime-local" aria-describedby="cutoff-help" disabled></label></div><p id="cutoff-help">Local date and time. The current session still finishes.</p><button type="submit" hidden>Save auto-start cutoff</button></form>
       <div class="actions"><button id="check-in" type="button" aria-disabled="true">Check in</button><button id="open-compact" class="main-only" type="button">Open compact timer</button><button id="open-main" class="compact-only" type="button">Open main window</button><button id="close-compact" class="compact-only" type="button">Close compact window</button></div>
     </section>
     <section id="pending" class="main-only" aria-labelledby="pending-heading">
@@ -43,36 +44,94 @@
     </section>
     <section id="schedules" class="main-only" aria-labelledby="schedule-heading">
       <h2 id="schedule-heading">Session scheduling</h2>
-      <p>Use your screen reader's table navigation to read each cell and its column header. Overlapping sessions wait for the current session to finish.</p>
+      <p>Use your screen reader's table navigation to read each cell and its column header. Choose how overlapping sessions behave in Settings.</p>
       <div class="table-scroll" role="region" aria-label="Scheduled sessions table" tabindex="0"><table>
-        <caption>Scheduled sessions</caption><thead><tr><th scope="col">Start time</th><th scope="col">Duration</th><th scope="col">Auto-start</th><th scope="col">Low time</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody id="schedule-rows"></tbody>
+        <caption>Scheduled sessions</caption><thead><tr><th scope="col">Start time</th><th scope="col">Duration</th><th scope="col">Auto-start</th><th scope="col">Low time</th><th scope="col">Status</th><th scope="col">Cutoff</th><th scope="col">Volume</th><th scope="col">Action</th></tr></thead><tbody id="schedule-rows"></tbody>
       </table></div><p id="schedule-empty" hidden>No sessions scheduled.</p>
-      <form id="schedule-form" novalidate><fieldset><legend>Add a session</legend>
+      <button id="import-schedules" type="button">Import extension schedules…</button>
+      <form id="schedule-form" novalidate><fieldset><legend id="schedule-legend">Add a session</legend>
         <label>Start date and time<input id="schedule-start" type="datetime-local" required aria-describedby="schedule-help"></label><p id="schedule-help" class="hint">Use your local date and time.</p>
-        <label>Duration in minutes<input id="schedule-minutes" type="text" inputmode="numeric" maxlength="8" value="15"></label>
-      </fieldset><button type="submit">Add session</button></form>
+        <div class="duration"><label>Hours<input id="schedule-hours" type="number" min="0" step="1" value="0"></label><label>Minutes<input id="schedule-minutes" type="number" min="0" step="1" value="15"></label><label>Seconds<input id="schedule-seconds" type="number" min="0" step="1" value="0"></label></div>
+        <label class="check"><input id="schedule-repeat" type="checkbox">Auto-start following sessions</label>
+        <div class="option-row"><label class="check"><input id="schedule-cutoff-enabled" type="checkbox">Disable auto-start at</label><label><span class="sr-only">Scheduled auto-start cutoff date and time</span><input id="schedule-cutoff" type="datetime-local" disabled></label></div>
+        <label class="check"><input id="schedule-low" type="checkbox" checked>Low-time warning for this schedule</label>
+        <label>Scheduled app volume (0–100)<input id="schedule-volume" type="number" min="0" max="100" value="50"></label>
+      </fieldset><div class="actions"><button id="schedule-save" type="submit">Add session</button><button id="schedule-cancel" type="button" hidden>Cancel editing</button></div></form>
     </section>
     <section id="outbox" class="main-only" aria-labelledby="outbox-heading">
-      <h2 id="outbox-heading">Outbox</h2><p>These entries are stored locally. “Simulate success” changes a row for accessibility testing; it sends nothing online.</p>
-      <div class="table-scroll" role="region" aria-label="Outbox table" tabindex="0"><table><caption>Local preview entries</caption><thead><tr><th scope="col">Saved locally</th><th scope="col">Destination</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">Actions</th></tr></thead><tbody id="outbox-rows"></tbody></table></div>
+      <h2 id="outbox-heading">Outbox</h2><p id="delivery-status">Sheets delivery is off.</p><p>Entries marked “Local preview only” always stay here. “Simulate success” sends nothing. New reflections saved with a connection retain that destination; enabled delivery sends them automatically.</p>
+      <div class="actions"><button id="send-pending" type="button">Send pending now</button><button id="open-sheet" type="button">Open Google Sheet</button></div>
+      <div class="table-scroll" role="region" aria-label="Outbox table" tabindex="0"><table><caption>Saved reflections and delivery</caption><thead><tr><th scope="col">Saved locally</th><th scope="col">Destination</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">Actions</th></tr></thead><tbody id="outbox-rows"></tbody></table></div>
       <p id="outbox-empty" hidden>No local entries.</p>
+    </section>
+    <section id="appearance" class="main-only" aria-labelledby="appearance-heading">
+      <h2 id="appearance-heading">Display and behavior</h2>
+      <form id="appearance-form"><label>Color theme<select id="theme"><option value="0">Dark</option><option value="1">Light</option><option value="2">High contrast</option><option value="3">Glamour</option></select></label>
+        <label class="check"><input id="show-compact" type="checkbox" checked>Show compact view</label>
+        <label>Compact window position<select id="placement"><option value="0">Remember dragged position</option><option value="1">Center</option><option value="2">Top left</option><option value="3">Top right</option><option value="4" selected>Bottom left</option><option value="5">Bottom right</option><option value="6">Top center</option><option value="7">Bottom center</option></select></label>
+        <label>Reflection window position<select id="popup"><option value="0">Center</option><option value="1">Top left</option><option value="2">Top right</option><option value="3">Bottom left</option><option value="4" selected>Bottom right</option></select></label>
+        <label>When a schedule overlaps the current session<select id="overlap"><option value="0">End the current session and request a reflection</option><option value="1">Ask me in Scheduling</option><option value="2" selected>Wait for the current session to finish</option></select></label>
+        <label>Default low-time threshold, in seconds<input id="default-threshold" type="number" min="1" max="31536000" value="15" required></label>
+        <p>This default applies when a timer or schedule has no individual threshold.</p>
+        <label class="check"><input id="logging" type="checkbox" checked>Keep local diagnostics</label>
+        <button type="submit" hidden>Save display and behavior</button>
+      </form>
+    </section>
+    <section id="audio" class="main-only" aria-labelledby="audio-heading">
+      <h2 id="audio-heading">Audio</h2>
+      <form id="volume-form"><label>App volume (0–100)<input id="app-volume" type="number" min="0" max="100" required value="50"></label><button type="submit" hidden>Save app volume</button></form>
+      <p>Each sound has its own volume. Muting the app keeps the timer and readable status messages working.</p>
+      <form id="sound-form"><label>Sound event<select id="sound-kind"><option value="0">Session end</option><option value="1">Success</option><option value="2">Failure</option><option value="3">Low time</option></select></label>
+        <p id="sound-default"></p><label>Track<select id="sound-track" aria-describedby="sound-default"></select></label>
+        <label>When another alert is playing<select id="sound-behavior"><option value="0">Interrupt and replace it</option><option value="1">Lower other alerts while this plays</option><option value="2">Play alongside other alerts</option></select></label>
+        <label>Sound volume (0–100)<input id="sound-volume" type="number" min="0" max="100" value="100" required></label>
+        <div class="option-row"><label class="check"><input id="sound-fade" type="checkbox">Fade out automatically</label><label>Fade after this many seconds<input id="sound-fade-seconds" type="number" min="1" max="31536000" value="10" required></label></div>
+        <div class="actions"><button type="submit">Save sound</button><button id="browse-sound" type="button">Choose custom MP3</button><button id="preview-sound" type="button">Preview saved sound</button><button id="stop-sound" type="button">Stop audio</button></div>
+      </form>
+    </section>
+    <section id="connection" class="main-only" aria-labelledby="connection-heading">
+      <h2 id="connection-heading">Connection setup</h2>
+      <p>Connection settings belong to this preview. It does not import settings from the installed app. You can use the timer and save local reflections without connecting.</p>
+      <details><summary>Set up a new Google Sheets receiver</summary><ol>
+        <li>Create or choose your own Google spreadsheet. Enter its URL below.</li>
+        <li>Choose Save private receiver script. A new token is generated if the token field is blank and none is saved.</li>
+        <li>In your spreadsheet, open Extensions, then Apps Script. Paste the saved script into the editor and save it.</li>
+        <li>Run <code>setupReflectionTimer</code> once and authorize it with the Google account that owns the sheet.</li>
+        <li>Deploy a new web app that executes as you, with access set to Anyone. Copy its deployed URL ending in <code>/exec</code> into the Receiver URL field.</li>
+        <li>Stop the other timer or browser extension from sending to this sheet, select Enable Sheets delivery, then choose Save connection. The app verifies the receiver before enabling delivery.</li>
+      </ol><p>The token protects requests to the receiver. Keep your personalized script and setup code private.</p></details>
+      <form id="connection-form"><label>Google Sheets URL<input id="sheet-url" type="url" autocomplete="off" required></label><label>Receiver URL<input id="receiver-url" type="url" autocomplete="off"></label>
+        <label>Private token<input id="connection-token" type="password" autocomplete="new-password" maxlength="512" aria-describedby="token-help"></label><p id="token-help">Leave blank to keep the saved token. No saved token yet.</p>
+        <label>Destination tabs<select id="sheet-mode"><option value="date">One tab per day</option><option value="fixed">One named tab</option></select></label><label>Tab name (for one named tab)<input id="sheet-name" type="text" maxlength="100" value="Reflections"></label>
+        <label class="check"><input id="connection-enabled" type="checkbox">Enable Sheets delivery; other timer senders are stopped</label>
+        <div class="actions"><button type="submit">Save connection</button><button id="pause-delivery" type="button">Pause Sheets delivery</button><button id="save-script" type="button">Save private receiver script</button><button id="new-token" type="button">Generate new token in setup draft</button><button id="restore-setup" type="button" aria-disabled="true">Restore saved setup draft</button></div>
+      </form>
+      <details><summary>Transfer a private connection setup code</summary><p>A setup code contains your sheet connection and token. It is not encrypted. Keep it private.</p><form id="import-form"><label>Private setup code<textarea id="setup-import" rows="3" maxlength="16000" autocomplete="off"></textarea></label><button type="submit">Load code into setup form</button></form><button id="export-setup" type="button">Show saved setup code</button><div id="setup-export-group" hidden><label>Saved private setup code<textarea id="setup-export" rows="3" readonly></textarea></label><button id="hide-setup" type="button">Hide setup code</button></div></details>
+    </section>
+    <section id="diagnostics" class="main-only" aria-labelledby="diagnostics-heading">
+      <h2 id="diagnostics-heading">Diagnostics</h2><p>The report includes timer events and delivery status. It excludes reflections, drafts, tokens, connection URLs, audio paths, and activity in other apps.</p>
+      <div class="actions"><button id="mark-issue" type="button">Mark an issue now</button><button id="show-diagnostics" type="button">Show diagnostic report</button><button id="export-diagnostics" type="button">Export diagnostic report</button><button id="clear-diagnostics" type="button">Clear log…</button></div>
+      <div id="diagnostic-result" hidden><h3 tabindex="-1" id="diagnostic-title">Current diagnostic report</h3><pre id="diagnostic-report" class="preserve-lines"></pre></div>
     </section>
     <section id="review" class="main-only" aria-labelledby="review-heading">
       <h2 id="review-heading">Review guide</h2>
       <ol><li>Enter a duration, leave the input, and read the surrounding text at your own pace.</li><li>Start the timer. Read this page or another app for a minute. The countdown should not interrupt you.</li><li>Use Read remaining time. You should hear the current time once.</li><li>Open the compact timer and try both views using the keyboard.</li><li>Navigate individual Scheduling and Outbox cells using your reader's table commands.</li><li>Write a practice reflection, choose Later, and reopen it to check that the draft is preserved.</li></ol>
-      <p>The preview has its own saved data. Audio, live Sheets delivery, installation setup, and the remaining settings are not included in this first prototype.</p>
-      <p>Use Alt+Tab for its windows. This preview does not register global shortcuts. Close the main window to quit the preview; close a compact window to leave the preview timer running.</p>
+      <p>The preview has its own saved data. Settings, audio, connection setup, delivery, and diagnostics are available for testing. The installed app and its configuration are unchanged.</p>
+      <p>App, the floating timer, and session-end prompts are separate windows. Compact and Time-only share one floating window. App opens centered, the floating timer bottom left, and session-end prompts bottom right. Closing App hides it in the tray; choose Quit desktop app to exit.</p>
+      <p>The original Ctrl+Alt shortcuts are available when another running app has not already registered them: T for App, / to shrink or hide the floating timer, . to focus Compact (twice for App), , for a check-in, and ` to end early. You can also open views from the preview tray icon.</p>
     </section>
     <section id="reflection" class="reflection-only" aria-labelledby="reflection-heading">
       <h2 id="reflection-heading" tabindex="-1">Session reflection</h2><p id="reflection-context"></p>
       <p id="reflection-help">What went well? What would you change next time? Write up to 5,000 characters. Later keeps your draft for another time.</p>
       <form id="reflection-form" novalidate><label for="reflection-text">Your reflection</label><textarea id="reflection-text" rows="7" maxlength="5000" aria-describedby="reflection-help"></textarea>
         <div id="reason-group" hidden><label for="early-reason">Reason for ending early (optional)</label><textarea id="early-reason" rows="2" maxlength="1000"></textarea></div>
-        <p id="draft-status">Draft not yet changed.</p><div class="actions"><button type="submit" class="primary">Save to local Outbox</button><button id="later" type="button">Later</button></div>
+        <p id="reflection-delivery">Saving keeps this entry in the preview Outbox.</p><p id="draft-status">Draft not yet changed.</p><div class="actions"><button id="skip-reflection" type="button">Skip</button><button id="later" type="button">Later</button><button type="submit" class="primary">Save &amp; send</button></div>
       </form>
     </section>
   </main>
   <dialog id="entry-dialog" aria-labelledby="entry-title"><h2 id="entry-title" tabindex="-1">Saved reflection</h2><p id="entry-meta"></p><p id="entry-text" class="preserve-lines"></p><form method="dialog"><button>Close details</button></form></dialog>
-  <footer class="main-only">Reflection Timer · accessibility preview 0.1</footer>
+  <dialog id="delivery-dialog" aria-labelledby="delivery-title"><h2 id="delivery-title" tabindex="-1">Review delivery</h2><p id="delivery-explanation"></p><div class="actions"><button id="delivery-confirm" type="button">Confirm</button><form method="dialog"><button>Cancel</button></form></div></dialog>
+  <dialog id="clear-log-dialog" aria-labelledby="clear-log-title"><h2 id="clear-log-title" tabindex="-1">Clear diagnostics?</h2><p>Clear the local diagnostic log? Your timer, schedules, and reflections are unchanged.</p><div class="actions"><button id="clear-log-confirm" type="button">Clear log</button><form method="dialog"><button>Cancel</button></form></div></dialog>
+  <footer class="main-only"><button id="save-settings" type="button">Save settings</button><span class="sr-only">Reflection Timer · accessibility preview 0.3</span></footer>
 </body>
 </html>

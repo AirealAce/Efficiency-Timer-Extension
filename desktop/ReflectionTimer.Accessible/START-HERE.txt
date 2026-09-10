@@ -1,0 +1,28 @@
+Reflection Timer - accessibility preview 0.3
+
+Extract the whole folder, then run ReflectionTimer.AccessibilityPreview.exe.
+This is a separate local preview. The installed app and its settings are unchanged.
+
+Original views and initial positions:
+  App: center, with five tabs.
+  Compact: bottom left, with the original small control set.
+  Time-only: bottom left, another mode of the same floating window.
+  Session end: bottom right, a separate reflection prompt.
+
+App, the floating timer, and session-end prompts can coexist. Only Compact and
+Time-only are mutually exclusive. Saved placement choices are respected.
+
+Close App to hide it in the tray. Choose Quit desktop app, or right-click the
+preview tray icon and choose Quit accessibility preview, to exit and save drafts.
+
+Default profile: %LOCALAPPDATA%\ReflectionTimerAccessibilityPreview\review
+For a fresh profile, launch with: --profile review-03
+Quit an older preview before opening another version with the same profile.
+Global shortcuts can be unavailable while another timer already owns them.
+
+Requires Microsoft Edge WebView2 Evergreen Runtime; .NET and audio are included.
+The initial schedules and Outbox records are local examples. Sheets delivery is
+ off until explicitly enabled. Local preview entries stay local.
+
+See PREVIEW-README.md for functions, test results, and remaining reader checks.
+Keep this preview separate until functional and reader acceptance is complete.

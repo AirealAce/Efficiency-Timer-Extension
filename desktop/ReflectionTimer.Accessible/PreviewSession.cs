@@ -4,26 +4,49 @@ using ReflectionTimer.Core;
 
 namespace ReflectionTimer.Accessible;
 
-// A presentation adapter over the production engine. Never constructs a SheetsClient.
+// A presentation adapter over the shared engine. Services handle delivery separately.
 public sealed class PreviewSession
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public TimerEngine Engine { get; }
     public event Action<string>? Announcement;
+    public event Action<string[]?>? DurationDraftChanged;
+    private string[]? durationDraft;
+    internal LowTimeOptions ScheduledLowDraft { get; set; }=new();
+    internal void SelectScheduleDraft(Guid? id)=>ScheduledLowDraft=id is {} key
+        ? Engine.Snapshot.Schedules.SingleOrDefault(s=>s.Id==key)?.LowTime ?? throw new ArgumentException("That schedule is no longer available.") : new();
+    internal static object LowView(LowTimeOptions low,int threshold)=>new{low.Enabled,inherit=low.ThresholdSeconds is null,threshold=low.ThresholdSeconds??threshold,track=(int)low.Track,custom=low.Mp3Path.Length>0,customName=Path.GetFileName(low.Mp3Path)};
+    internal static LowTimeOptions ReadLow(JsonElement data,LowTimeOptions previous)
+    {
+        var low=previous with {Enabled=Flag(data,"enabled"),ThresholdSeconds=Flag(data,"inherit")?null:Number(data,"threshold",1,TimerEngine.MaxDuration)};
+        if(data.TryGetProperty("track",out _))low=low with{Track=(LibrarySound)Number(data,"track",0,9),Mp3Path=Flag(data,"keepCustom")?previous.Mp3Path:""};
+        return low;
+    }
+    internal void SetDurationDraft(string[]? parts)
+    {
+        if(parts is not null && (parts.Length!=3 || parts.Any(p=>p is null || p.Length>20)))throw new ArgumentException("Enter three valid duration fields.");
+        durationDraft=parts?.ToArray();DurationDraftChanged?.Invoke(durationDraft?.ToArray());
+    }
     public PreviewSession(IStateStore store, Func<DateTimeOffset>? clock = null)
     {
+        var saved = store.Load();
+        if(saved.FormatVersion!=1) throw new InvalidDataException("Unsupported preview data version. Data was not changed.");
+        if (saved.Outbox.Any(o => o.SheetUrl.Length == 0 && !o.LocalOnly)) {
+            saved.Outbox = saved.Outbox.Select(o => o.SheetUrl.Length == 0 ? o with { LocalOnly = true } : o).ToList();
+            store.Save(saved);
+        }
         Engine = new(store, clock);
         Engine.LowTimeReached += timer => Announcement?.Invoke($"Low time. {SpeakTime(TimerEngine.Remaining(timer, Engine.Now))} remaining.");
     }
     public static AppState SampleState(DateTimeOffset now) => new() {
-        ExtensionDisabledConfirmed = true,
+        ExtensionDisabledConfirmed = false,
         ScheduleOverlap = ScheduleOverlapPolicy.Wait,
         Schedules = [new(Guid.NewGuid(), now.AddDays(7).ToUnixTimeMilliseconds(), 900, false, 50),
                      new(Guid.NewGuid(), now.AddDays(8).ToUnixTimeMilliseconds(), 1200, false, 50)],
         Outbox = [new() { Message = "Sample reflection: I completed my reading.", SubmittedAt = now.AddMinutes(-30), DurationSeconds = 900,
-            ActualDurationSeconds = 900, IsTest = true, Status = DeliveryStatus.Pending },
+            ActualDurationSeconds = 900, IsTest = true, LocalOnly = true, Status = DeliveryStatus.Pending },
             new() { Message = "Sample reflection: I will take a short break.", SubmittedAt = now.AddMinutes(-15), DurationSeconds = 600,
-            ActualDurationSeconds = 360, IsTest = true, Status = DeliveryStatus.NeedsReview, ErrorKind = "sample", Attempts = 1 }]
+            ActualDurationSeconds = 360, IsTest = true, LocalOnly = true, Status = DeliveryStatus.NeedsReview, ErrorKind = "sample", Attempts = 1 }]
     };
     public object Clock()
     {
@@ -45,17 +68,22 @@ public sealed class PreviewSession
     {
         var state = Engine.Snapshot;
         return new {
-            clock = Clock(), timer = new { state.Timer.DurationSeconds, state.Timer.AutoRestart, state.Timer.LowTime.Enabled,
-                threshold = state.Timer.LowTime.ThresholdSeconds ?? 15 },
+            clock = Clock(), durationDraft, theme = (int)state.Theme, state.ShowFloatingTimer, appVolume = state.Timer.Volume, connected = state.ExtensionDisabledConfirmed && SheetsClient.Validate(state.Connection) is null,
+            timer = new { state.Timer.DurationSeconds, state.Timer.AutoRestart, state.Timer.LowTime.Enabled, state.Timer.AutoRestartUntil, state.Timer.EndTime,
+                threshold = state.Timer.LowTime.ThresholdSeconds ?? AudioSettings.From(state).LowTimeThresholdSeconds,
+                low=LowView(state.Timer.LowTime,AudioSettings.From(state).LowTimeThresholdSeconds) },
             prompts = state.Prompts.Select(p => new { p.Id, p.IsCheckIn, p.EndedEarly, p.Draft, p.EarlyEndReason,
                 allotted = SpeakTime(p.DurationSeconds), actual = p.ActualDurationSeconds is { } actual ? SpeakTime(actual) : "Unavailable",
                 completed = DateTimeOffset.FromUnixTimeMilliseconds(p.CompletedAt).ToLocalTime().ToString("g") }),
             schedules = state.Schedules.Select(s => new { s.Id, start = DateTimeOffset.FromUnixTimeMilliseconds(s.StartTime).ToLocalTime().ToString("g"),
                 duration = SpeakTime(s.DurationSeconds), repeat = s.AutoRestart ? "On" : "Off", lowTime = s.LowTime.Enabled ? "On" : "Off",
-                status = s.AwaitingDecision ? "Needs choice" : s.WaitingForCurrentSession ? "Waiting" : "Scheduled" }),
+                status = s.AwaitingDecision ? "Needs choice" : s.WaitingForCurrentSession ? "Waiting" : "Scheduled",
+                editStart = DateTimeOffset.FromUnixTimeMilliseconds(s.StartTime).ToLocalTime().ToString("yyyy-MM-ddTHH:mm"), s.DurationSeconds, s.AutoRestartUntil, s.Volume }),
             outbox = state.Outbox.Select(o => new { o.Id, saved = o.SubmittedAt.LocalDateTime.ToString("g"),
-                destination = "Local preview only", status = o.Status == DeliveryStatus.Sent ? "Simulated success" : o.Status.ToString(),
-                o.Attempts, o.Message, duration = SpeakTime(o.DurationSeconds) })
+                localOnly = o.LocalOnly,
+                destination = o.LocalOnly ? "Local preview only" : o.IsTest ? "test" : o.SheetMode == "fixed" ? o.SheetName : o.SubmittedAt.ToString("MM/dd/yyyy"),
+                status = o.Status == DeliveryStatus.Sent && o.LocalOnly ? "Simulated success" : o.Status.ToString(),
+                o.Attempts, o.Message, duration = SpeakTime(o.DurationSeconds), error = o.ErrorKind.Length == 0 ? "" : TimerEngine.SafeError(o.ErrorKind) })
         };
     }
     public void Tick()
@@ -76,11 +104,17 @@ public sealed class PreviewSession
                 if (state.Timer.IsRunning) { Engine.Pause(); return new("Timer paused."); }
                 var seconds = Number(data, "seconds", 1, TimerEngine.MaxDuration);
                 if (TimerEngine.IsPaused(state.Timer) && seconds == state.Timer.DurationSeconds) Engine.Resume();
-                else Engine.Start(seconds, Flag(data, "repeat"), state.Timer.Volume, lowTime: new LowTimeOptions {
-                    Enabled = Flag(data, "lowTime"), ThresholdSeconds = Number(data, "threshold", 1, TimerEngine.MaxDuration) });
+                else Engine.Start(seconds, Flag(data, "repeat"), state.Timer.Volume, state.Timer.AutoRestartUntil, lowTime:state.Timer.LowTime with {Enabled=Flag(data,"lowTime")});
+                SetDurationDraft(null);
                 return new("Timer running.");
             case "reset":
-                Engine.Reset(Number(data, "seconds", 1, TimerEngine.MaxDuration)); return new("Timer reset.");
+                Engine.Reset(Number(data, "seconds", 1, TimerEngine.MaxDuration));SetDurationDraft(null);return new("Timer reset.");
+            case "repeat":
+                Engine.SetPreferences(Flag(data, "enabled"), state.Timer.Volume, Flag(data,"enabled") ? state.Timer.AutoRestartUntil : null);
+                return new(Flag(data, "enabled") ? "Auto-start enabled." : "Auto-start disabled.");
+            case "lowTime":
+                Engine.SetLowTime(ReadLow(data,state.Timer.LowTime));
+                return new("Low-time warning saved.");
             case "end":
                 var previous = state.Prompts.Select(p => p.Id).ToHashSet();
                 if (!Engine.EndEarly()) throw new ArgumentException("Start or resume the timer before ending it early.");
@@ -92,28 +126,54 @@ public sealed class PreviewSession
             case "draft":
                 var draftId = Id(data); RequiredPrompt(draftId);
                 Engine.SaveDraft(draftId, Text(data, "text", 5000), Text(data, "reason", 1000)); return new("");
+            case "skip":
+                var skipped=Id(data);RequiredPrompt(skipped);Engine.SkipPrompt(skipped);return new("Reflection skipped.",Close:true);
             case "queue":
-                Engine.QueueReflection(Id(data), Text(data, "text", 5000), Text(data, "reason", 1000));
-                return new("Reflection saved in the local Outbox. Nothing was sent online.", Close: true);
+                var localOnly = SheetsClient.Validate(state.Connection) is not null;
+                Engine.QueueReflection(Id(data), Text(data, "text", 5000), Text(data, "reason", 1000), localOnly);
+                return new(localOnly ? "Reflection saved locally in the preview Outbox." : "Reflection saved in Outbox for Sheets delivery when enabled.", Close: true);
             case "schedule":
                 var date = Text(data, "start", 40);
                 if (!DateTime.TryParseExact(date, "yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
                     throw new ArgumentException("Enter a valid local start date and time.");
                 if (TimeZoneInfo.Local.IsInvalidTime(start) || TimeZoneInfo.Local.IsAmbiguousTime(start))
                     throw new ArgumentException("Choose an unambiguous local time outside the daylight-saving clock change.");
-                Engine.SaveSchedule(null, new DateTimeOffset(start), Number(data, "seconds", 1, TimerEngine.MaxDuration), false, 50);
+                var editId = data.TryGetProperty("id", out var identifier) && identifier.ValueKind == JsonValueKind.String && Guid.TryParse(identifier.GetString(), out var edited) ? edited : (Guid?)null;
+                Engine.SaveSchedule(editId, new DateTimeOffset(start), Number(data, "seconds", 1, TimerEngine.MaxDuration), Flag(data,"repeat"),
+                    data.TryGetProperty("volume",out _) ? Number(data,"volume",0,100) : 50,
+                    data.TryGetProperty("cutoff",out var endAt) && endAt.ValueKind == JsonValueKind.String && endAt.GetString() is { Length: >0 } cutoffText ? ParseLocalTime(cutoffText) : null,
+                    data.TryGetProperty("lowOptions",out var lowData)?ReadLow(lowData,Flag(data,"fromTimer")?state.Timer.LowTime:ScheduledLowDraft):new LowTimeOptions { Enabled = !data.TryGetProperty("lowTime",out _) || Flag(data,"lowTime") });
+                ScheduledLowDraft=new();
                 return new("Session scheduled.");
             case "removeSchedule":
                 var id = Id(data);
                 if (state.Schedules.All(s => s.Id != id)) throw new ArgumentException("That schedule is no longer available.");
                 Engine.RemoveSchedule(id); return new("Scheduled session removed.");
             case "simulate":
-                // Deliberately no HTTP client. This exercises row updates with local records only.
+                // This exercises row updates with explicitly local records only.
                 var item = state.Outbox.SingleOrDefault(o => o.Id == Id(data)) ?? throw new ArgumentException("Entry not found.");
+                if (!item.LocalOnly) throw new ArgumentException("Simulation is only available for local preview entries.");
                 Engine.FinishUpload(item.Id, true, "", "Preview");
                 return new("Simulated success. No data was sent.");
+            case "retry":
+                var retry = state.Outbox.SingleOrDefault(o => o.Id == Id(data)) ?? throw new ArgumentException("Entry not found.");
+                if (retry.LocalOnly) throw new ArgumentException("This preview entry stays local. Save a new reflection after enabling your connection.");
+                if (retry.ErrorKind is "write_uncertain" or "id_conflict" && !Flag(data,"confirmed")) throw new ArgumentException("Check your sheet and confirm before retrying this uncertain write.");
+                Engine.RetryUpload(retry.Id); return new("Entry queued for retry.");
+            case "markSent":
+                var reviewed = state.Outbox.SingleOrDefault(o => o.Id == Id(data)) ?? throw new ArgumentException("Entry not found.");
+                if (reviewed.LocalOnly || !Flag(data,"confirmed")) throw new ArgumentException("Confirm that this entry is already in your sheet first.");
+                Engine.MarkAlreadySent(reviewed.Id); return new("Entry marked already sent.");
+            case "resolveSchedule":
+                Engine.ResolveSchedule(Id(data),(ScheduleDecision)Number(data,"decision",0,2)); return new("Schedule choice saved.");
             default: throw new ArgumentException("Unknown preview command.");
         }
+    }
+    internal static long ParseLocalTime(string value)
+    {
+        if(!DateTime.TryParseExact(value,"yyyy-MM-ddTHH:mm",CultureInfo.InvariantCulture,DateTimeStyles.None,out var local)
+            || TimeZoneInfo.Local.IsInvalidTime(local) || TimeZoneInfo.Local.IsAmbiguousTime(local)) throw new ArgumentException("Choose an unambiguous local date and time.");
+        return new DateTimeOffset(local).ToUnixTimeMilliseconds();
     }
     private ReflectionPrompt RequiredPrompt(Guid id) => Engine.Snapshot.Prompts.SingleOrDefault(p => p.Id == id) ?? throw new ArgumentException("That reflection is no longer pending.");
     private static Guid Id(JsonElement data) => Guid.TryParse(Text(data, "id", 36), out var id) ? id : throw new ArgumentException("Invalid record identifier.");

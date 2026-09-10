@@ -36,6 +36,7 @@ public sealed class SheetsClient : IDisposable
     public Task<SheetReply> Upload(ConnectionSettings settings, OutboxItem item, CancellationToken cancellation = default) => Send(settings, item, cancellation);
     private async Task<SheetReply> Send(ConnectionSettings settings, OutboxItem? item, CancellationToken cancellation, bool pingTest = false)
     {
+        if (item?.LocalOnly == true) return new(false, "settings_required", "This entry is local only and cannot be uploaded.");
         var invalid = Validate(settings);
         if (invalid is not null) return new(false, "settings_required", invalid);
         if (item is not null && item.ReceiverUrl.Length > 0 && !ConnectionSetup.SameReceiver(item.ReceiverUrl, settings.WebAppUrl))

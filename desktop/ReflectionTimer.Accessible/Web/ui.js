@@ -2,6 +2,11 @@ export function setText(element, value) {
   const text = String(value ?? '');
   if (element.textContent !== text) element.textContent = text;
 }
+export function setOptions(select, choices, value) {
+  const signature=JSON.stringify(choices);
+  if(select.dataset.choices!==signature){select.replaceChildren(...choices.map(c=>new Option(c.label,String(c.value))));select.dataset.choices=signature;}
+  if(select.value!==String(value))select.value=String(value);
+}
 export function formatClock(seconds) {
   const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = seconds % 60;
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
