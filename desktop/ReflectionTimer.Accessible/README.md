@@ -1,4 +1,4 @@
-# Reflection Timer accessibility preview 0.3
+# Reflection Timer accessibility preview 0.4
 
 This local preview adds semantic HTML in WebView2 to the existing C# timer, storage, audio, and Sheets services. It retains the original window model and control layout. Development is on `accessibility/webview2-prototype`; production remains 3.12.9. Do not merge into master, update the public repository page, publish a release, or replace an installed copy until reviewed.
 
@@ -19,13 +19,21 @@ The original four color palettes, flat App tabs, separate audio sections, three 
 
 Extract the entire portable folder and run `ReflectionTimer.AccessibilityPreview.exe`. .NET is included; Microsoft Edge WebView2 Evergreen Runtime must be installed. A startup error explains how to obtain it if missing.
 
-The default preview profile is `%LOCALAPPDATA%\ReflectionTimerAccessibilityPreview\review`. `--profile review-03` selects a separate fresh profile. Names accept only letters, digits, and hyphens. Only one process can use a profile. Earlier preview data can be reopened after quitting the earlier process using that profile.
+The default preview profile is `%LOCALAPPDATA%\ReflectionTimerAccessibilityPreview\review`. `--profile review-04` selects a separate fresh profile. Names accept only letters, digits, and hyphens. Only one process can use a profile. Earlier preview data can be reopened after quitting the earlier process using that profile.
 
 Closing App hides it. Reopen it from the preview tray icon; choose **Quit desktop app** or **Quit accessibility preview** in the tray to exit. Open reflection drafts are flushed before exit. Closing Compact hides only the floating window. Compact/Time-only do not appear in Alt+Tab, matching the original; App and session-end windows do.
 
 The original Ctrl+Alt shortcuts are registered when available: T for App, slash to shrink/hide floating controls, period to focus Compact (twice for App), comma for a check-in, and backtick to end early. Another running timer can already own those chords. Failures are recorded in diagnostics; they do not replace another app's registration. Tray and App controls remain available.
 
-This build does not access the installed app's profile or change its startup registration. It does not install itself or start automatically with Windows.
+This build does not access the installed app’s profile or change its startup registration. Its optional Windows sign-in checkbox registers only this preview executable and named preview profile, using a separate registry value; it is off by default. Keep the extracted folder in place if enabling it. No startup registration is changed during installation or ordinary launch.
+
+## Restored App pages in 0.4
+
+The Start timer at label, field, and button form one horizontal row. Save settings is shown only on Settings; Ctrl+Enter saves settings only on that tab. Scheduling restores its seven original columns and Edit selected / Remove selected / Import action bar. Outbox restores four columns, the selected reflection below the table, and its shared action bar. Native table cells remain individually readable; keyboard-accessible radio selectors in the first cell maintain selection without adding a visible column.
+
+Audio restores the original group order, App sound sliders in both Timer and Settings, Disruptive / Assertive / Polite choices, event sliders, fade duration enablement and explanation, Preview audio / Choose MP3, and Stop all app audio. Scheduling retains its own sound volume and low-time options.
+
+Guided setup opens a three-step native HTML dialog sharing the Settings draft. Theme preview, shortcut availability, startup preference, readable diagnostic history, and the original page explanations are present. See APP-PAGE-AUDIT.md for the source comparison and verification limits.
 
 ## Functions available for review
 
@@ -46,7 +54,7 @@ The user reported that text and table navigation in 0.1 worked well. That suppor
 
 A fresh profile contains two example schedules and two example Outbox records. Reflections saved before a valid connection exists remain **Local preview only** permanently. Enabling a connection cannot adopt or upload them. **Simulate success** is available only for these records and makes no request.
 
-No Sheets requests occur until the user saves a valid connection and explicitly enables delivery. Verification uses an authenticated ping. New connected reflections then use the existing request-ID/retry protocol; practice reflections use the receiver's test tab. Pausing prevents the next write but cannot retract a request already sent. Uncertain writes require explicit review before retrying or marking already sent. Entries retain their destination; the shared engine blocks unsafe account changes.
+Save & test connection explicitly performs an authenticated ping. Confirming the extension is off and saving a valid connection enables delivery. Settings can also be saved incomplete; invalid connections never send. New connected reflections then use the existing request-ID/retry protocol; practice reflections use the receiver's test tab. Pausing prevents the next write but cannot retract a request already sent. Uncertain writes require explicit review before retrying or marking already sent. Entries retain their destination; the shared engine blocks unsafe account changes.
 
 `LocalOnly` is enforced by upload selection and the HTTP client. It defaults to false, preserving normal production offline binding. Service tests use a simulated receiver and silent audio; no real spreadsheet was used for automated verification.
 
@@ -56,8 +64,8 @@ The host allows only exact packaged resources under its local virtual origin. It
 
 | Check | Result |
 | --- | --- |
-| Engine, adapter, storage, and service checks | 44 passed |
-| Browser semantics, behavior, and view checks | 39 passed |
+| Engine, adapter, storage, and service checks | 52 passed |
+| Browser semantics, behavior, and view checks | 64 passed |
 | Shared production delivery safety checks | 40 passed |
 | Full legacy suite | 477 passed; 16 native focus/theme failures |
 | Untouched 3.12.9 theme comparison | Same 13 theme failures |
@@ -79,7 +87,7 @@ The native computer-use tool could not reliably capture the foreground preview o
 6. Check Later, Skip, Save & send, and exit with unfinished drafts. Use a tester-owned sheet only after deliberately enabling delivery.
 7. Try JAWS, NVDA, Narrator, keyboard-only use, contrast themes, enlarged text, zoom, and different monitor/DPI arrangements. Record versions, exact keys, expected behavior, and observed speech/focus.
 
-Before production adoption: resolve native focus findings, complete reader and functional acceptance, and implement reviewed existing-profile migration and installer/startup integration. Do not present this preview as complete production parity or universally screen-reader compatible.
+Before production adoption: resolve native focus findings, complete reader and functional acceptance, and implement reviewed existing-profile migration and installer integration. Do not present this preview as complete production parity or universally screen-reader compatible.
 
 ## Development
 

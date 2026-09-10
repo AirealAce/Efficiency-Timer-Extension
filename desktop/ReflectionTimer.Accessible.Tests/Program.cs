@@ -77,6 +77,18 @@ try {
     Check(!File.ReadAllText(Path.Combine(directory, "state.dat")).Contains("Saved local reflection."), "Preview uses encrypted storage");
     Check(new PreviewSession(encrypted).Engine.Snapshot.Outbox.Last().Message == "Saved local reflection.", "Encrypted preview data survives reopening");
 } finally { File.Delete(Path.Combine(directory, "state.dat")); if (Directory.Exists(directory)) Directory.Delete(directory); }
+var launch=PreviewStartup.Parse(["--profile","review-test","--tray"]);
+Check(launch.Profile=="review-test"&&launch.Tray&&PreviewStartup.Parse([]).Profile=="review","Startup arguments preserve the selected preview profile");
+Check(PreviewStartup.ValueName("review-test")!="Reflection Timer Desktop"&&PreviewStartup.Command(@"C:\Preview Test\Timer.exe","review-test")=="\"C:\\Preview Test\\Timer.exe\" --profile review-test --tray","Startup targets only the preview and quotes executable paths");
+foreach(var invalid in new[]{new[]{"--profile","../other"},new[]{"--tray","--tray"},new[]{"--unknown"}}){try{PreviewStartup.Parse(invalid);throw new Exception("Invalid startup arguments accepted");}catch(ArgumentException){}}
+Check(true,"Startup rejects unsafe or unrecognized arguments");
+var shortcutSession=new PreviewSession(new MemoryStore{State=PreviewSession.SampleState(now)},()=>now);
+shortcutSession.SetDurationDraft(["0","2","3"]);shortcutSession.Execute("startOrEnd",Data(new{}));
+Check(shortcutSession.Engine.Snapshot.Timer.IsRunning&&shortcutSession.Engine.Snapshot.Timer.DurationSeconds==123,"Start/end shortcut starts with the shared duration draft");
+shortcutSession.Engine.Pause();shortcutSession.Execute("startOrEnd",Data(new{}));
+Check(shortcutSession.Engine.Snapshot.Timer.IsRunning,"Start/end shortcut resumes a paused timer");
+var shortcutEnd=shortcutSession.Execute("startOrEnd",Data(new{}));
+Check(!shortcutSession.Engine.Snapshot.Timer.IsRunning&&shortcutEnd.OpenReflection.HasValue,"Start/end shortcut opens an early-end reflection");
 await ServiceTests.Run(Check);
 Console.WriteLine($"{passed} tests passed.");
 

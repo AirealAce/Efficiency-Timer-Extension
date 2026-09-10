@@ -76,14 +76,14 @@ public sealed class PreviewSession
                 allotted = SpeakTime(p.DurationSeconds), actual = p.ActualDurationSeconds is { } actual ? SpeakTime(actual) : "Unavailable",
                 completed = DateTimeOffset.FromUnixTimeMilliseconds(p.CompletedAt).ToLocalTime().ToString("g") }),
             schedules = state.Schedules.Select(s => new { s.Id, start = DateTimeOffset.FromUnixTimeMilliseconds(s.StartTime).ToLocalTime().ToString("g"),
-                duration = SpeakTime(s.DurationSeconds), repeat = s.AutoRestart ? "On" : "Off", lowTime = s.LowTime.Enabled ? "On" : "Off",
+                duration = SpeakTime(s.DurationSeconds), repeat = s.AutoRestart ? "On" : "Off", lowTime = s.LowTime.Enabled ? s.LowTime.ThresholdSeconds is {} threshold ? $"{threshold/60}:{threshold%60:00}" : "Default" : "Off",
                 status = s.AwaitingDecision ? "Needs choice" : s.WaitingForCurrentSession ? "Waiting" : "Scheduled",
                 editStart = DateTimeOffset.FromUnixTimeMilliseconds(s.StartTime).ToLocalTime().ToString("yyyy-MM-ddTHH:mm"), s.DurationSeconds, s.AutoRestartUntil, s.Volume }),
             outbox = state.Outbox.Select(o => new { o.Id, saved = o.SubmittedAt.LocalDateTime.ToString("g"),
                 localOnly = o.LocalOnly,
                 destination = o.LocalOnly ? "Local preview only" : o.IsTest ? "test" : o.SheetMode == "fixed" ? o.SheetName : o.SubmittedAt.ToString("MM/dd/yyyy"),
                 status = o.Status == DeliveryStatus.Sent && o.LocalOnly ? "Simulated success" : o.Status.ToString(),
-                o.Attempts, o.Message, duration = SpeakTime(o.DurationSeconds), error = o.ErrorKind.Length == 0 ? "" : TimerEngine.SafeError(o.ErrorKind) })
+                o.Attempts, o.Message, o.DurationSeconds, o.ActualDurationSeconds, o.EndedEarly, o.EarlyEndReason, o.IsCheckIn, o.NextAttemptAt, duration = SpeakTime(o.DurationSeconds), error = o.ErrorKind.Length == 0 ? "" : TimerEngine.SafeError(o.ErrorKind) })
         };
     }
     public void Tick()
@@ -100,6 +100,16 @@ public sealed class PreviewSession
         var state = Engine.Snapshot;
         switch (action)
         {
+            case "startOrEnd":
+                if(state.Timer.IsRunning)return Execute("end",data);
+                var duration=state.Timer.DurationSeconds;
+                if(durationDraft is {} parts){
+                    var parsed=parts.Select(p=>p.Length==0?0L:long.TryParse(p,NumberStyles.None,CultureInfo.InvariantCulture,out var value)&&value<=TimerEngine.MaxDuration?value:throw new ArgumentException("Enter valid duration fields.")).ToArray();
+                    var total=parsed[0]*3600+parsed[1]*60+parsed[2];
+                    if(total<1||total>TimerEngine.MaxDuration)throw new ArgumentException("Enter a duration between one second and one year.");
+                    duration=(int)total;
+                }
+                return Execute("toggle",JsonSerializer.SerializeToElement(new{seconds=duration,repeat=state.Timer.AutoRestart,lowTime=state.Timer.LowTime.Enabled},Json));
             case "toggle":
                 if (state.Timer.IsRunning) { Engine.Pause(); return new("Timer paused."); }
                 var seconds = Number(data, "seconds", 1, TimerEngine.MaxDuration);

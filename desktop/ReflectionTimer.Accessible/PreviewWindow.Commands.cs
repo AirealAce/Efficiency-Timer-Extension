@@ -7,7 +7,7 @@ namespace ReflectionTimer.Accessible;
 
 internal sealed partial class PreviewWindow
 {
-    private static readonly HashSet<string> SettingsCommands = ["settingsLoad", "connectionSave", "connectionPause", "setupImport", "setupExport", "setupScript", "setupRestore", "setupNewToken", "saveAppearance", "displayOption", "saveSound", "browseSound", "previewSound", "stopSound", "volume", "diagnostics", "exportDiagnostics", "markIssue", "sendPending", "setCutoff", "importSchedules", "openSheet", "clearDiagnostics", "editScheduleDraft", "browseLowSound", "previewLowSound"];
+    private static readonly HashSet<string> SettingsCommands = ["settingsLoad", "connectionSave", "connectionPause", "setupImport", "setupExport", "setupScript", "setupRestore", "setupNewToken", "saveAppearance", "displayOption", "saveSound", "browseSound", "previewSound", "stopSound", "volume", "diagnostics", "exportDiagnostics", "markIssue", "sendPending", "setCutoff", "importSchedules", "openSheet", "clearDiagnostics", "editScheduleDraft", "browseLowSound", "previewLowSound", "connectionStore", "setupGuide"];
     private static string ReadString(JsonElement data, string key, int max = 4096) => data.TryGetProperty(key,out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { } text && text.Length <= max
         ? text : throw new ArgumentException($"Enter valid {key}.");
     private static int ReadInt(JsonElement data, string key, int min, int max) => data.TryGetProperty(key,out var value) && value.TryGetInt32(out var result) && result >= min && result <= max
@@ -27,7 +27,9 @@ internal sealed partial class PreviewWindow
         var engine = app.Session.Engine; var services = app.Services; var state = engine.Snapshot;
         string message = "";
         switch (action) {
-            case "settingsLoad": break;
+            case "settingsLoad": Post(new{type="shortcuts",shortcuts=app.ShortcutState});break;
+            case "setupGuide": System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(AppContext.BaseDirectory,"START-HERE.html")){UseShellExecute=true});break;
+            case "connectionStore": services.SaveConnection(ReadConnection(data),ReadFlag(data,"enabled"));message="Settings saved.";break;
             case "editScheduleDraft":
                 app.Session.SelectScheduleDraft(data.TryGetProperty("id",out var scheduleId)&&scheduleId.ValueKind==JsonValueKind.String?scheduleId.GetGuid():null);break;
             case "browseLowSound":
@@ -72,7 +74,10 @@ internal sealed partial class PreviewWindow
                 if(!ReadFlag(data,"confirmed"))throw new ArgumentException("Confirm before clearing the diagnostic log.");
                 services.Log.Clear();Post(new{type="diagnostics",report=services.Log.Report(state)});message="Local diagnostic log cleared.";break;
             case "connectionSave":
-                message = await services.CheckAndSave(ReadConnection(data),ReadFlag(data,"enabled")); break;
+                var checkedConnection=ReadConnection(data);
+                if(ReadFlag(data,"enabled"))message=await services.CheckAndSave(checkedConnection,true);
+                else{services.SaveConnection(checkedConnection,false);message=await services.CheckConnection(checkedConnection);}
+                break;
             case "connectionPause":
                 services.SaveConnection(state.Connection,false); message = "Sheets delivery paused. Pending entries stay saved."; break;
             case "setupRestore":
@@ -86,7 +91,7 @@ internal sealed partial class PreviewWindow
                 var imported = ConnectionSetup.Import(ReadString(data,"code",16000));
                 // Import is a draft only; verification/enabling is a separate explicit action.
                 engine.SaveSetupDraft(imported,true);
-                Post(new { type = "setupImported", connection = imported });
+                Post(new { type = "setupImported", connection = imported, advance=true });
                 message = "Private setup code loaded. Verify and enable the connection when ready."; break;
             case "setupExport":
                 Post(new { type = "setupCode", code = ConnectionSetup.Export(state.Connection) });
@@ -104,9 +109,10 @@ internal sealed partial class PreviewWindow
                 var theme=(AppColorTheme)ReadInt(data,"theme",0,3);var placement=(FloatingTimerPlacement)ReadInt(data,"placement",0,7);
                 var popup=(ReflectionPopupPosition)ReadInt(data,"popup",0,4);var overlap=(ScheduleOverlapPolicy)ReadInt(data,"overlap",0,2);
                 var threshold=ReadInt(data,"threshold",1,TimerEngine.MaxDuration);
+                app.SetStartup(ReadFlag(data,"startAtLogin"));
                 engine.SetTheme(theme); engine.SetFloatingTimerPlacement(placement); engine.SetPopupPosition(popup);
                 engine.SetScheduleOverlap(overlap); engine.SetLowTimeDefault(threshold);
-                engine.SaveSettings(state.Connection,ReadFlag(data,"logging"),false,state.ExtensionDisabledConfirmed);
+                engine.SaveSettings(state.Connection,ReadFlag(data,"logging"),engine.Snapshot.StartAtLogin,state.ExtensionDisabledConfirmed);
                 engine.SetFloatingTimer(ReadFlag(data,"showCompact")); app.ApplyDisplayPreferences();
                 message="Display, schedule policy, and diagnostics preferences saved."; break;
             case "volume": engine.SetAppVolume(ReadInt(data,"volume",0,100)); message="App volume saved."; break;
@@ -125,7 +131,7 @@ internal sealed partial class PreviewWindow
                     }
                 } break;
             case "previewSound": _ = services.Play((SoundEvent)ReadInt(data,"kind",0,3),true,announcePreview:!ReadFlag(data,"quiet")); message="Playing audio preview for up to five seconds."; break;
-            case "stopSound": services.StopAudio(); message="Audio stopped."; break;
+            case "stopSound": services.StopAudio(); message="App audio stopped."; break;
             case "markIssue": services.Log.Record("issue.marked"); message="Issue marked in local diagnostics."; break;
             case "diagnostics": Post(new { type="diagnostics", report=services.Log.Report(state) }); break;
             case "exportDiagnostics":
@@ -135,7 +141,7 @@ internal sealed partial class PreviewWindow
             case "sendPending": _ = services.Sync(true); break;
             case "setCutoff":
                 long? cutoff = ReadString(data,"cutoff",40) is { Length: >0 } whenText ? PreviewSession.ParseLocalTime(whenText) : null;
-                engine.SetPreferences(state.Timer.AutoRestart,state.Timer.Volume,cutoff); message="Auto-start cutoff saved."; break;
+                engine.SetPreferences(cutoff.HasValue||state.Timer.AutoRestart,state.Timer.Volume,cutoff); message="Auto-start cutoff saved."; break;
         }
         Post(new { type="settings", settings=services.Settings() });
         Post(new{type="scheduledLow",low=PreviewSession.LowView(app.Session.ScheduledLowDraft,AudioSettings.From(engine.Snapshot).LowTimeThresholdSeconds)});

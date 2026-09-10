@@ -11,7 +11,7 @@ const layout=arrangeApp(view);
 const bridge = window.chrome?.webview;
 const requests = new Map();
 let requestSequence = 0, state, promptId, initial = true, durationDirty = false, loadedPrompt;
-let saveDelay, saving = Promise.resolve(), queued = false, lastSavedDraft = '', scheduleEdit, deliveryDecision;
+let saveDelay, saving = Promise.resolve(), queued = false, lastSavedDraft = '', scheduleEdit, deliveryDecision, selectedSchedule, selectedOutbox;
 
 function send(action, data = {}) {
   return new Promise((resolve, reject) => {
@@ -65,81 +65,92 @@ function renderReflection() {
 }
 function createTableRow(columns) {
   const row = document.createElement('tr');
-  columns.forEach((_, index) => { const cell = document.createElement(index === 0 ? 'th' : 'td'); if (index === 0) cell.scope = 'row'; row.append(cell); });
+  Array.from({length:typeof columns==='number'?columns:columns.length}).forEach((_, index) => { const cell = document.createElement(index === 0 ? 'th' : 'td'); if (index === 0) cell.scope = 'row'; row.append(cell); });
   return row;
 }
-function rowButton(cell, label, action) {
-  const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
-  button.addEventListener('click', () => { if(button.getAttribute('aria-disabled')!=='true') run(() => action(button.closest('tr').dataset.id, button)); });
-  cell.append(button); return button;
-}
 function reviewDelivery(id, action) {
+  const uncertain=['write_uncertain','id_conflict'].includes(state.outbox.find(o=>o.id===id)?.error);
   deliveryDecision={id,action};
   setText($('delivery-explanation'),action==='retry'
-    ? 'This receiver reported an uncertain write. Check your Google sheet first. Retrying creates a new request and could duplicate an entry already saved there.'
+    ? uncertain?'This receiver reported an uncertain write. Check your Google sheet first. Retrying creates a new request and could duplicate an entry already saved there.':'Check the Google Sheet first. Retrying an entry that already arrived can create a duplicate. Send it again?'
     : 'Check that this exact reflection is already in your Google sheet. Confirming removes it from pending delivery without sending it.');
-  setText($('delivery-confirm'),action==='retry'?'I checked the sheet — retry as a new request':'I found this entry in my sheet — mark already sent');
+  setText($('delivery-confirm'),action==='retry'?(uncertain?'I checked the sheet — retry as a new request':'Retry selected entry'):'I found this entry in my sheet — mark already sent');
   $('delivery-dialog').showModal();$('delivery-title').focus();
 }
 function clearScheduleEdit() {
-  scheduleEdit=undefined;setText($('schedule-legend'),'Add a session');setText($('schedule-save'),'Add session');$('schedule-cancel').hidden=true;
+  scheduleEdit=undefined;setText($('schedule-legend'),'Add a scheduled session');setText($('schedule-save'),'Add session');
+  $('schedule-start').value=localDateTime(Date.now()+3600000);$('schedule-hours').value='0';$('schedule-minutes').value='15';$('schedule-seconds').value='0';$('schedule-repeat').checked=false;$('schedule-cutoff-enabled').checked=false;$('schedule-cutoff').value='';$('schedule-cutoff').disabled=true;$('schedule-volume').value='50';setText($('schedule-volume-caption'),'App sound (50%)');
   settings.resetScheduleLow();run(()=>send('editScheduleDraft',{id:null}));
 }
-function tables() {
-  reconcileRows($('schedule-rows'), state.schedules, () => {
-    const row = createTableRow(['start','duration','repeat','low','status','cutoff','volume','action']);
-    rowButton(row.cells[7], 'Remove', async (id, button) => {
-      const next = button.closest('tr').nextElementSibling?.querySelector('button') || button.closest('tr').previousElementSibling?.querySelector('button') || $('schedule-start');
-      await send('removeSchedule', {id}); next.focus();
-    });
-    rowButton(row.cells[7], 'Edit', async id=>{
-      const record=state.schedules.find(s=>s.id===id);scheduleEdit=id;
-      $('schedule-start').value=record.editStart; $('schedule-hours').value=Math.floor(record.durationSeconds/3600);$('schedule-minutes').value=Math.floor(record.durationSeconds/60)%60;$('schedule-seconds').value=record.durationSeconds%60;
-      $('schedule-repeat').checked=record.repeat==='On';$('schedule-low').checked=record.lowTime==='On';
-      $('schedule-volume').value=record.volume;$('schedule-cutoff').value=localDateTime(record.autoRestartUntil);
-      $('schedule-cutoff-enabled').checked=!!record.autoRestartUntil;$('schedule-cutoff').disabled=!record.autoRestartUntil;
-      settings.resetScheduleLow();await send('editScheduleDraft',{id});
-      setText($('schedule-legend'),'Edit scheduled session');setText($('schedule-save'),'Save scheduled changes');$('schedule-cancel').hidden=false;$('schedule-start').focus();
-    });
-    ['Start now','Wait','Skip'].forEach((label,decision)=>rowButton(row.cells[7],label,async id=>{await send('resolveSchedule',{id,decision});$('schedule-start').focus();}));
-    return row;
-  }, (row, record) => {
-    [record.start,record.duration,record.repeat,record.lowTime,record.status,record.autoRestartUntil?new Date(record.autoRestartUntil).toLocaleString():'Off',`${record.volume}%`].forEach((text,index) => setText(row.cells[index],text));
-    row.cells[7].firstChild.setAttribute('aria-label',`Remove session starting ${record.start}`);
-    row.cells[7].children[1].setAttribute('aria-label',`Edit session starting ${record.start}`);
-    [...row.cells[7].children].slice(2).forEach(button=>{button.hidden=record.status!=='Needs choice';});
-  });
-  $('schedule-empty').hidden = state.schedules.length !== 0;
-  reconcileRows($('outbox-rows'), state.outbox, () => {
-    const row = createTableRow(['saved','destination','status','attempts','actions']);
-    rowButton(row.cells[4], 'Details', id => {
-      const item = state.outbox.find(entry => entry.id === id);
-      setText($('entry-meta'),`${item.saved}. ${item.duration}. ${item.status}.${item.error ? ' Delivery issue: '+item.error+'. Check your sheet before retrying an uncertain write.' : ''}`); setText($('entry-text'),item.message);
-      $('entry-dialog').showModal(); $('entry-title').focus();
-    });
-    rowButton(row.cells[4], 'Simulate success', id => send('simulate',{id}));
-    rowButton(row.cells[4], 'Retry delivery', id => {
-      if(['write_uncertain','id_conflict'].includes(state.outbox.find(o=>o.id===id).error)) reviewDelivery(id,'retry');
-      else return send('retry',{id});
-    });
-    rowButton(row.cells[4], 'Mark already sent',id=>reviewDelivery(id,'markSent')); return row;
-  }, (row, record) => {
-    [record.saved,record.destination,record.status,record.attempts].forEach((text,index) => setText(row.cells[index],text));
-    row.cells[4].children[0].setAttribute('aria-label',`Details for entry saved ${record.saved}`);
-    row.cells[4].children[1].setAttribute('aria-label',`Simulate success for entry saved ${record.saved}`);
-    row.cells[4].children[1].hidden=record.localOnly===false;
-    const retry=row.cells[4].children[2];retry.hidden=record.localOnly!==false;
-    retry.setAttribute('aria-label',`Retry delivery for entry saved ${record.saved}`); available(retry,!['Sent','Sending'].includes(record.status));
-    row.cells[4].children[3].hidden=record.localOnly!==false || record.status!=='NeedsReview';
-    row.cells[4].children[3].setAttribute('aria-label',`Mark already sent for entry saved ${record.saved}`);
-  });
-  $('outbox-empty').hidden = state.outbox.length !== 0;
+function selectedRow(kind) {
+  return (kind==='schedule'?state.schedules:state.outbox).find(r=>r.id===(kind==='schedule'?selectedSchedule:selectedOutbox));
 }
+function selectRow(kind,id) {
+  if(kind==='schedule')selectedSchedule=id;else selectedOutbox=id;
+  renderSelections();
+}
+function selectableRow(columns,kind) {
+  const row=createTableRow(columns),radio=document.createElement('input'),text=document.createElement('span');
+  radio.type='radio';radio.name=kind+'-selection';radio.className='row-selector';text.className='cell-text';row.cells[0].append(radio,text);
+  radio.addEventListener('change',()=>{if(radio.checked)selectRow(kind,row.dataset.id);});
+  row.addEventListener('click',()=>{radio.checked=true;selectRow(kind,row.dataset.id);});
+  return row;
+}
+function renderSelections() {
+  for(const [kind,id] of [['schedule',selectedSchedule],['outbox',selectedOutbox]]) {
+    for(const row of $(kind+'-rows').children){const selected=row.dataset.id===id;row.dataset.selected=String(selected);row.querySelector('input').checked=selected;}
+  }
+  const schedule=selectedRow('schedule'),entry=selectedRow('outbox');
+  available($('edit-schedule'),!!schedule);available($('remove-schedule'),!!schedule);
+  $('schedule-decision').hidden=schedule?.status!=='Needs choice';
+  available($('retry-selected'),!!entry&&!['Sent','Sending','Simulated success'].includes(entry.status)&&entry.localOnly===false);
+  available($('mark-selected'),entry?.status==='NeedsReview'&&entry?.localOnly===false);
+  $('local-preview-actions').hidden=!entry||entry.localOnly===false;
+  let text='';
+  if(entry){
+    const actual=entry.actualDurationSeconds;
+    text=entry.message+'\n\n'+(actual!=null?formatClock(actual)+' spent / ':'Actual time unavailable / ')+(entry.durationSeconds!=null?formatClock(entry.durationSeconds):entry.duration)+' allotted';
+    if(entry.isCheckIn)text+=' · Check-in';
+    else if(entry.endedEarly)text+=' · ended early\nReason: '+(entry.earlyEndReason||'Not supplied');
+    if(entry.status==='Pending'&&entry.nextAttemptAt)text+='\nNext retry: '+new Date(entry.nextAttemptAt).toLocaleTimeString();
+    if(entry.status==='NeedsReview')text+='\nNeeds review: '+entry.error+'. Check the Sheet before retrying.';
+    if(entry.localOnly!==false)text+='\nLocal preview only.';
+  }
+  setText($('outbox-detail'),text);
+}
+async function editSelectedSchedule() {
+  const record=selectedRow('schedule');if(!record)return;scheduleEdit=record.id;
+  $('schedule-start').value=record.editStart;$('schedule-hours').value=Math.floor(record.durationSeconds/3600);$('schedule-minutes').value=Math.floor(record.durationSeconds/60)%60;$('schedule-seconds').value=record.durationSeconds%60;
+  $('schedule-repeat').checked=record.repeat==='On';$('schedule-volume').value=record.volume;
+  setText($('schedule-volume-caption'),'App sound ('+record.volume+'%)');
+  $('schedule-cutoff').value=localDateTime(record.autoRestartUntil);$('schedule-cutoff-enabled').checked=!!record.autoRestartUntil;$('schedule-cutoff').disabled=!record.autoRestartUntil;
+  settings.resetScheduleLow();await send('editScheduleDraft',{id:record.id});
+  setText($('schedule-legend'),'Edit scheduled session');setText($('schedule-save'),'Save changes');$('schedule-start').focus();
+}
+function tables() {
+  if(!state.schedules.some(s=>s.id===selectedSchedule))selectedSchedule=state.schedules[0]?.id;
+  const entries=[...state.outbox].reverse();
+  if(!entries.some(s=>s.id===selectedOutbox))selectedOutbox=entries[0]?.id;
+  reconcileRows($('schedule-rows'),state.schedules,()=>selectableRow(7,'schedule'),(row,record)=>{
+    const values=[record.start,formatClock(record.durationSeconds),record.repeat,record.autoRestartUntil?new Date(record.autoRestartUntil).toLocaleString():'—',record.volume+'%',record.lowTime,record.status];
+    setText(row.cells[0].querySelector('.cell-text'),values[0]);
+    values.slice(1).forEach((value,i)=>setText(row.cells[i+1],value));
+    row.querySelector('input').setAttribute('aria-label','Select session starting '+record.start);
+  });
+  $('schedule-empty').hidden=state.schedules.length!==0;
+  reconcileRows($('outbox-rows'),entries,()=>selectableRow(4,'outbox'),(row,record)=>{
+    setText(row.cells[0].querySelector('.cell-text'),record.saved);
+    [record.destination,record.status,record.attempts].forEach((value,i)=>setText(row.cells[i+1],value));
+    row.querySelector('input').setAttribute('aria-label','Select entry saved '+record.saved);
+  });
+  $('outbox-empty').hidden=state.outbox.length!==0;renderSelections();
+}
+
 function render(next) {
   const previous = state; state = next;
   settings.state(state);
   if (view === 'reflection') { renderReflection(); return; }
-  setText($('visual-clock'),formatClock(state.clock.seconds)); setText($('timer-state'),state.clock.status);
+  setText($('visual-clock'),formatClock(state.clock.seconds)); setText($('timer-state'),state.clock.status==='Running'&&state.timer.endTime?'Running · ends '+new Date(state.timer.endTime).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):state.clock.status);
   if (!previous || previous.clock.status !== state.clock.status) snapshot(state.clock);
   const running = state.clock.status === 'Running';
   ['hours','minutes','seconds'].forEach(id => $(id).readOnly = running);
@@ -149,7 +160,7 @@ function render(next) {
   setText($('toggle'),running ? 'Pause' : state.clock.status === 'Paused' && !durationDirty ? 'Resume' : 'Start');
   available($('end'),running); available($('check-in'),running || state.clock.status === 'Paused');
   if (view === 'main') {
-    setText($('pending-count'),`${state.prompts.length} pending reflection${state.prompts.length === 1 ? '' : 's'}.`);
+    setText($('pending-count'),`${state.prompts.length} pending reflection(s) · ${state.outbox.filter(o=>!['Sent','Simulated success'].includes(o.status)).length} unsent entry/entries`);
     reconcileRows($('pending-list'),state.prompts,record => {
       const li=document.createElement('li'), button=document.createElement('button'); button.type='button'; li.append(button);
       button.addEventListener('click',()=>run(()=>send('openReflection',{id:record.id}))); return li;
@@ -177,7 +188,7 @@ bridge?.addEventListener('message', event => {
   else if (message.type === 'timeRead') snapshot(message.clock,true);
   else if (message.type === 'announcement') announce(message.message);
   else if (message.type === 'durationDraft'&&view!=='reflection')sharedDuration(message.parts);
-  else if (message.type === 'focusTimer') {layout.select('timer');const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
+  else if (message.type === 'focusTimer') {if(document.querySelector('dialog[open]'))return;if(message.selectTimer)layout.select('timer');if(document.body.dataset.tab!=='timer')return;const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
   else if (message.type === 'flush') {
     saveDraft().then(()=>send('flushed')).catch(e=>{ error(e.message); send('flushFailed').catch(()=>{}); });
   } else settings.message(message);
@@ -185,7 +196,7 @@ bridge?.addEventListener('message', event => {
 const settings=settingsUI({send,run,bind,view,announce});
 bind('delivery-confirm',async()=>{
   const decision=deliveryDecision;await send(decision.action,{id:decision.id,confirmed:true});$('delivery-dialog').close();
-  const target=$('outbox-rows').querySelector(`[data-id="${CSS.escape(decision.id)}"] button`) || $('send-pending');target.focus();
+  $('retry-selected').focus();
 });
 ['hours','minutes','seconds'].forEach(id => $(id).addEventListener('input',()=>{const parts=['hours','minutes','seconds'].map(id=>$(id).value);sharedDuration(parts);run(()=>send('durationDraft',{parts}));}));
 $('timer-editor').addEventListener('submit',event=>{ event.preventDefault(); run(async()=>{
@@ -198,7 +209,15 @@ bind('end',()=>send('end')); bind('check-in',()=>send('checkIn')); bind('practic
 $('repeat').addEventListener('change',()=>run(()=>send('repeat',{enabled:$('repeat').checked})));
 bind('open-compact',()=>send('toggleCompact')); bind('open-main',()=>send('main')); bind('close-compact',()=>send('close'));
 if(view==='main'){
-  bind('show-pending',()=>state.prompts.length?send('openReflection',{id:state.prompts[0].id}):announce('No pending reflections.'));
+  bind('show-pending',async()=>{if(!state.prompts.length)return announce('No pending reflections.');for(const prompt of state.prompts)await send('openReflection',{id:prompt.id});});
+  bind('edit-schedule',editSelectedSchedule);
+  bind('remove-schedule',async()=>{if(!selectedSchedule)return;const id=selectedSchedule;await send('removeSchedule',{id});if(scheduleEdit===id)clearScheduleEdit();($('schedule-rows').querySelector('input:checked')||$('schedule-start')).focus();});
+  for(const [id,decision] of [['schedule-start-now',0],['schedule-wait',1],['schedule-skip',2]])bind(id,()=>selectedSchedule&&send('resolveSchedule',{id:selectedSchedule,decision}));
+  bind('retry-selected',()=>selectedOutbox&&reviewDelivery(selectedOutbox,'retry'));
+  bind('mark-selected',()=>selectedOutbox&&send('markSent',{id:selectedOutbox,confirmed:true}));
+  bind('simulate-selected',()=>selectedOutbox&&send('simulate',{id:selectedOutbox}));
+  $('schedule-volume').addEventListener('input',()=>setText($('schedule-volume-caption'),'App sound ('+$('schedule-volume').value+'%)'));
+  $('schedule-repeat').addEventListener('change',()=>{if(!$('schedule-repeat').checked){$('schedule-cutoff-enabled').checked=false;$('schedule-cutoff').disabled=true;}});
   bind('timer-mark-issue',()=>send('markIssue'));bind('quit',()=>send('quit'));
   $('quick-schedule-form').addEventListener('submit',event=>{event.preventDefault();run(()=>send('schedule',{start:$('quick-start').value,seconds:readDuration(),repeat:$('repeat').checked,lowOptions:settings.timerLow(),fromTimer:true,volume:state.appVolume??50,cutoff:$('cutoff-enabled').checked?$('cutoff').value:''}));});
 }
@@ -211,7 +230,7 @@ $('schedule-form').addEventListener('submit',event=>{event.preventDefault();run(
   await send('schedule',{id:scheduleEdit,start:$('schedule-start').value,seconds,repeat:$('schedule-repeat').checked,lowTime:$('schedule-low').checked,
     lowOptions:settings.scheduleLow(),volume:Number($('schedule-volume').value),cutoff:$('schedule-cutoff-enabled').checked?$('schedule-cutoff').value:''});clearScheduleEdit();
 });});
-$('schedule-cutoff-enabled').addEventListener('change',()=>{$('schedule-cutoff').disabled=!$('schedule-cutoff-enabled').checked;if($('schedule-cutoff-enabled').checked&&!$('schedule-cutoff').value)$('schedule-cutoff').value=localDateTime(new Date($('schedule-start').value||Date.now()).getTime()+3600000);});
+$('schedule-cutoff-enabled').addEventListener('change',()=>{$('schedule-cutoff').disabled=!$('schedule-cutoff-enabled').checked;if($('schedule-cutoff-enabled').checked)$('schedule-repeat').checked=true;if($('schedule-cutoff-enabled').checked&&!$('schedule-cutoff').value)$('schedule-cutoff').value=localDateTime(new Date($('schedule-start').value||Date.now()).getTime()+3600000);});
 bind('schedule-cancel',()=>{clearScheduleEdit();$('schedule-start').focus();});
 ['reflection-text','early-reason'].forEach(id=>$(id).addEventListener('input',()=>{
   setText($('draft-status'),'Saving draft…'); clearTimeout(saveDelay); saveDelay=setTimeout(()=>saveDraft().catch(e=>error(e.message)),300);
@@ -225,4 +244,5 @@ bind('later',async()=>{await saveDraft();await send('close');});
 bind('skip-reflection',async()=>{clearTimeout(saveDelay);await saving.catch(()=>{});queued=true;try{await send('skip',{id:promptId});}catch(e){queued=false;throw e;}});
 ['reflection-text','early-reason'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();$('reflection-form').requestSubmit();}}));
 ['hours','minutes','seconds'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();if(state?.clock.status!=='Running')$('timer-editor').requestSubmit();}}));
+if(view==='main')$('schedule-start').value=localDateTime(Date.now()+3600000);
 run(()=>send('ready'));

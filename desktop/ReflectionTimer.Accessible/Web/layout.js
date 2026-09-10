@@ -8,7 +8,7 @@ export function arrangeApp(view) {
   const panels=new Map(),buttons=new Map(),scroll=new Map();let current='timer';
   for(const [id,label] of definitions){const button=document.createElement('button');button.type='button';button.id=`tab-${id}`;button.textContent=label;button.setAttribute('role','tab');button.setAttribute('aria-controls',`panel-${id}`);nav.append(button);buttons.set(id,button);
     const panel=document.createElement('div');panel.id=`panel-${id}`;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);panels.set(id,panel);
-    if(id!=='settings')panel.append($(id));else panel.append($('appearance'),$('audio'),$('connection'));
+    if(id!=='settings')panel.append($(id));else panel.append($('appearance'),$('audio'),$('duplicate-timers'),$('connection'),$('startup'));
     main.append(panel);button.addEventListener('click',()=>select(id));
     button.addEventListener('keydown',event=>{const offset=event.key==='ArrowRight'?1:event.key==='ArrowLeft'?-1:0;let next;
       if(offset)next=definitions[(definitions.findIndex(x=>x[0]===id)+offset+definitions.length)%definitions.length][0];
@@ -16,7 +16,7 @@ export function arrangeApp(view) {
       if(next){event.preventDefault();select(next);buttons.get(next).focus();}
     });
   }
-  function select(id){if(!panels.has(id))return;scroll.set(current,main.scrollTop);for(const [key,panel] of panels){panel.hidden=key!==id;const button=buttons.get(key);button.setAttribute('aria-selected',String(key===id));button.tabIndex=key===id?0:-1;}current=id;main.scrollTop=scroll.get(id)||0;}
+  function select(id){if(!panels.has(id))return;scroll.set(current,main.scrollTop);for(const [key,panel] of panels){panel.hidden=key!==id;const button=buttons.get(key);button.setAttribute('aria-selected',String(key===id));button.tabIndex=key===id?0:-1;}current=id;document.body.dataset.tab=id;document.querySelector('footer').hidden=id!=='settings';document.dispatchEvent(new CustomEvent('appTabChanged',{detail:id}));main.scrollTop=scroll.get(id)||0;}
   document.querySelector('.page-header>.main-only').classList.add('sr-only');
   document.querySelector('.eyebrow').classList.add('sr-only');
   const timer=$('timer');$('timer-heading').classList.add('sr-only');$('timer-state').after($('time-snapshot'));
@@ -25,7 +25,7 @@ export function arrangeApp(view) {
   timer.querySelector('.hint').classList.add('sr-only');$('read-time').classList.add('sr-only');
   const editor=$('timer-editor'),actions=editor.querySelector('.actions'),options=editor.querySelector('.options');editor.querySelector('legend').classList.add('sr-only');$('duration-help').classList.add('sr-only');
   editor.after(options);$('repeat').closest('label').after($('cutoff-form'));$('end').hidden=true;$('check-in').classList.add('sr-only');
-  const quick=document.createElement('form');quick.id='quick-schedule-form';quick.className='option-row';quick.innerHTML='<label>Start timer at<input id="quick-start" type="datetime-local" required></label><button type="submit">Schedule session</button>';
+  const quick=document.createElement('form');quick.id='quick-schedule-form';quick.className='option-row';quick.innerHTML='<label for="quick-start">Start timer at</label><input id="quick-start" type="datetime-local" required><button type="submit">Schedule session</button>';
   const later=new Date(Date.now()+3600000);quick.querySelector('input').value=new Date(later-later.getTimezoneOffset()*60000).toISOString().slice(0,16);
   editor.after(quick);const help=document.createElement('p');help.textContent='Uses the duration and options on this page. View or cancel it in Scheduling session times.';quick.after(help);
   options.after($('volume-form'));
@@ -35,10 +35,10 @@ export function arrangeApp(view) {
   const mark=document.createElement('button');mark.id='timer-mark-issue';mark.type='button';mark.textContent='Mark issue';buttonsRow.append(mark);pending.prepend(buttonsRow);
   timer.append(pending,$('open-compact'));
   const quit=document.createElement('button');quit.id='quit';quit.type='button';quit.textContent='Quit desktop app';
-  const hint=document.createElement('p');hint.textContent='Closing this window keeps the timer running in the tray. Right-click its tray icon to quit.';timer.append(hint,quit);
+  const hint=document.createElement('p');hint.textContent='Closing this window keeps the timer running in the tray. Right-click its tray icon to quit. Test reflections only go to the test tab.';timer.append(hint,quit);
   const guide=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Accessibility preview review guide';guide.append(summary,$('review'));panels.get('diagnostics').append(guide);
   ['schedule-heading','outbox-heading','diagnostics-heading'].forEach(id=>$(id).classList.add('sr-only'));
-  $('appearance-heading').textContent='App theme and display';$('audio-heading').textContent='Audio';
+  $('appearance-heading').textContent='App theme';$('audio-heading').textContent='Audio';
   $('practice').textContent='Test reflection prompt';$('open-compact').textContent='Show / hide floating timer';
   $('reset').textContent='Reset';
   select('timer');return {select};

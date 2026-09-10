@@ -44,7 +44,7 @@ public sealed class PreviewServices : IDisposable
     {
         var s = engine.Snapshot; var audio = AudioSettings.From(s);
         return new { s.Connection.SheetUrl, s.Connection.WebAppUrl, s.Connection.SheetMode, s.Connection.SheetName,
-            hasToken = s.Connection.ApiToken.Length > 0, hasDraft = s.SetupDraft is not null, s.ExtensionDisabledConfirmed, s.LoggingEnabled,
+            hasToken = s.Connection.ApiToken.Length > 0, hasDraft = s.SetupDraft is not null, s.ExtensionDisabledConfirmed, s.LoggingEnabled, s.StartAtLogin,
             connected = SheetsClient.Validate(s.Connection) is null && s.ExtensionDisabledConfirmed,
             volume = s.Timer.Volume, threshold = audio.LowTimeThresholdSeconds, s.ShowFloatingTimer,
             placement = (int)s.FloatingPlacement, popup = (int)s.PopupPosition, theme = (int)s.Theme, overlap = (int)s.ScheduleOverlap,
@@ -56,8 +56,17 @@ public sealed class PreviewServices : IDisposable
     public void SaveConnection(ConnectionSettings connection, bool enabled)
     {
         var state = engine.Snapshot;
-        engine.SaveSettings(connection, state.LoggingEnabled, false, enabled);
+        engine.SaveSettings(connection, state.LoggingEnabled, state.StartAtLogin, enabled);
         connectionRevision++;
+    }
+    public async Task<string> CheckConnection(ConnectionSettings connection)
+    {
+        var invalid=SheetsClient.Validate(connection);
+        if(invalid is not null)throw new ArgumentException(invalid);
+        var reply=await sheets.Ping(connection,stop.Token);
+        Log.Record("connection.checked",value:reply.Success?1:0);
+        if(!reply.Success)throw new ArgumentException(reply.DisplayMessage);
+        return "Connection works · "+reply.Target;
     }
     public async Task<string> CheckAndSave(ConnectionSettings connection, bool enabled)
     {

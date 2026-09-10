@@ -4,12 +4,12 @@ export function mountLowTime({send,run}){
   const controls=[];
   for(const [target,enabledId,thresholdId] of [['timer','low-time','threshold'],['schedule','schedule-low','schedule-low-threshold']]){
     const enabled=$(enabledId),options=document.createElement('div');options.className='low-time-options';enabled.closest('label').after(options);
-    enabled.closest('label').lastChild.textContent=target==='timer'?'Low on time audio':'Low on time audio for this schedule';
+    enabled.closest('label').lastChild.textContent='Low on time audio';
     let threshold=$(thresholdId);
     if(threshold)threshold.closest('label').remove();else{threshold=document.createElement('input');threshold.id=thresholdId;}
     threshold.type='number';threshold.min='1';threshold.max='31536000';threshold.value='15';threshold.setAttribute('aria-label','Low-time seconds remaining');
     const row=document.createElement('div');row.className='option-row';
-    const label=document.createElement('label');label.className='check';const inherit=document.createElement('input');inherit.type='checkbox';inherit.checked=true;inherit.id=`${target}-low-inherit`;label.append(inherit,'Use default threshold');row.append(label,threshold);
+    const label=document.createElement('label');label.className='check';const inherit=document.createElement('input');inherit.type='checkbox';inherit.checked=true;inherit.id=`${target}-low-inherit`;label.append(inherit,'Use default threshold');const suffix=document.createElement('span');suffix.textContent='seconds remaining';row.append(label,threshold,suffix);
     const caption=document.createElement('p'),source=document.createElement('select');source.id=`${target}-low-track`;source.setAttribute('aria-label',target==='timer'?'Session low-time sound':'Scheduled low-time sound');
     const actions=document.createElement('div');actions.className='option-row';const preview=document.createElement('button'),browse=document.createElement('button');preview.type=browse.type='button';preview.textContent='Preview audio';browse.textContent='Choose MP3…';actions.append(source,preview,browse);options.append(row,caption,actions);
     const control={target,enabled,options,threshold,inherit,source,caption,value:{enabled:true,inherit:true,threshold:15,track:0,custom:false},dirty:false};controls.push(control);

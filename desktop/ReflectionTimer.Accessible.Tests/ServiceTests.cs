@@ -9,7 +9,7 @@ static class ServiceTests
     internal static async Task Run(Action<bool,string> check)
     {
         var directory=Path.Combine(Path.GetTempPath(),"ReflectionTimer-Services-"+Guid.NewGuid().ToString("N"));
-        var state=PreviewSession.SampleState(DateTimeOffset.Now);
+        var state=PreviewSession.SampleState(DateTimeOffset.Now);state.StartAtLogin=true;
         state.Outbox=state.Outbox.Select(o=>o with { LocalOnly=false }).ToList(); // Upgrade a 0.1 profile.
         var session=new PreviewSession(new MemoryStore { State=state });
         var handler=new Receiver(); var audio=new SilentAudio();
@@ -21,6 +21,7 @@ static class ServiceTests
             await services.Sync(true);
             check(handler.Actions.Count==0,"Disconnected preview makes no delivery requests");
             await services.CheckAndSave(connection,false);
+            check(session.Engine.Snapshot.StartAtLogin,"Saving connection preserves the preview startup preference");
             check(handler.Actions.Count==0 && session.Engine.Snapshot.Outbox.All(o=>o.LocalOnly && o.SheetUrl==""),"Connection save preserves migrated local entries and makes no request while paused");
             await services.CheckAndSave(connection,true);
             check(handler.Actions.SequenceEqual(["ping"]),"Enabling delivery authenticates a receiver before saving");
@@ -57,6 +58,9 @@ static class ServiceTests
             check(audio.Count==before+1,"Sound preview uses the shared audio backend");
             session.Engine.SetAppVolume(0);before=audio.Count;await services.Play(SoundEvent.LowTime,true);
             check(audio.Count==before,"Muted audio never opens a playback backend");
+            var connectionBefore=JsonSerializer.Serialize(session.Engine.Snapshot);var actionsBefore=handler.Actions.Count;
+            await services.CheckConnection(connection);
+            check(handler.Actions.Count==actionsBefore+1&&handler.Actions.Last()=="ping"&&JsonSerializer.Serialize(session.Engine.Snapshot)==connectionBefore,"Explicit connection test uses a read-only ping without enabling delivery");
             var encoded=ConnectionSetup.Export(connection);
             check(ConnectionSetup.Import(encoded)==connection,"Private connection setup code round-trips without changing the destination");
         }

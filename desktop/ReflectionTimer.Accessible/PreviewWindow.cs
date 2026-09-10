@@ -14,7 +14,7 @@ internal sealed partial class PreviewWindow : Form
     private readonly PreviewApplication app;
     private readonly WebView2 browser = new() { Dock = DockStyle.Fill, AccessibleName = "Reflection Timer accessibility preview" };
     private bool ready, allowClose, requestingClose;
-    private bool focusOnReady;
+    private bool focusOnReady, selectTimerOnReady;
     private (ReflectionTimer.Core.AppColorTheme Theme,bool Contrast)? appliedTheme;
     private TaskCompletionSource? flush;
     internal PreviewWindow(PreviewApplication app, string view, Guid? prompt)
@@ -22,7 +22,7 @@ internal sealed partial class PreviewWindow : Form
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · accessibility preview 0.3" : view == "compact" ? "Reflection Timer — Compact view · accessibility preview 0.3" : "Reflection Timer — Session end · accessibility preview 0.3";
+        Text = view == "main" ? "Reflection Timer — App view · accessibility preview 0.4" : view == "compact" ? "Reflection Timer — Compact view · accessibility preview 0.4" : "Reflection Timer — Session end · accessibility preview 0.4";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(368, 284) : new(560, app.Session.Engine.Snapshot.Prompts.Any(p=>p.Id==prompt&&p.EndedEarly)?525:440);
         MinimumSize = view == "main" ? new(420, 400) : view == "compact" ? new(80,32) : new(420,360);
@@ -48,7 +48,7 @@ internal sealed partial class PreviewWindow : Form
     }
     protected override bool ShowWithoutActivation => View is "compact" or "reflection";
     protected override CreateParams CreateParams {get{var value=base.CreateParams;if(View=="compact")value.ExStyle=(value.ExStyle|0x80)&~0x40000;return value;}}
-    internal void FocusControls(){if(!ready){focusOnReady=true;return;}Post(new{type=View=="compact"?"expandCompact":"focusTimer"});}
+    internal void FocusControls(bool timerPage=false){if(!ready){focusOnReady=true;selectTimerOnReady=timerPage;return;}Post(new{type=View=="compact"?"expandCompact":"focusTimer",selectTimer=timerPage});}
     internal void ApplyWindowTheme()
     {
         if(!IsHandleCreated)return;var theme=app.Session.Engine.Snapshot.Theme;var contrast=SystemInformation.HighContrast;
@@ -62,7 +62,7 @@ internal sealed partial class PreviewWindow : Form
     internal void ApplyPosition()
     {
         if(View=="main") return;
-        var state=app.Session.Engine.Snapshot; var area=Screen.FromControl(app.MainForm!).WorkingArea;
+        var state=app.Session.Engine.Snapshot; var area=View=="reflection"?Screen.FromPoint(Cursor.Position).WorkingArea:Screen.FromControl(app.MainForm!).WorkingArea;
         if(View=="compact"&&state.FloatingPlacement==ReflectionTimer.Core.FloatingTimerPlacement.Custom&&state.FloatingTimerLeft is {} left&&state.FloatingTimerTop is {} top){area=Screen.FromPoint(new(left,top)).WorkingArea;Location=new(Math.Clamp(left,area.Left,Math.Max(area.Left,area.Right-Width)),Math.Clamp(top,area.Top,Math.Max(area.Top,area.Bottom-Height)));return;}
         var position=View=="compact" ? (int)state.FloatingPlacement : state.PopupPosition switch {
             ReflectionTimer.Core.ReflectionPopupPosition.TopLeft=>2, ReflectionTimer.Core.ReflectionPopupPosition.TopRight=>3,
@@ -101,7 +101,7 @@ internal sealed partial class PreviewWindow : Form
         catch { ShowFailure("The local web interface could not start. Close and reopen the preview. Your saved preview data is retained."); }
     }
     internal static bool Allowed(string address) => Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Scheme == "https" && uri.Host == "reflection-timer.invalid"
-        && uri.IsDefaultPort && uri.UserInfo.Length == 0 && uri.AbsolutePath is "/index.html" or "/app.js" or "/app.css" or "/ui.js" or "/settings.js" or "/audio.js" or "/low-time.js" or "/compact.html" or "/compact.js" or "/compact.css" or "/layout.js";
+        && uri.IsDefaultPort && uri.UserInfo.Length == 0 && uri.AbsolutePath is "/index.html" or "/app.js" or "/app.css" or "/ui.js" or "/settings.js" or "/audio.js" or "/setup.js" or "/low-time.js" or "/compact.html" or "/compact.js" or "/compact.css" or "/layout.js";
     private void ShowFailure(string text)
     {
         if (IsDisposed) return;
@@ -124,8 +124,8 @@ internal sealed partial class PreviewWindow : Form
             if (action == "ready") {
                 ready = true; Post(new { type = "init", view = View, promptId = PromptId, state = app.Session.View() });
                 if(View=="main" && app.RecoveryNotice is { } notice) { Post(new { type="announcement", message=notice }); app.RecoveryNotice=null; }
-                if(focusOnReady){focusOnReady=false;FocusControls();}
-                if(View=="main")ReflectionTimer.Desktop.WindowActivation.Focus(this);
+                if(focusOnReady){focusOnReady=false;FocusControls(selectTimerOnReady);}
+                if(View=="main"&&!app.StartInTray)ReflectionTimer.Desktop.WindowActivation.Focus(this);
                 Reply(requestId); return;
             }
             if (action == "flushed") { flush?.TrySetResult(); Reply(requestId); return; }
@@ -146,7 +146,7 @@ internal sealed partial class PreviewWindow : Form
                 if(View!="compact") throw new ArgumentException("Only the compact window can request this size.");
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · accessibility preview 0.3";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · accessibility preview 0.4";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }
