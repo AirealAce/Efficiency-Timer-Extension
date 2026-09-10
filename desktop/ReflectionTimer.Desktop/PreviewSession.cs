@@ -60,6 +60,7 @@ public sealed class PreviewSession
         return new { seconds, text = SpeakTime(seconds), status };
     }
     public static string Status(TimerState timer) => timer.IsRunning ? "Running" : TimerEngine.IsPaused(timer) ? "Paused" : timer.RemainingSeconds == 0 ? "Finished" : "Ready";
+    internal bool AutoSendReflection(Guid id) => Engine.AutoSendReflection(id, isolatedProfile && SheetsClient.Validate(Engine.Snapshot.Connection) is not null);
     public static string SpeakTime(int total)
     {
         var parts = new List<string>();
@@ -88,7 +89,7 @@ public sealed class PreviewSession
                 localOnly = o.LocalOnly,
                 destination = o.LocalOnly ? "Local preview only" : o.IsTest ? "test" : o.SheetMode == "fixed" ? o.SheetName : o.SubmittedAt.ToString("MM/dd/yyyy"),
                 status = o.Status == DeliveryStatus.Sent && o.LocalOnly ? "Simulated success" : o.Status.ToString(),
-                o.Attempts, o.Message, o.DurationSeconds, o.ActualDurationSeconds, o.EndedEarly, o.EarlyEndReason, o.IsCheckIn, o.NextAttemptAt, duration = SpeakTime(o.DurationSeconds), error = o.ErrorKind.Length == 0 ? "" : TimerEngine.SafeError(o.ErrorKind) })
+                o.Attempts, o.Message, o.DurationSeconds, o.ActualDurationSeconds, o.EndedEarly, o.EarlyEndReason, o.IsCheckIn, o.AutoSent, o.NextAttemptAt, duration = SpeakTime(o.DurationSeconds), error = o.ErrorKind.Length == 0 ? "" : TimerEngine.SafeError(o.ErrorKind) })
         };
     }
     public void Tick()

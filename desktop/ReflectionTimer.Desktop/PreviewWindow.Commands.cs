@@ -55,6 +55,9 @@ internal sealed partial class PreviewWindow
                     case "popup":engine.SetPopupPosition((ReflectionPopupPosition)ReadInt(data,"value",0,4));break;
                     case "overlap":engine.SetScheduleOverlap((ScheduleOverlapPolicy)ReadInt(data,"value",0,2));break;
                     case "showCompact":engine.SetFloatingTimer(ReadInt(data,"value",0,1)==1);app.ApplyDisplayPreferences();break;
+                    case "compactAlwaysOnTop":engine.SetAlwaysOnTop(ReadInt(data,"value",0,1)==1,state.TimeOnlyAlwaysOnTop,state.PromptAlwaysOnTop);break;
+                    case "timeOnlyAlwaysOnTop":engine.SetAlwaysOnTop(state.CompactAlwaysOnTop,ReadInt(data,"value",0,1)==1,state.PromptAlwaysOnTop);break;
+                    case "promptAlwaysOnTop":engine.SetAlwaysOnTop(state.CompactAlwaysOnTop,state.TimeOnlyAlwaysOnTop,ReadInt(data,"value",0,1)==1);break;
                     default:throw new ArgumentException("Choose an available display preference.");
                 }break;
             case "importSchedules":
@@ -113,7 +116,9 @@ internal sealed partial class PreviewWindow
                 engine.SetTheme(theme); engine.SetFloatingTimerPlacement(placement); engine.SetPopupPosition(popup);
                 engine.SetScheduleOverlap(overlap); engine.SetLowTimeDefault(threshold);
                 engine.SaveSettings(state.Connection,ReadFlag(data,"logging"),engine.Snapshot.StartAtLogin,state.ExtensionDisabledConfirmed);
-                engine.SetFloatingTimer(ReadFlag(data,"showCompact")); app.ApplyDisplayPreferences();
+                engine.SetFloatingTimer(ReadFlag(data,"showCompact"));
+                engine.SetAlwaysOnTop(ReadFlag(data,"compactAlwaysOnTop"),ReadFlag(data,"timeOnlyAlwaysOnTop"),ReadFlag(data,"promptAlwaysOnTop"));
+                app.ApplyDisplayPreferences();
                 message="Display, schedule policy, and diagnostics preferences saved."; break;
             case "volume": engine.SetAppVolume(ReadInt(data,"volume",0,100)); message="App volume saved."; break;
             case "saveSound":

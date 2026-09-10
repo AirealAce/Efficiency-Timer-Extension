@@ -29,6 +29,7 @@ export function settingsUI({send, run, bind, view, announce}) {
     if(form==='appearance-form') {
       ['theme','placement','popup','overlap'].forEach(id=>$(id).value=settings[id]);
       $('show-compact').checked=settings.showFloatingTimer; $('logging').checked=settings.loggingEnabled;$('start-at-login').checked=!!settings.startAtLogin;
+      ['compactAlwaysOnTop','timeOnlyAlwaysOnTop','promptAlwaysOnTop'].forEach(id=>$(id).checked=settings[id]!==false);
       $('default-threshold').value=settings.threshold;
     } else if(form==='volume-form'&&!dirty.has('settings-volume-form')) setMasterVolume(settings.volume);
     else if(form==='connection-form') {
@@ -43,7 +44,8 @@ export function settingsUI({send, run, bind, view, announce}) {
     });});
   }
   const appearance=()=>({theme:Number($('theme').value),placement:Number($('placement').value),popup:Number($('popup').value),
-    overlap:Number($('overlap').value),threshold:Number($('default-threshold').value),logging:$('logging').checked,showCompact:$('show-compact').checked,startAtLogin:$('start-at-login').checked,quiet:true});
+    overlap:Number($('overlap').value),threshold:Number($('default-threshold').value),logging:$('logging').checked,showCompact:$('show-compact').checked,startAtLogin:$('start-at-login').checked,
+    compactAlwaysOnTop:$('compactAlwaysOnTop').checked,timeOnlyAlwaysOnTop:$('timeOnlyAlwaysOnTop').checked,promptAlwaysOnTop:$('promptAlwaysOnTop').checked,quiet:true});
   submit('appearance-form','saveAppearance',appearance);
   submit('volume-form','volume',()=>({volume:Number($('app-volume').value)}));
   submit('connection-form','connectionSave',connection);
@@ -62,6 +64,7 @@ export function settingsUI({send, run, bind, view, announce}) {
   $('cutoff').addEventListener('change',()=>run(async()=>{if($('cutoff-enabled').checked){await send('setCutoff',cutoffData());dirty.delete('cutoff-form');dirtyFields.delete('cutoff-form');}}));
   ['theme','placement','popup','overlap'].forEach(id=>$(id).addEventListener('change',()=>run(async()=>{await send('displayOption',{option:id,value:Number($(id).value),quiet:true});cleanField('appearance-form',id);})));
   $('show-compact').addEventListener('change',()=>run(async()=>{await send('displayOption',{option:'showCompact',value:$('show-compact').checked?1:0,quiet:true});cleanField('appearance-form','show-compact');}));
+  ['compactAlwaysOnTop','timeOnlyAlwaysOnTop','promptAlwaysOnTop'].forEach(id=>$(id).addEventListener('change',()=>run(async()=>{await send('displayOption',{option:id,value:$(id).checked?1:0,quiet:true});cleanField('appearance-form',id);})));
   function setMasterVolume(value){for(const id of ['app-volume','settings-volume']){$(id).value=value;setText($(id+'-caption'),'App sound ('+value+'%)');}}
   for(const id of ['app-volume','settings-volume'])$(id).addEventListener('input',()=>{
     const value=Number($(id).value),revision=++volumeRevision;setMasterVolume(value);dirty.add('volume-form');dirty.add('settings-volume-form');

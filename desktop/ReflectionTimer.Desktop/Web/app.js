@@ -11,6 +11,12 @@ const layout=arrangeApp(view);
 const bridge = window.chrome?.webview;
 const requests = new Map();
 let requestSequence = 0, state, promptId, initial = true, durationDirty = false, loadedPrompt;
+let reflectionBusy=false;
+function setReflectionBusy(busy){
+  reflectionBusy=busy;$('reflection-form').setAttribute('aria-busy',String(busy));
+  ['reflection-text','early-reason'].forEach(id=>$(id).readOnly=busy);
+  document.querySelectorAll('#reflection-form button').forEach(button=>available(button,!busy));
+}
 let saveDelay, saving = Promise.resolve(), queued = false, lastSavedDraft = '', scheduleEdit, deliveryDecision, selectedSchedule, selectedOutbox;
 
 function send(action, data = {}) {
@@ -116,6 +122,7 @@ function renderSelections() {
     text=entry.message+'\n\n'+(actual!=null?formatClock(actual)+' spent / ':'Actual time unavailable / ')+(entry.durationSeconds!=null?formatClock(entry.durationSeconds):entry.duration)+' allotted';
     if(entry.isCheckIn)text+=' · Check-in';
     else if(entry.endedEarly)text+=' · ended early\nReason: '+(entry.earlyEndReason||'Not supplied');
+    if(entry.autoSent)text+='\nauto-sent';
     if(entry.status==='Pending'&&entry.nextAttemptAt)text+='\nNext retry: '+new Date(entry.nextAttemptAt).toLocaleTimeString();
     if(entry.status==='NeedsReview')text+='\nNeeds review: '+entry.error+'. Check the Sheet before retrying.';
     if(entry.localOnly!==false)text+='\nLocal preview only.';
@@ -144,7 +151,7 @@ function tables() {
   $('schedule-empty').hidden=state.schedules.length!==0;
   reconcileRows($('outbox-rows'),entries,()=>selectableRow(4,'outbox'),(row,record)=>{
     setText(row.cells[0].querySelector('.cell-text'),record.saved);
-    [record.destination,record.status,record.attempts].forEach((value,i)=>setText(row.cells[i+1],value));
+    [record.destination,record.status+(record.autoSent?' · auto-sent':''),record.attempts].forEach((value,i)=>setText(row.cells[i+1],value));
     row.querySelector('input').setAttribute('aria-label','Select entry saved '+record.saved);
   });
   $('outbox-empty').hidden=state.outbox.length!==0;renderSelections();
@@ -196,7 +203,9 @@ bridge?.addEventListener('message', event => {
   else if (message.type === 'focusTimer') {if(document.querySelector('dialog[open]'))return;if(message.selectTimer)layout.select('timer');if(document.body.dataset.tab!=='timer')return;const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
   else if (message.type === 'cycleAppTab') layout.cycle(message.backward);
   else if (message.type === 'flush') {
+    if(message.freeze)setReflectionBusy(true);
     saveDraft().then(()=>send('flushed')).catch(e=>{ error(e.message); send('flushFailed').catch(()=>{}); });
+  } else if(message.type==='resumeReflection') {setReflectionBusy(false);
   } else settings.message(message);
 });
 const settings=settingsUI({send,run,bind,view,announce});
@@ -219,7 +228,7 @@ bind('end',()=>send('end')); bind('check-in',()=>send('checkIn')); bind('practic
 $('repeat').addEventListener('change',()=>run(()=>send('repeat',{enabled:$('repeat').checked})));
 bind('open-compact',()=>send('toggleCompact')); bind('open-main',()=>send('main')); bind('close-compact',()=>send('close'));
 if(view==='main'){
-  bind('show-pending',async()=>{if(!state.prompts.length)return announce('No pending reflections.');for(const prompt of state.prompts)await send('openReflection',{id:prompt.id});});
+  bind('show-pending',async()=>{if(!state.prompts.length)return announce('No pending reflections.');await send('openReflection',{id:state.prompts.at(-1).id});});
   bind('edit-schedule',editSelectedSchedule);
   bind('remove-schedule',async()=>{if(!selectedSchedule)return;const id=selectedSchedule;await send('removeSchedule',{id});if(scheduleEdit===id)clearScheduleEdit();($('schedule-rows').querySelector('input:checked')||$('schedule-start')).focus();});
   for(const [id,decision] of [['schedule-start-now',0],['schedule-wait',1],['schedule-skip',2]])bind(id,()=>selectedSchedule&&send('resolveSchedule',{id:selectedSchedule,decision}));
@@ -246,6 +255,7 @@ bind('schedule-cancel',()=>{clearScheduleEdit();$('schedule-start').focus();});
   setText($('draft-status'),'Saving draft…'); clearTimeout(saveDelay); saveDelay=setTimeout(()=>saveDraft().catch(e=>error(e.message)),300);
 }));
 $('reflection-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{
+  if(reflectionBusy)return;
   if(!$('reflection-text').value.trim()) { $('reflection-text').setAttribute('aria-invalid','true'); $('reflection-text').focus(); throw new Error('Write a reflection before saving.'); }
   $('reflection-text').removeAttribute('aria-invalid'); await saveDraft(); queued=true;
   try { await send('queue',draft()); } catch(e) { queued=false; throw e; }

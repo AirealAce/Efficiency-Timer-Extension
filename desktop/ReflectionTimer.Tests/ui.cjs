@@ -206,6 +206,10 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     check(await page.evaluate(()=>window.savedRow===document.querySelector('#outbox-rows tr')&&window.savedCell===window.savedRow.cells[2]&&window.savedButton===document.activeElement),'Status update preserves row, cell, and focused action identity');
     check((await page.locator('#outbox-rows').textContent()).includes('Simulated success'),'Changed table cell is updated');
     check(await page.locator('#outbox-detail').textContent().then(text=>text.includes('A sample reflection.')),'Selected Outbox text is readable on the page');
+    const autoSentState=structuredClone(changed);Object.assign(autoSentState.outbox[0],{autoSent:true,endedEarly:true,earlyEndReason:'Appointment'});
+    await page.evaluate(state=>window.previewDispatch({type:'state',state}),autoSentState);
+    check((await page.locator('#outbox-rows').textContent()).includes('auto-sent')&&await page.locator('#outbox-detail').textContent().then(text=>text.includes('auto-sent')&&text.includes('ended early')&&text.includes('Appointment')),'Outbox exposes auto-sent alongside early-end status, reason, and delivery status');
+    await page.evaluate(state=>window.previewDispatch({type:'state',state}),changed);
     check(await page.locator('#outbox .actions button').allTextContents().then(labels=>JSON.stringify(labels)===JSON.stringify(['Send pending now','Retry selected…','Already in Sheet','Open Google Sheet'])),'Outbox actions match the original shared button row');
     check(await page.locator('#outbox-rows button').count()===0&&await page.locator('#outbox thead th').count()===4,'Outbox preserves its original columns without per-row action buttons');
     const settings={sheetUrl:'',webAppUrl:'',sheetMode:'date',sheetName:'Reflections',hasToken:false,connected:false,volume:50,threshold:15,
@@ -214,7 +218,18 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
       sounds:[0,1,2,3].map(kind=>({kind,track:0,behavior:0,volume:100,fadeOutEnabled:false,fadeOutAfterSeconds:10,custom:false,defaultName:'Bundled default'}))};
     await page.getByRole('tab',{name:'Settings',exact:true}).click();
     await page.evaluate(settings=>window.previewDispatch({type:'settings',settings}),settings);
-    check(await page.getByRole('combobox',{name:'Compact timer position',exact:true}).inputValue()==='4'&&await page.getByRole('checkbox',{name:'Show compact floating timer (always on top)',exact:true}).isChecked(),'Display controls expose the intended defaults');
+    check(await page.getByRole('combobox',{name:'Compact timer position',exact:true}).inputValue()==='4'&&await page.getByRole('checkbox',{name:'Show compact floating timer',exact:true}).isChecked(),'Display controls expose the intended defaults');
+    for(const [id,name] of [['compactAlwaysOnTop','Compact view always on top'],['timeOnlyAlwaysOnTop','Time-only view always on top'],['promptAlwaysOnTop','Reflection prompts always on top']]){
+      const option=page.getByRole('checkbox',{name,exact:true});check(await option.isChecked(),name+' defaults on');
+      await option.uncheck();await page.waitForFunction(id=>window.previewMessages.some(m=>m.action==='displayOption'&&m.data.option===id&&m.data.value===0),id);
+      check(await option.evaluate(e=>e===document.activeElement),name+' saves immediately and retains keyboard focus');
+      await option.check();
+    }
+    await page.locator('#compactAlwaysOnTop').uncheck();
+    await page.getByRole('button',{name:'Save settings',exact:true}).click();
+    await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='saveAppearance'&&m.data.compactAlwaysOnTop===false&&m.data.timeOnlyAlwaysOnTop===true&&m.data.promptAlwaysOnTop===true));
+    check(true,'Save settings keeps Compact, Time-only, and prompt layering independent');
+    await page.evaluate(settings=>window.previewDispatch({type:'settings',settings}),settings);
     check(await page.locator('#audio fieldset legend').allTextContents().then(names=>JSON.stringify(names)===JSON.stringify(['Success messages','Failure messages','Low on time audio','Session end · time limit reached'])),'All four original audio event sections are present together');
     await page.evaluate(()=>{window.savedAudioOption=document.querySelector('#sound-track-0 option');});
     await page.evaluate(settings=>window.previewDispatch({type:'settings',settings}),settings);
@@ -399,6 +414,15 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='flushed'));
     const messages=await page.evaluate(()=>window.previewMessages);
     check(messages.findIndex(m=>m.action==='draft'&&m.data.text==='Unsaved final keystroke')<messages.findIndex(m=>m.action==='flushed'),'Closing flush saves the newest draft before acknowledging');
+    await page.locator('#reflection-text').fill('Final text before automatic replacement');
+    const autoQueues=await page.evaluate(()=>window.previewMessages.filter(m=>m.action==='queue').length);
+    await page.evaluate(()=>window.previewDispatch({type:'flush',freeze:true}));
+    await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='draft'&&m.data.text==='Final text before automatic replacement'));
+    check(await page.locator('#reflection-text').evaluate(e=>e.readOnly)&&await page.locator('#early-reason').evaluate(e=>e.readOnly)&&await page.locator('#later').getAttribute('aria-disabled')==='true','Auto-send freezes both text fields and actions while the newest draft is saved');
+    await page.locator('#reflection-text').press('Control+Enter');
+    check(await page.evaluate(()=>window.previewMessages.filter(m=>m.action==='queue').length)===autoQueues,'Ctrl+Enter cannot duplicate a submission during automatic replacement');
+    await page.evaluate(()=>window.previewDispatch({type:'resumeReflection'}));
+    check(await page.locator('#reflection-text').isEditable()&&await page.locator('#reflection-text').inputValue()==='Final text before automatic replacement'&&await page.locator('#later').getAttribute('aria-disabled')==='false','An interrupted auto-send restores editing without changing text');
     const promptLayout=await page.context().newPage();
     for(const [kind,isCheckIn,endedEarly] of [['Session-end',false,false],['Check-in',true,false],['Early-end',false,true]]){
       // CSS viewports inside the existing 560px-wide native prompt at common display scales.

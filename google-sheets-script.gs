@@ -11,7 +11,7 @@
  * the request works cleanly from a Manifest V3 service worker.
  */
 
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.8.0';
 const DELIVERY_PROTOCOL = 'request-id-v1';
 const RECEIPT_PREFIX = 'RT_RECEIPT_';
 const ROWS_PER_BLOCK = 16;
@@ -105,6 +105,7 @@ function doPost(event) {
         version: APP_VERSION,
         deliveryProtocol: DELIVERY_PROTOCOL,
         supportsCheckIns: true,
+        supportsAutoSent: true,
         target: `${spreadsheet.getName()} / ${target.sheet ? target.sheet.getName() : target.name}`,
         willCreate: !target.sheet,
         template: target.templateName || null
@@ -115,8 +116,10 @@ function doPost(event) {
       throw new Error('Unsupported action.');
     }
 
-    const message = String(payload.message || '').trim();
-    if (!message) {
+    let message = String(payload.message || '').trim();
+    const autoSentMarker = message === '[auto-sent]' || message.startsWith('[auto-sent]\n');
+    if (autoSentMarker) message = message.slice('[auto-sent]'.length).trim();
+    if (!message && !autoSentMarker && payload.autoSent !== true) {
       throw new Error('The reflection is empty.');
     }
     if (message.length > MAX_REFLECTION_LENGTH) {
@@ -194,6 +197,8 @@ function requestFingerprint_(p) {
     p.actualDurationSeconds ?? null, p.endedEarly === true, String(p.earlyEndReason || '').trim()];
   // Preserve fingerprints for pre-upgrade receipts, including explicit false.
   if (p.isCheckIn === true) fields.push('check-in');
+  // Text-marker requests keep their pre-upgrade fingerprint and retry receipts.
+  if (p.autoSent === true && !String(p.message || '').trim().match(/^\[auto-sent\](?:\n|$)/)) fields.push('auto-sent');
   const text = JSON.stringify(fields);
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8)
     .map(value => (value & 255).toString(16).padStart(2, '0')).join('');
@@ -402,6 +407,8 @@ function durationNumberFormat_(seconds) {
 }
 
 function validateSession_(payload, allotted) {
+  if (payload.autoSent !== undefined && typeof payload.autoSent !== 'boolean') throw new Error('Invalid auto-send status.');
+  const autoSent = payload.autoSent === true || /^\[auto-sent\](?:\n|$)/.test(String(payload.message || '').trim());
   const actualDurationSeconds = validateDuration_(payload.actualDurationSeconds);
   if (actualDurationSeconds !== null && (allotted === null || actualDurationSeconds > allotted)) {
     throw new Error('Actual time cannot exceed the allotted time.');
@@ -415,7 +422,7 @@ function validateSession_(payload, allotted) {
   if (payload.earlyEndReason !== undefined && typeof payload.earlyEndReason !== 'string') throw new Error('Invalid early-finish reason.');
   const earlyEndReason = String(payload.earlyEndReason || '').trim();
   if (earlyEndReason.length > 1000) throw new Error('The early-finish reason exceeds 1000 characters.');
-  return { actualDurationSeconds, endedEarly, isCheckIn, earlyEndReason: endedEarly ? earlyEndReason : '' };
+  return { actualDurationSeconds, endedEarly, isCheckIn, autoSent, earlyEndReason: endedEarly ? earlyEndReason : '' };
 }
 
 function appendReflection_(sheet, message, moment, spreadsheet, durationSeconds = null,
@@ -444,13 +451,13 @@ function appendReflection_(sheet, message, moment, spreadsheet, durationSeconds 
   const clockLabel = `${moment.hour % 12 || 12}:${String(moment.minute).padStart(2, '0')}`;
   entry.setValues([[clockLabel, message.startsWith('=') ? "'" + message : message,
     session.actualDurationSeconds === null ? '' : session.actualDurationSeconds / 86400,
-    durationSeconds === null ? '' : durationSeconds / 86400, session.isCheckIn ? 'Check-in' : session.endedEarly ? 'ended early' : '',
+    durationSeconds === null ? '' : durationSeconds / 86400, [session.isCheckIn ? 'Check-in' : session.endedEarly ? 'ended early' : '', session.autoSent ? 'auto-sent' : ''].filter(Boolean).join(' · '),
     session.earlyEndReason.startsWith('=') ? "'" + session.earlyEndReason : session.earlyEndReason]])
     .setFontWeight('normal').setVerticalAlignment('top').clearNote();
   entry.getCell(1, 1).setBackground(background)
     .setFontColor(textColor_(background)).setNote(NOTE_PREFIX + JSON.stringify({
       kind: 'entry', timestamp: moment.timestamp.toISOString(), hourStart: moment.hourStart, durationSeconds,
-      actualDurationSeconds: session.actualDurationSeconds, endedEarly: session.endedEarly, isCheckIn: session.isCheckIn === true,
+      actualDurationSeconds: session.actualDurationSeconds, endedEarly: session.endedEarly, isCheckIn: session.isCheckIn === true, autoSent: session.autoSent === true,
       requestId: session.requestId || undefined, requestFingerprint: session.fingerprint || undefined
     }));
   // New rows can inherit an hour band's fill. Restore column stripes explicitly:

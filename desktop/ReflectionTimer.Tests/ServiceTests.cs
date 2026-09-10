@@ -31,6 +31,16 @@ static class ServiceTests
             await services.Sync();
             check(session.Engine.Snapshot.Outbox.Single(o=>o.Id==prompt).Status==DeliveryStatus.Sent && handler.Actions.Count(a=>a=="appendReflection")==1,"New connected reflection is delivered once using the shared protocol");
             check(handler.LastWrite.GetProperty("deliveryProtocol").GetString()==SheetsClient.DeliveryProtocol && handler.LastWrite.GetProperty("requestId").GetString()==prompt.ToString(),"Delivery retains the stable request ID and retry protocol");
+            var blank=session.Engine.TestPrompt();session.AutoSendReflection(blank);await services.Sync();
+            check(handler.LastWrite.GetProperty("autoSent").GetBoolean()&&handler.LastWrite.GetProperty("message").GetString()=="[auto-sent]"&&session.Engine.Snapshot.Outbox.Single(o=>o.Id==blank).Message=="","Blank auto-sent entries use a marker accepted by existing receivers while retaining the empty response locally");
+            session.Engine.Start(300,false,50);session.Engine.EndEarly();var early=session.Engine.Snapshot.Prompts.Last();
+            session.Engine.SaveDraft(early.Id,"Last words","Appointment");session.AutoSendReflection(early.Id);await services.Sync();
+            check(handler.LastWrite.GetProperty("endedEarly").GetBoolean()&&handler.LastWrite.GetProperty("autoSent").GetBoolean()&&handler.LastWrite.GetProperty("message").GetString()=="[auto-sent]\nLast words"&&handler.LastWrite.GetProperty("earlyEndReason").GetString()=="Appointment","Sheets request retains both ended-early and auto-sent status plus the original response and reason");
+            var full=session.Engine.TestPrompt();session.Engine.SaveDraft(full,new string('x',5000));session.AutoSendReflection(full);
+            var beforeFull=handler.Actions.Count(a=>a=="appendReflection");await services.Sync();
+            check(handler.Actions.Count(a=>a=="appendReflection")==beforeFull&&session.Engine.Snapshot.Outbox.Single(o=>o.Id==full) is {Status:DeliveryStatus.NeedsReview,ErrorKind:"receiver_update_required"}&&session.Engine.Snapshot.Outbox.Single(o=>o.Id==full).Message.Length==5000,"An old receiver cannot cause a full-length automatic response to be truncated or lost");
+            handler.SupportsAutoSent=true;session.Engine.RetryUpload(full);await services.Sync();
+            check(handler.LastWrite.GetProperty("message").GetString()!.Length==5012&&session.Engine.Snapshot.Outbox.Single(o=>o.Id==full).Status==DeliveryStatus.Sent,"Updated receivers receive every character plus the automatic-send marker under the same entry ID");
             try { session.Execute("simulate",Data(new { id=prompt })); throw new Exception("Connected simulation allowed"); } catch(ArgumentException) { }
             check(session.Engine.Snapshot.Outbox.Single(o=>o.Id==prompt).SavedTab=="QA only","Connected entries cannot be relabeled as simulated success");
             var local=session.Engine.Snapshot.Outbox.First();
@@ -72,6 +82,7 @@ static class ServiceTests
     }
     private sealed class Receiver : HttpMessageHandler
     {
+        public bool SupportsAutoSent;
         public List<string> Actions=[];public JsonElement LastWrite;public string WriteError="";public Action? OnPing;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancellationToken)
         {
@@ -79,7 +90,7 @@ static class ServiceTests
             var action=data.RootElement.GetProperty("action").GetString()!;Actions.Add(action);
             if(action=="appendReflection") LastWrite=data.RootElement.Clone(); else OnPing?.Invoke();
             var content=action=="appendReflection" && WriteError.Length>0 ? JsonSerializer.Serialize(new{success=false,code=WriteError})
-                : JsonSerializer.Serialize(new{success=true,target="synthetic destination",sheet="QA only",deliveryProtocol=SheetsClient.DeliveryProtocol,supportsCheckIns=true});
+                : JsonSerializer.Serialize(new{success=true,target="synthetic destination",sheet="QA only",deliveryProtocol=SheetsClient.DeliveryProtocol,supportsCheckIns=true,supportsAutoSent=SupportsAutoSent});
             return new(HttpStatusCode.OK){Content=new StringContent(content)};
         }
     }

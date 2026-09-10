@@ -23,15 +23,17 @@ internal sealed class PreviewApplication : ApplicationContext
     private (AppColorTheme Theme, bool Contrast)? menuTheme;
     private readonly PreviewShortcuts shortcuts;
     private readonly ConsecutiveShortcutPresses compactPresses=new();
+    private readonly ReflectionPromptCoordinator promptCoordinator;
     internal PreviewApplication(PreviewSession session, string directory, string? recoveryNotice = null, bool startInTray = false, string? profileName = null)
     {
         Session = session; ProfileDirectory = directory; ProfileName=profileName; StartInTray=startInTray; RecoveryNotice=recoveryNotice;
         Services = new(session.Engine, directory); Services.Announcement += Announce;
+        promptCoordinator=new(session,()=>windows.Where(w=>w.View=="reflection"&&!w.IsDisposed).Cast<IReflectionPromptWindow>().ToArray(),ShowReflection,()=>{_ = Services.Sync();});
         MainForm = Create("main");
         var menu=new ContextMenuStrip();
         menu.Items.Add("App view",null,(_,_)=>Open("main"));menu.Items.Add("Compact view",null,(_,_)=>Open("compact"));
         menu.Items.Add("Show / hide floating timer",null,(_,_)=>ToggleCompactVisibility());
-        menu.Items.Add("Pending reflections",null,(_,_)=>{var p=Session.Engine.Snapshot.Prompts.FirstOrDefault();if(p is not null)Open("reflection",p.Id);else Announce("No pending reflections.");});
+        menu.Items.Add("Pending reflections",null,(_,_)=>{var p=Session.Engine.Snapshot.Prompts.LastOrDefault();if(p is not null)Open("reflection",p.Id);else Announce("No pending reflections.");});
         menu.Items.Add("Quit desktop app",null,async(_,_)=>await CloseMainAsync());
         tray=new(){Text="Reflection Timer",Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information,Visible=true,ContextMenuStrip=menu};
         tray.DoubleClick+=(_,_)=>Open("main");
@@ -41,7 +43,7 @@ internal sealed class PreviewApplication : ApplicationContext
         pulse.Tick += (_, _) => {
             try { var pending=Session.Engine.Snapshot.Prompts.Select(p=>p.Id).ToHashSet();
                 Session.Tick();
-                foreach(var prompt in Session.Engine.Snapshot.Prompts.Where(p=>!pending.Contains(p.Id))) { var window=Create("reflection",prompt.Id);window.ApplyPosition();window.Show(); }
+                foreach(var prompt in Session.Engine.Snapshot.Prompts.Where(p=>!pending.Contains(p.Id))) _ = OpenReflectionAsync(prompt.Id,false);
                 ApplyTheme();Broadcast(new { type = "clock", clock = Session.Clock() }); tickFailed = false;
                 if (Session.Engine.Now - lastSync >= 15000) { lastSync = Session.Engine.Now; _ = Services.Sync(); if(shortcuts?.RetryUnavailable()==true)Broadcast(new{type="shortcuts",shortcuts=ShortcutState}); } }
             catch { if (!tickFailed) Announce("Could not save a timer update. Your last saved state is retained."); tickFailed = true; }
@@ -57,7 +59,7 @@ internal sealed class PreviewApplication : ApplicationContext
     }
     private void ApplyTheme()
     {
-        foreach(var window in windows.ToArray())window.ApplyWindowTheme();
+        foreach(var window in windows.ToArray()){window.ApplyWindowTheme();window.ApplyTopMost();}
         var preference=(Session.Engine.Snapshot.Theme,SystemInformation.HighContrast);
         if(menuTheme==preference)return;
         menuTheme=preference;PreviewTheme.ApplyMenu(tray.ContextMenuStrip!,PreviewTheme.Palette(preference.Item1,preference.Item2));
@@ -93,12 +95,25 @@ internal sealed class PreviewApplication : ApplicationContext
     }
     internal void Open(string view, Guid? prompt = null, bool timerPage=false)
     {
+        if(view=="reflection"){if(prompt is {} id)_ = OpenReflectionAsync(id,true);return;}
         if(view=="compact" && !Session.Engine.Snapshot.ShowFloatingTimer) Session.Engine.SetFloatingTimer(true);
         var window = windows.FirstOrDefault(w => w.View == view && w.PromptId == prompt);
         if(window is null){window=Create(view,prompt);window.ApplyPosition();}
         if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
         WindowActivation.Focus(window);
         if(WindowActivation.CanReceiveFocus(window))window.FocusControls(timerPage);
+    }
+    private async Task OpenReflectionAsync(Guid id,bool activate)
+    {
+        try {await promptCoordinator.OpenAsync(id,activate,()=>closing);}
+        catch {Announce("The previous reflection could not be saved. It stays open; the new reflection is saved under Pending reflections. Try opening it again.");}
+    }
+    private void ShowReflection(Guid id,bool activate)
+    {
+        var window=windows.FirstOrDefault(w=>w.View=="reflection"&&w.PromptId==id);
+        if(window is null){window=Create("reflection",id);window.ApplyPosition();}
+        if(activate){WindowActivation.Focus(window);if(WindowActivation.CanReceiveFocus(window))window.FocusControls();}
+        else window.Show();
     }
     internal void ApplyDisplayPreferences()
     {
@@ -125,10 +140,12 @@ internal sealed class PreviewApplication : ApplicationContext
         if (closing) return;
         closing = true;
         try {
-            foreach (var window in windows.ToArray()) await window.FlushDraftAsync();
-            Services.Log.Record("app.exiting");pulse.Stop();
-            foreach (var window in windows.Where(w => w != MainForm).ToArray()) window.CloseAfterSave();
-            ((PreviewWindow)MainForm!).CloseAfterSave();
+            await promptCoordinator.ExclusivelyAsync(async()=>{
+                foreach (var window in windows.ToArray()) await window.FlushDraftAsync();
+                Services.Log.Record("app.exiting");pulse.Stop();
+                foreach (var window in windows.Where(w => w != MainForm).ToArray()) window.CloseAfterSave();
+                ((PreviewWindow)MainForm!).CloseAfterSave();
+            });
         }
         catch { Announce("Could not save a reflection draft. The app is staying open. Try again."); }
         finally { closing = false; }

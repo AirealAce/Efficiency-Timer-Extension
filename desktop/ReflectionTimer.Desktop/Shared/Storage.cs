@@ -61,7 +61,7 @@ public sealed class DiagnosticLog
         "app.started", "app.exiting", "app.activated", "app.deactivated", "app.hidden", "system.resume", "system.session",
         "timer.started", "timer.paused", "timer.resumed", "timer.reset", "timer.preferences", "timer.deadline", "timer.autoRestartDisabled",
         "schedule.saved", "schedule.removed", "prompt.test", "prompt.shown", "prompt.later", "prompt.draftSaved", "prompt.skipped",
-        "reflection.queued", "upload.started", "upload.sent", "upload.needsReview", "upload.recovered", "upload.retryRequested",
+        "reflection.queued", "reflection.autoSent", "upload.started", "upload.sent", "upload.needsReview", "upload.recovered", "upload.retryRequested",
         "upload.confirmedByUser", "settings.saved", "connection.checked", "issue.marked", "error.storage", "error.unexpected",
         "sound.changed", "sound.preview", "sound.played", "sound.fallback", "sound.muted", "sound.stopped", "sound.failed", "display.changed", "theme.changed",
         "shortcut.registered", "shortcut.unavailable", "shortcut.used", "timer.endedEarly", "timer.lowTime", "timer.lowTimeOptions", "sound.thresholdChanged", "sound.requested",
@@ -106,7 +106,7 @@ public sealed class DiagnosticLog
         TimerLowTimeCustom = state.Timer.LowTime.Mp3Path.Length > 0,
         Schedules = state.Schedules.Select(x => x with { LowTime = x.LowTime with { Mp3Path = "" } }), PendingPrompts = state.Prompts.Count,
         Outbox = state.Outbox.Select(x => new { x.Id, x.SubmittedAt, x.Status, x.IsTest, x.Attempts, x.RetryProtected,
-            x.NextAttemptAt, x.DurationSeconds, x.ActualDurationSeconds, x.EndedEarly, x.IsCheckIn, ErrorKind = TimerEngine.SafeError(x.ErrorKind) }),
+            x.NextAttemptAt, x.DurationSeconds, x.ActualDurationSeconds, x.EndedEarly, x.IsCheckIn, x.AutoSent, ErrorKind = TimerEngine.SafeError(x.ErrorKind) }),
         state.ExtensionDisabledConfirmed
     };
 }

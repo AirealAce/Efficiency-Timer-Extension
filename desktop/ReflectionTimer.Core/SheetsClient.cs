@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace ReflectionTimer.Core;
 
 public record SheetReply(bool Success, string ErrorKind, string DisplayMessage, string Tab = "", string Target = "",
-    bool SupportsSafeRetry = false, bool Retryable = false, bool SupportsCheckIns = false);
+    bool SupportsSafeRetry = false, bool Retryable = false, bool SupportsCheckIns = false, bool SupportsAutoSent = false);
 
 public sealed class SheetsClient : IDisposable
 {
@@ -48,6 +48,11 @@ public sealed class SheetsClient : IDisposable
             if (!receiver.Success) return receiver;
             if (!receiver.SupportsCheckIns) return new(false, "receiver_update_required", "Update the Apps Script deployment to support check-ins, then retry this saved entry from the Outbox.");
         }
+        if(item?.AutoSent==true && item.Message.Length>4988) {
+            var receiver=await Ping(settings,cancellation);
+            if(!receiver.Success)return receiver;
+            if(!receiver.SupportsAutoSent)return new(false,"receiver_update_required","Update the Apps Script deployment to send this full-length reflection with its auto-sent marker. The complete entry is retained in Outbox.");
+        }
         var submitted = item?.SubmittedAt ?? DateTimeOffset.Now;
         var body = JsonSerializer.Serialize(new {
             action = item is null ? "ping" : "appendReflection", token = settings.ApiToken.Trim(),
@@ -56,8 +61,11 @@ public sealed class SheetsClient : IDisposable
             timezoneOffsetMinutes = -(int)submitted.Offset.TotalMinutes, durationSeconds = item?.DurationSeconds ?? 0,
             actualDurationSeconds = item?.ActualDurationSeconds, endedEarly = item?.EndedEarly ?? false, isCheckIn = item?.IsCheckIn ?? false,
             earlyEndReason = item?.EarlyEndReason ?? "",
+            autoSent = item?.AutoSent ?? false,
             deliveryProtocol = item?.RetryProtected == true ? DeliveryProtocol : null,
-            isTest = item?.IsTest ?? pingTest, message = item?.Message ?? "", requestId = item?.Id.ToString()
+            // Keep the marker in the wire text so existing deployments also
+            // record auto-send status and accept otherwise blank reflections.
+            isTest = item?.IsTest ?? pingTest, message = item?.AutoSent == true ? "[auto-sent]" + (item.Message.Length>0 ? "\n"+item.Message : "") : item?.Message ?? "", requestId = item?.Id.ToString()
         });
         try
         {
@@ -111,7 +119,8 @@ public sealed class SheetsClient : IDisposable
                         || (item.RetryProtected && Read(root, "deliveryProtocol") != DeliveryProtocol)))
                         return new(false, "invalid_response", "The receiver did not confirm this entry's destination and delivery protocol. Check the Sheet and deployment before retrying; the entry is kept in the Outbox.");
                     return new(true, "", "Connected.", Read(root, "sheet"), Read(root, "target"), Read(root, "deliveryProtocol") == DeliveryProtocol,
-                        SupportsCheckIns: root.TryGetProperty("supportsCheckIns", out var checkIns) && checkIns.ValueKind == JsonValueKind.True);
+                        SupportsCheckIns: root.TryGetProperty("supportsCheckIns", out var checkIns) && checkIns.ValueKind == JsonValueKind.True,
+                        SupportsAutoSent: root.TryGetProperty("supportsAutoSent", out var autoSent) && autoSent.ValueKind == JsonValueKind.True);
                 }
                 // Raw server responses can contain arbitrary reflection text or
                 // credentials. Never send them to diagnostics or persisted errors.

@@ -1,8 +1,10 @@
-# Reflection Timer 4.0.9
+# Reflection Timer 4.1.0
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 
 The four views, themes, audio controls, window positions and Ctrl+Alt shortcuts are retained. App and reflection prompts can coexist with either Compact or Time-only. Semantic HTML supports screen-reader web navigation; quiet countdown updates do not interrupt reading.
+
+Settings provides separate always-on-top switches for Compact, Time-only, and reflection prompts, all enabled by default. Prompts are excluded from Alt+Tab. A new session-end prompt auto-sends the previous open session-end draft (even blank), preserving any early-end status and reason. Check-ins stay separate. Auto-send first commits to Outbox; failed local saves leave the old window editable and the new prompt pending. Network delivery uses the existing connection and retry rules.
 
 Compact has a two-line Auto/Start toggle that lights up when enabled. Screen readers announce it as the "Auto-start next session" toggle button; Space or Enter switches it without starting the timer. The narrower editor retains all three duration fields and the App, reset, start/pause, and end-session actions.
 

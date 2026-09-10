@@ -57,6 +57,7 @@ public enum AppColorTheme { Dark = 0, Light = 1, HighContrast = 2, Glamour = 3 }
 public enum FloatingTimerPlacement { Custom = 0, Center = 1, TopLeft = 2, TopRight = 3, BottomLeft = 4, BottomRight = 5, TopCenter = 6, BottomCenter = 7 }
 public record OutboxItem
 {
+    public bool AutoSent { get; init; }
     // Explicitly local records must never be bound to a receiver or uploaded.
     public bool LocalOnly { get; init; }
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -95,6 +96,9 @@ public record AppState
     public AudioSettings? Audio { get; set; } // Null migrates the existing session-end MP3 without changing it.
     public ReflectionPopupPosition PopupPosition { get; set; } = ReflectionPopupPosition.BottomRight;
     public bool ShowFloatingTimer { get; set; } = true;
+    public bool CompactAlwaysOnTop { get; set; } = true;
+    public bool TimeOnlyAlwaysOnTop { get; set; } = true;
+    public bool PromptAlwaysOnTop { get; set; } = true;
     public int? FloatingTimerLeft { get; set; }
     public int? FloatingTimerTop { get; set; }
     public FloatingTimerPlacement FloatingPlacement { get; set; } = FloatingTimerPlacement.BottomLeft;

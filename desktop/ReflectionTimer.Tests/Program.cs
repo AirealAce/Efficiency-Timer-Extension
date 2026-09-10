@@ -92,6 +92,7 @@ Check(shortcutSession.Engine.Snapshot.Timer.IsRunning,"Start/end shortcut resume
 var shortcutEnd=shortcutSession.Execute("startOrEnd",Data(new{}));
 Check(!shortcutSession.Engine.Snapshot.Timer.IsRunning&&shortcutEnd.OpenReflection.HasValue,"Start/end shortcut opens an early-end reflection");
 await PromotionTests.Run(Check);
+await PromptPolicyTests.Run(Check);
 await ServiceTests.Run(Check);
 Console.WriteLine($"{passed} tests passed.");
 

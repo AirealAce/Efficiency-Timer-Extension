@@ -314,19 +314,28 @@ public sealed class TimerEngine
         }
     }
     public void SkipPrompt(Guid id) => Change("prompt.skipped", s => s.Prompts.RemoveAll(x => x.Id == id), id);
-    public void QueueReflection(Guid promptId, string text, string? earlyEndReason = null, bool localOnly = false)
+    public bool AutoSendReflection(Guid promptId, bool localOnly = false)
+    {
+        lock(gate) {
+            var prompt=state.Prompts.SingleOrDefault(p=>p.Id==promptId);
+            if(prompt is null)return false; // A manual submission may already have finished.
+            QueueReflection(promptId,prompt.Draft,prompt.EarlyEndReason,localOnly,autoSent:true);
+            return true;
+        }
+    }
+    public void QueueReflection(Guid promptId, string text, string? earlyEndReason = null, bool localOnly = false, bool autoSent = false)
     {
         text = text.Trim();
-        if (text.Length is < 1 or > 5000) throw new ArgumentException("Write a reflection between 1 and 5,000 characters.");
+        if ((!autoSent && text.Length < 1) || text.Length > 5000) throw new ArgumentException("Write a reflection between 1 and 5,000 characters.");
         if (earlyEndReason?.Trim().Length > 1000) throw new ArgumentException("Keep the reason for ending early under 1,001 characters.");
-        Change("reflection.queued", s => {
+        Change(autoSent ? "reflection.autoSent" : "reflection.queued", s => {
             var prompt = s.Prompts.SingleOrDefault(x => x.Id == promptId) ?? throw new ArgumentException("This reflection has already been saved or dismissed.");
             var submittedAt = clock();
             var actual = prompt.IsCheckIn && prompt.CheckInSessionId is not null && prompt.CheckInSessionId == s.Timer.SessionId
                 ? ActualSeconds(s.Timer, submittedAt.ToUnixTimeMilliseconds()) : prompt.ActualDurationSeconds;
             s.Outbox.Add(new() {
                 Id = promptId, Message = text, SubmittedAt = submittedAt, DurationSeconds = prompt.DurationSeconds, LocalOnly = localOnly,
-                ActualDurationSeconds = actual, EndedEarly = prompt.EndedEarly, IsCheckIn = prompt.IsCheckIn,
+                ActualDurationSeconds = actual, EndedEarly = prompt.EndedEarly, IsCheckIn = prompt.IsCheckIn, AutoSent = autoSent,
                 EarlyEndReason = prompt.EndedEarly ? (earlyEndReason ?? prompt.EarlyEndReason).Trim() : "",
                 ReceiverUrl = s.Connection.WebAppUrl,
                 IsTest = prompt.IsTest, SheetUrl = s.Connection.SheetUrl, SheetMode = s.Connection.SheetMode, SheetName = s.Connection.SheetName
@@ -374,6 +383,9 @@ public sealed class TimerEngine
     public void MarkAlreadySent(Guid id) => Change("upload.confirmedByUser", s =>
         s.Outbox = s.Outbox.Select(x => x.Id == id && x.Status == DeliveryStatus.NeedsReview ? x with { Status = DeliveryStatus.Sent, ErrorKind = "" } : x).ToList(), id);
     public void SetFloatingTimer(bool visible) => Change("display.changed", s => s.ShowFloatingTimer = visible);
+    public void SetAlwaysOnTop(bool compact, bool timeOnly, bool prompt) => Change("display.changed", s => {
+        s.CompactAlwaysOnTop = compact; s.TimeOnlyAlwaysOnTop = timeOnly; s.PromptAlwaysOnTop = prompt;
+    });
     public void SetFloatingTimerPosition(int left, int top) => Change("display.changed", s => {
         s.FloatingTimerLeft = left; s.FloatingTimerTop = top; s.FloatingPlacement = FloatingTimerPlacement.Custom;
     });

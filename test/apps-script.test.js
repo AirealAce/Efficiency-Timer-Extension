@@ -379,6 +379,32 @@ test('completed entries leave status and reason blank and legacy actual time is 
   assert.deepEqual(h.grids.get('test')[0].slice(2, 6), ['', 120 / 86400, '', '']);
 });
 
+test('auto-sent status combines with ended early and retains the response and reason', () => {
+  const h=createHarness(['test']);
+  const p={...datedRequest,isTest:true,durationSeconds:900,actualDurationSeconds:17,endedEarly:true,earlyEndReason:'Appointment',autoSent:true,message:'[auto-sent]\nFinal response',requestId:crypto.randomUUID(),deliveryProtocol:'request-id-v1'};
+  assert.equal(h.request(p).success,true);
+  assert.deepEqual(h.grids.get('test')[0].slice(1,6),['Final response',17/86400,900/86400,'ended early · auto-sent','Appointment']);
+  const before=structuredClone(h.grids.get('test'));assert.equal(h.request(p).duplicate,true);assert.deepEqual(h.grids.get('test'),before);
+});
+
+test('blank and full-length automatic responses are supported without losing text', () => {
+  for(const text of ['', 'x'.repeat(5000)]){
+    const h=createHarness(['test']);const p={...datedRequest,isTest:true,durationSeconds:900,actualDurationSeconds:900,autoSent:true,message:'[auto-sent]'+(text?'\n'+text:'')};
+    assert.equal(h.request(p).success,true);assert.equal(h.grids.get('test')[0][1],text);assert.equal(h.grids.get('test')[0][4],'auto-sent');
+  }
+});
+
+test('auto-send validation and legacy marker receipt compatibility', () => {
+  const h=createHarness(['test']);assert.equal(h.request({...datedRequest,action:'ping',isTest:true}).supportsAutoSent,true);
+  assert.equal(h.request({...datedRequest,isTest:true,autoSent:'yes'}).success,false);assert.equal(h.insertedCells.length,0);
+  const p={...datedRequest,isTest:true,durationSeconds:60,actualDurationSeconds:60,message:'[auto-sent]\nPreviously sent',requestId:crypto.randomUUID()};
+  const fields=[SPREADSHEET_ID,'date','',true,p.submittedAt,p.timezoneOffsetMinutes,p.message,60,60,false,''];
+  const fingerprint=crypto.createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+  assert.equal(h.context.requestFingerprint_({...p,autoSent:true}),fingerprint);
+  h.properties.set('RT_RECEIPT_'+p.requestId,JSON.stringify({status:'done',fingerprint,sheet:'test',timestamp:p.submittedAt}));
+  assert.equal(h.request({...p,autoSent:true}).duplicate,true);assert.equal(h.insertedCells.length,0);
+});
+
 test('check-ins write elapsed/allotted durations and Check-in status with no early-end reason', () => {
   for (const actualDurationSeconds of [0, 25, 60]) {
     const h = createHarness(['test', 'Temp', '09/05/2026']);
