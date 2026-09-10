@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Reflection Timer accessibility preview</title>
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to main content</a>
+  <header class="page-header">
+    <p class="eyebrow">Accessibility preview · local test profile</p>
+    <h1 id="page-title" tabindex="-1">Reflection Timer</h1>
+    <p class="main-only">Try the timer, read a table, or write a practice reflection. Everything here stays in this separate preview.</p>
+    <nav aria-label="Page sections" class="main-only"><a href="#timer">Timer</a><a href="#pending">Reflections</a><a href="#schedules">Scheduling</a><a href="#outbox">Outbox</a><a href="#review">Review guide</a></nav>
+  </header>
+  <div class="messages"><p id="status" role="status" aria-atomic="true"></p><p id="error" role="alert" aria-atomic="true"></p></div>
+  <main id="main" tabindex="-1">
+    <section id="timer" class="timer-view" aria-labelledby="timer-heading">
+      <h2 id="timer-heading">Focus timer</h2>
+      <p id="timer-state">Ready</p>
+      <div id="visual-clock" class="clock" aria-hidden="true">15:00</div>
+      <p id="time-snapshot">Time checked: 15 minutes remaining. Ready.</p>
+      <p class="hint">The visual countdown stays quiet. Read the current time whenever you need it.</p>
+      <div class="actions"><button id="read-time" type="button">Read remaining time</button><button id="compact-mode" class="compact-only" type="button" aria-expanded="true" aria-controls="timer-editor">Time-only view</button></div>
+      <form id="timer-editor" novalidate>
+        <fieldset><legend>Session duration</legend><div class="duration">
+          <label>Hours<input id="hours" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" value="0" aria-describedby="duration-help"></label>
+          <label>Minutes<input id="minutes" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" value="15" aria-describedby="duration-help"></label>
+          <label>Seconds<input id="seconds" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="10" value="0" aria-describedby="duration-help"></label>
+        </div><p id="duration-help" class="hint">Whole numbers. Pause to change the duration. Extra seconds and minutes carry into the next unit.</p></fieldset>
+        <div class="options"><label class="check"><input id="repeat" type="checkbox">Auto-start the next session</label><label class="check"><input id="low-time" type="checkbox" checked>Low-time warning</label><label>Warn with this many seconds remaining<input id="threshold" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" value="15"></label></div>
+        <div class="actions"><button id="toggle" class="primary" type="submit">Start timer</button><button id="reset" type="button">Reset timer</button><button id="end" type="button" aria-disabled="true">End early and reflect</button></div>
+      </form>
+      <div class="actions"><button id="check-in" type="button" aria-disabled="true">Check in</button><button id="open-compact" class="main-only" type="button">Open compact timer</button><button id="open-main" class="compact-only" type="button">Open main window</button><button id="close-compact" class="compact-only" type="button">Close compact window</button></div>
+    </section>
+    <section id="pending" class="main-only" aria-labelledby="pending-heading">
+      <h2 id="pending-heading">Pending reflections</h2><p id="pending-count">No pending reflections.</p>
+      <p>When a session finishes, its reflection waits here. It will not take focus away from your current work.</p>
+      <ul id="pending-list"></ul><button id="practice" type="button">Open a practice reflection</button>
+    </section>
+    <section id="schedules" class="main-only" aria-labelledby="schedule-heading">
+      <h2 id="schedule-heading">Session scheduling</h2>
+      <p>Use your screen reader's table navigation to read each cell and its column header. Overlapping sessions wait for the current session to finish.</p>
+      <div class="table-scroll" role="region" aria-label="Scheduled sessions table" tabindex="0"><table>
+        <caption>Scheduled sessions</caption><thead><tr><th scope="col">Start time</th><th scope="col">Duration</th><th scope="col">Auto-start</th><th scope="col">Low time</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody id="schedule-rows"></tbody>
+      </table></div><p id="schedule-empty" hidden>No sessions scheduled.</p>
+      <form id="schedule-form" novalidate><fieldset><legend>Add a session</legend>
+        <label>Start date and time<input id="schedule-start" type="datetime-local" required aria-describedby="schedule-help"></label><p id="schedule-help" class="hint">Use your local date and time.</p>
+        <label>Duration in minutes<input id="schedule-minutes" type="text" inputmode="numeric" maxlength="8" value="15"></label>
+      </fieldset><button type="submit">Add session</button></form>
+    </section>
+    <section id="outbox" class="main-only" aria-labelledby="outbox-heading">
+      <h2 id="outbox-heading">Outbox</h2><p>These entries are stored locally. “Simulate success” changes a row for accessibility testing; it sends nothing online.</p>
+      <div class="table-scroll" role="region" aria-label="Outbox table" tabindex="0"><table><caption>Local preview entries</caption><thead><tr><th scope="col">Saved locally</th><th scope="col">Destination</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">Actions</th></tr></thead><tbody id="outbox-rows"></tbody></table></div>
+      <p id="outbox-empty" hidden>No local entries.</p>
+    </section>
+    <section id="review" class="main-only" aria-labelledby="review-heading">
+      <h2 id="review-heading">Review guide</h2>
+      <ol><li>Enter a duration, leave the input, and read the surrounding text at your own pace.</li><li>Start the timer. Read this page or another app for a minute. The countdown should not interrupt you.</li><li>Use Read remaining time. You should hear the current time once.</li><li>Open the compact timer and try both views using the keyboard.</li><li>Navigate individual Scheduling and Outbox cells using your reader's table commands.</li><li>Write a practice reflection, choose Later, and reopen it to check that the draft is preserved.</li></ol>
+      <p>The preview has its own saved data. Audio, live Sheets delivery, installation setup, and the remaining settings are not included in this first prototype.</p>
+      <p>Use Alt+Tab for its windows. This preview does not register global shortcuts. Close the main window to quit the preview; close a compact window to leave the preview timer running.</p>
+    </section>
+    <section id="reflection" class="reflection-only" aria-labelledby="reflection-heading">
+      <h2 id="reflection-heading" tabindex="-1">Session reflection</h2><p id="reflection-context"></p>
+      <p id="reflection-help">What went well? What would you change next time? Write up to 5,000 characters. Later keeps your draft for another time.</p>
+      <form id="reflection-form" novalidate><label for="reflection-text">Your reflection</label><textarea id="reflection-text" rows="7" maxlength="5000" aria-describedby="reflection-help"></textarea>
+        <div id="reason-group" hidden><label for="early-reason">Reason for ending early (optional)</label><textarea id="early-reason" rows="2" maxlength="1000"></textarea></div>
+        <p id="draft-status">Draft not yet changed.</p><div class="actions"><button type="submit" class="primary">Save to local Outbox</button><button id="later" type="button">Later</button></div>
+      </form>
+    </section>
+  </main>
+  <dialog id="entry-dialog" aria-labelledby="entry-title"><h2 id="entry-title" tabindex="-1">Saved reflection</h2><p id="entry-meta"></p><p id="entry-text" class="preserve-lines"></p><form method="dialog"><button>Close details</button></form></dialog>
+  <footer class="main-only">Reflection Timer · accessibility preview 0.1</footer>
+</body>
+</html>
