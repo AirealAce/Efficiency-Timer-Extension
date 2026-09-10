@@ -90,6 +90,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
       if(view==='Compact'){
         await target.evaluate(state=>window.previewDispatch({type:'state',state}),{...state,timer:{...state.timer,autoRestart:true}});
         check(await target.locator('#repeat').evaluate(e=>e.getAttribute('aria-pressed')==='true'&&getComputedStyle(e).borderStyle==='double'),'Auto-start remains visibly distinct in Windows contrast mode');
+        check(await target.locator('.transport svg').evaluateAll(icons=>icons.every(e=>getComputedStyle(e).stroke===getComputedStyle(e.closest('button')).color)),'Compact arrow icons preserve their button text colors in Windows contrast mode');
         await capture('Windows-contrast-Compact-auto-start-on',target);
       }
       await target.emulateMedia({forcedColors:'none'});
