@@ -44,3 +44,17 @@ body[data-view=main] nav[role=tablist] button[aria-selected=true]{font-weight:40
 #panel-diagnostics>details{flex:none;margin:0}
 #guided-dialog{width:min(940px,96vw);height:min(800px,94vh);max-height:94vh;padding:20px}#guided-dialog[open]{display:flex;flex-direction:column}#guided-pages{flex:1;min-height:0;overflow:auto;padding:12px 4px}#guided-dialog [role=tablist]{display:flex;gap:10px;flex-wrap:wrap}#guided-dialog [role=tab][aria-selected=true]{background:var(--accent);color:var(--accent-text)}#guided-dialog>.actions{margin-bottom:0}
 body[data-view=reflection] .messages{height:auto;min-height:0;padding:0 20px!important}
+/* Let the writing area yield space to context, the optional reason, and actions. */
+body[data-view=reflection] #reflection-text{flex:1 1 0;min-height:64px;height:0}
+body[data-view=reflection] #early-reason{height:52px;min-height:52px;padding:5px 8px;line-height:1.25}
+body[data-view=reflection] #reason-group,body[data-view=reflection] #draft-status,body[data-view=reflection] .actions{flex-shrink:0}
+@media(max-height:400px){
+  body[data-view=reflection] header{padding-top:12px}
+  body[data-view=reflection] h1{font-size:22px;margin-bottom:8px}
+  body[data-view=reflection] #reflection-context{font-size:14px;line-height:1.4;margin-bottom:8px}
+  body[data-view=reflection] #reason-group label{font-size:14px;line-height:1.4;margin:4px 0}
+  body[data-view=reflection] #early-reason{margin-top:0}
+  body[data-view=reflection] #draft-status{margin:4px 0}
+  body[data-view=reflection] .actions{margin:4px 0 6px}
+  body[data-view=reflection] .actions button{min-height:36px;padding:6px 12px}
+}

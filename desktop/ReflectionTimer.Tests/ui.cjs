@@ -399,6 +399,29 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='flushed'));
     const messages=await page.evaluate(()=>window.previewMessages);
     check(messages.findIndex(m=>m.action==='draft'&&m.data.text==='Unsaved final keystroke')<messages.findIndex(m=>m.action==='flushed'),'Closing flush saves the newest draft before acknowledging');
+    const promptLayout=await page.context().newPage();
+    for(const [kind,isCheckIn,endedEarly] of [['Session-end',false,false],['Check-in',true,false],['Early-end',false,true]]){
+      // CSS viewports inside the existing 560px-wide native prompt at common display scales.
+      for(const [scale,width,height] of [[100,544,endedEarly?486:401],[125,432,endedEarly?381:313],[150,357,endedEarly?311:254]]){
+        await promptLayout.setViewportSize({width,height});
+        await promptLayout.goto('https://reflection-timer.invalid/index.html?view=reflection');
+        await promptLayout.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
+        const promptState={...initial,prompts:[{id:'layout',isCheckIn,endedEarly,draft:'',earlyEndReason:'',actual:'12 minutes 34 seconds',allotted:'15 minutes',completed:'9/10/2026 3:45 PM'}]};
+        await promptLayout.evaluate(state=>window.previewDispatch({type:'init',state,promptId:'layout'}),promptState);
+        for(const theme of [0,1,2,3]){
+          await promptLayout.evaluate(state=>window.previewDispatch({type:'state',state}),{...promptState,theme});
+          check(await promptLayout.evaluate(()=>{
+            const root=document.documentElement,main=document.querySelector('main');
+            const controls=[...document.querySelectorAll('#reflection textarea,#reflection button')].filter(e=>e.getClientRects().length);
+            return root.scrollHeight<=innerHeight+1&&root.scrollWidth<=innerWidth&&main.scrollHeight<=main.clientHeight+1&&main.scrollWidth<=main.clientWidth&&controls.every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&(!e.matches('textarea')||e.scrollHeight<=e.clientHeight);});
+          }),`${kind} prompt fits without page or empty-field scrollbars at ${scale}% display scale, theme ${theme}`);
+          if(scale===125&&(theme===0||theme===3))await capture(`Prompt-${kind}-${scale}-theme-${theme}`,promptLayout);
+        }
+        await promptLayout.locator('#reflection-text').fill(('A long reflection stays inside the writing area.\n').repeat(50));
+        check(await promptLayout.locator('#reflection-text').evaluate(e=>e.scrollHeight>e.clientHeight)&&await promptLayout.locator('main').evaluate(e=>e.scrollHeight<=e.clientHeight+1)&&await promptLayout.getByRole('button',{name:'Save & send',exact:true}).evaluate(e=>e.getBoundingClientRect().bottom<=innerHeight),`${kind} long text scrolls within its field and leaves the actions visible at ${scale}%`);
+      }
+    }
+    await promptLayout.close();
     check(failures.length===0,'No browser JavaScript errors');
     console.log(`${count} browser checks passed.`);
   } finally { await browser.close(); }

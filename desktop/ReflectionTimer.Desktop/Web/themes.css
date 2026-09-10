@@ -25,6 +25,7 @@ input[type=range]{accent-color:var(--accent)}
 :root[data-theme="3"] #theme-preview .theme-ornament{display:block}
 :root[data-theme="3"] #theme-preview-title{font-family:Georgia,serif;font-style:italic;font-weight:400}
 @media(max-width:640px){#page-title>.theme-ornament{display:none!important}}
+@media(max-height:400px){:root[data-theme="3"] body[data-view=reflection] #page-title{padding:0 4px;margin-bottom:8px}}
 @media(max-width:560px){:root[data-theme="3"] body[data-view=main] #page-title{margin:-16px -14px 10px;padding:16px 14px;min-height:80px}.theme-preview-samples{gap:10px;padding-right:0}#theme-preview .theme-ornament{display:none!important}}
 @media(forced-colors:active){
   :root:root{--background:Canvas;--field:Canvas;--raised:ButtonFace;--border:CanvasText;--text:CanvasText;--muted:CanvasText;--accent:Highlight;--accent-text:HighlightText;--error:CanvasText;--selection:Highlight;--selection-text:HighlightText;--warning:CanvasText;--decoration:CanvasText}
