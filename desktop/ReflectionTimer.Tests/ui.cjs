@@ -58,6 +58,29 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
       check(true,view+' starts a positive duration with omitted units treated as zero');
       await target.evaluate(state=>{window.previewDispatch({type:'durationDraft',parts:null});window.previewDispatch({type:'state',state});},initial);
     }
+    async function completedDuration(target,view){
+      const running={...initial,clock:{seconds:1,text:'1 second',status:'Running'},timer:{...initial.timer,endTime:123456789}};
+      const finished={...initial,clock:{seconds:900,text:'15 minutes',status:'Finished'}};
+      await target.evaluate(state=>{window.previewDispatch({type:'durationDraft',parts:null});window.previewDispatch({type:'state',state});},running);
+      await target.evaluate(()=>window.previewDispatch({type:'clock',clock:{seconds:0,text:'0 seconds',status:'Running'}}));
+      check(await target.locator('#visual-clock').textContent()==='0:00',view+' can show zero at the end of the countdown');
+      await target.evaluate(state=>window.previewDispatch({type:'state',state}),finished);
+      await target.evaluate(clock=>window.previewDispatch({type:'clock',clock}),finished.clock);
+      check(await target.locator('#visual-clock').textContent()==='15:00'&&await target.locator('#minutes').inputValue()==='15'&&await target.locator('#toggle').getAttribute('aria-label')!=='Resume timer',view+' returns to the input duration after completion and later ticks');
+      check(await target.locator('#time-snapshot').textContent()==='Time checked: 15 minutes set. Finished.',view+' accessible snapshot describes the next duration as set after completion');
+      if(view==='Compact'){
+        await target.locator('#shrink').click();
+        check(await target.locator('#visual-clock').textContent()==='15:00'&&await target.locator('#minutes').isHidden(),'Time-only also shows the input duration after completion');
+        await target.locator('#expand').click();
+      }
+      await target.locator('#minutes').fill('12');
+      await target.evaluate(clock=>window.previewDispatch({type:'clock',clock}),finished.clock);
+      check(await target.locator('#visual-clock').textContent()==='12:00',view+' keeps a newly entered duration after completion');
+      await target.locator('#minutes').fill('0');
+      await target.evaluate(clock=>window.previewDispatch({type:'clock',clock}),finished.clock);
+      check(await target.locator('#visual-clock').textContent()==='0:00'&&await target.locator('#hours').inputValue()==='0'&&await target.locator('#seconds').inputValue()==='0',view+' stays at zero after completion when every input is zero');
+      await target.evaluate(state=>{window.previewDispatch({type:'durationDraft',parts:null});window.previewDispatch({type:'state',state});},initial);
+    }
     async function themes(target,state,view){
       const palettes=[
         ['Dark','rgb(22, 26, 34)','rgb(35, 42, 54)','rgb(239, 244, 250)'],
@@ -104,6 +127,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.getByRole('tab',{name:'Timer',exact:true}).click();
     check(await page.getByRole('tab').allTextContents().then(t=>JSON.stringify(t)===JSON.stringify(['Timer','Scheduler','Outbox','Settings','Diagnostics'])),'App exposes the five tabs with the renamed Scheduler');
     await emptyDurationFields(page,'App');
+    await completedDuration(page,'App');
     await page.locator('#minutes').fill('12');
     for(const [chord,names] of [['Control+Tab',['Scheduler','Outbox','Settings','Diagnostics','Timer']],['Control+Shift+Tab',['Diagnostics','Settings','Outbox','Scheduler','Timer']]]){
       for(const name of names){
@@ -334,6 +358,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.waitForFunction(()=>document.querySelector('#repeat').getAttribute('aria-pressed')==='true'&&!document.querySelector('#repeat').hasAttribute('aria-disabled'));
     await emptyDurationFields(page,'Compact');
     check(await page.evaluate(()=>window.previewMessages.findLast(m=>m.action==='toggle').data.repeat===true),'Starting from Compact uses the Auto-start toggle state');
+    await completedDuration(page,'Compact');
     await capture('Compact-view');
     await themes(page,initial,'Compact');
     const mode=page.getByRole('button',{name:'Shrink to time-only view',exact:true});await mode.click();

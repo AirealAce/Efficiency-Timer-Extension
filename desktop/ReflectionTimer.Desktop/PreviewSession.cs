@@ -53,8 +53,11 @@ public sealed class PreviewSession
     public object Clock()
     {
         var timer = Engine.Snapshot.Timer;
-        var seconds = TimerEngine.Remaining(timer, Engine.Now);
-        return new { seconds, text = SpeakTime(seconds), status = Status(timer) };
+        var status = Status(timer);
+        // Keep completion and reflection accounting in the engine, but show the
+        // duration ready for the next session once the countdown has ended.
+        var seconds = status == "Finished" ? timer.DurationSeconds : TimerEngine.Remaining(timer, Engine.Now);
+        return new { seconds, text = SpeakTime(seconds), status };
     }
     public static string Status(TimerState timer) => timer.IsRunning ? "Running" : TimerEngine.IsPaused(timer) ? "Paused" : timer.RemainingSeconds == 0 ? "Finished" : "Ready";
     public static string SpeakTime(int total)

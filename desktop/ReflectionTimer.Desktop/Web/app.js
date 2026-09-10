@@ -29,7 +29,7 @@ function run(action) { error(''); Promise.resolve().then(action).catch(e => erro
 function available(button, yes) { button.setAttribute('aria-disabled', String(!yes)); }
 function bind(id, action) { $(id).addEventListener('click', () => { if ($(id).getAttribute('aria-disabled') !== 'true') run(action); }); }
 function snapshot(clock, speak = false) {
-  const text = `${clock.text} remaining. ${clock.status}.`;
+  const text = `${clock.text} ${clock.status==='Finished'?'set':'remaining'}. ${clock.status}.`;
   setText($('time-snapshot'), `Time checked: ${text}`);
   if (speak) announce(text);
 }

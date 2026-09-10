@@ -24,7 +24,7 @@ function resize(){if(state)send('compactSize',{width:Math.ceil(document.body.get
 function mode(value){tiny=value;document.body.dataset.tiny=String(value);$('shrink').setAttribute('aria-label',value?'Hide compact timer':'Shrink to time-only view');$('expand').setAttribute('aria-label',value?'Expand compact view':'Open main timer page');['shrink','expand'].forEach(id=>$(id).title=$(id).getAttribute('aria-label'));}
 function focusDuration(){const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
 function expand(){revealed=true;mode(false);focusDuration();}
-function snapshot(clock,speak=false){const text=`${clock.text} remaining. ${clock.status}.`;setText($('time-snapshot'),`Time checked: ${text}`);if(speak)announce(text);}
+function snapshot(clock,speak=false){const text=`${clock.text} ${clock.status==='Finished'?'set':'remaining'}. ${clock.status}.`;setText($('time-snapshot'),`Time checked: ${text}`);if(speak)announce(text);}
 function render(next){const previous=state;state=next;document.documentElement.dataset.theme=String(state.theme??0);const running=state.clock.status==='Running';
   if(!previous||previous.clock.status!==state.clock.status)snapshot(state.clock);
   if(!previous||(!dirty&&state.timer.durationSeconds!==previous.timer.durationSeconds))fill(state.timer.durationSeconds);
