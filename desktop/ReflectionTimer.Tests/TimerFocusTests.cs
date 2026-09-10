@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using ReflectionTimer.Core;
 using ReflectionTimer.Desktop;
 
@@ -23,6 +24,7 @@ internal static partial class Program
     }
     private static void TestTimerFocusShortcut()
     {
+        TestMainWindowToggleShortcut();
         Test("period uses Ctrl Alt NoRepeat registration and releases exactly once", () => {
             var api = new FakeHotKey(); var used = 0;
             var shortcut = new GlobalShortcut(() => used++, api, GlobalShortcut.CompactFocusKey, GlobalShortcut.CompactFocusId);
@@ -137,6 +139,129 @@ internal static partial class Program
             });
             Equal(5, api.Registrations.Count); Equal(4, api.Unregistrations.Count);
             Is(!api.Unregistrations.Any(x => x.Id == GlobalShortcut.CompactFocusId));
+        });
+    }
+
+    private static void PressMainShortcut(TimerApplication app)
+    {
+        var shortcut = (GlobalShortcut)typeof(TimerApplication).GetField("focusShortcut", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        Is(shortcut.Dispatch(GlobalShortcut.HotKeyMessage, GlobalShortcut.HotKeyId));
+        Application.DoEvents();
+    }
+
+    private static void TestMainWindowToggleShortcut()
+    {
+        Test("main foreground check excludes hidden, minimized, disabled, uncreated and other handles", () => {
+            using var form = new Form();
+            Is(!WindowActivation.IsForeground(form, 0)); Is(!form.IsHandleCreated);
+            form.Show(); var handle = form.Handle;
+            Is(WindowActivation.IsForeground(form, handle)); Is(!WindowActivation.IsForeground(form, handle + 1));
+            Is(!WindowActivation.IsForeground(form, 0));
+            form.Enabled = false; Is(!WindowActivation.IsForeground(form, handle)); form.Enabled = true;
+            form.WindowState = FormWindowState.Minimized; Is(!WindowActivation.IsForeground(form, handle));
+            form.WindowState = FormWindowState.Normal; form.Hide(); Is(!WindowActivation.IsForeground(form, handle));
+            form.Dispose(); Is(!WindowActivation.IsForeground(form, handle));
+        });
+        foreach (var tab in Enumerable.Range(0, 5))
+            Test("T uses main X close path and preserves tab and drafts: " + tab, () => {
+                WithEndEarlyApp((app, directory) => {
+                    var (main, tabs, duration, _) = TimerShortcutControls(app);
+                    duration.LoadSeconds(150);
+                    var appointment = Descendants(tabs.TabPages[0]).OfType<SessionStartInput>().Single(x => x.AccessibleName == "Start timer at");
+                    appointment.Text = "unfinished appointment draft";
+                    tabs.SelectedIndex = tab; app.Open(); Application.DoEvents();
+                    Is(WindowActivation.IsForeground(main, Form.ActiveForm?.Handle ?? 0));
+                    var before = JsonSerializer.Serialize(app.Engine.Snapshot);
+                    var saved = File.ReadAllBytes(Path.Combine(directory, "state.dat"));
+                    var closeReasons = new List<CloseReason>();
+                    main.FormClosing += (_, e) => { Is(e.Cancel); closeReasons.Add(e.CloseReason); };
+                    PressMainShortcut(app);
+                    Is(!main.Visible && !main.IsDisposed); Equal(CloseReason.UserClosing, closeReasons.Single());
+                    Is(app.Log.Recent().Any(x => x.Event == "app.hidden"));
+                    PressMainShortcut(app);
+                    Is(WindowActivation.IsForeground(main, Form.ActiveForm?.Handle ?? 0)); Equal(tab, tabs.SelectedIndex);
+                    Equal(150, duration.Seconds); Equal("unfinished appointment draft", appointment.Text);
+                    if (tab == 0) AssertDurationSelected(duration, "Minutes");
+                    Equal(before, JsonSerializer.Serialize(app.Engine.Snapshot));
+                    Is(saved.SequenceEqual(File.ReadAllBytes(Path.Combine(directory, "state.dat"))));
+                    // Tray/double-click Open must remain idempotent, not toggle.
+                    app.Open(); Is(main.Visible); Equal(1, closeReasons.Count);
+                });
+            });
+        foreach (var paused in new[] { false, true })
+            Test("T hiding preserves active session, compact view and auto-start: paused=" + paused, () => {
+                WithEndEarlyApp((app, _) => {
+                    var (main, _, _, _) = TimerShortcutControls(app);
+                    app.SetFloatingTimer(true);
+                    app.Engine.Start(7200, true, 0, app.Engine.Now + 3600000);
+                    if (paused) app.Engine.Pause();
+                    app.Open(); Application.DoEvents(); Is(WindowActivation.IsForeground(main, Form.ActiveForm?.Handle ?? 0));
+                    var before = JsonSerializer.Serialize(app.Engine.Snapshot);
+                    PressMainShortcut(app);
+                    Is(!main.Visible && !main.IsDisposed);
+                    Is(Application.OpenForms.OfType<FloatingTimerWindow>().Single().Visible);
+                    Equal(before, JsonSerializer.Serialize(app.Engine.Snapshot));
+                    PressMainShortcut(app); Is(WindowActivation.IsForeground(main, Form.ActiveForm?.Handle ?? 0));
+                });
+            });
+        Test("T restores minimized/maximized main and brings it forward from another window", () => {
+            nint foreground = 0;
+            WithEndEarlyApp((app, _) => {
+                var (main, _, _, _) = TimerShortcutControls(app);
+                app.Open(); main.WindowState = FormWindowState.Maximized; Application.DoEvents();
+                main.WindowState = FormWindowState.Minimized; Application.DoEvents();
+                Is(!WindowActivation.IsForeground(main, Form.ActiveForm?.Handle ?? 0));
+                PressMainShortcut(app); Is(main.Visible); Equal(FormWindowState.Maximized, main.WindowState);
+                using var other = new Form { Text = "Isolated foreground test" };
+                WindowActivation.Focus(other); Application.DoEvents(); foreground = other.Handle;
+                PressMainShortcut(app); Is(main.Visible); Equal(FormWindowState.Maximized, main.WindowState);
+                foreground = main.Handle;
+                PressMainShortcut(app); Is(!main.Visible);
+                foreground = other.Handle;
+                PressMainShortcut(app); Equal(FormWindowState.Maximized, main.WindowState);
+            }, foregroundWindow: () => foreground);
+        });
+        Test("T from compact and reflection focuses main without closing either window", () => {
+            nint foreground = 0;
+            WithEndEarlyApp((app, _) => {
+                var (main, _, _, _) = TimerShortcutControls(app); app.Open();
+                app.FocusCompactTimer(); Application.DoEvents();
+                var mini = Application.OpenForms.OfType<FloatingTimerWindow>().Single();
+                foreground = mini.Handle;
+                PressMainShortcut(app); Is(main.Visible); Is(mini.Visible);
+                app.Engine.Start(7200, false, 0); app.ShowCheckIn(); Application.DoEvents();
+                var popup = Application.OpenForms.OfType<ReflectionWindow>().Single();
+                ReflectionResponse(popup).Text = "Synthetic unfinished check-in";
+                WindowActivation.Focus(popup); Application.DoEvents(); foreground = popup.Handle;
+                var before = JsonSerializer.Serialize(app.Engine.Snapshot);
+                PressMainShortcut(app); Is(main.Visible); Is(popup.Visible && !popup.IsDisposed);
+                Equal("Synthetic unfinished check-in", ReflectionResponse(popup).Text);
+                Equal(before, JsonSerializer.Serialize(app.Engine.Snapshot));
+            }, foregroundWindow: () => foreground);
+        });
+        Test("T retains an owned modal instead of closing or typing behind its main owner", () => {
+            nint foreground = 0;
+            WithEndEarlyApp((app, _) => {
+                var (main, tabs, _, _) = TimerShortcutControls(app); tabs.SelectedIndex = 3; app.Open();
+                using var modal = new Form { Text = "Isolated modal test" };
+                var editor = new TextBox { Text = "unsaved modal draft" }; modal.Controls.Add(editor);
+                Exception? failure = null;
+                modal.Shown += (_, _) => modal.BeginInvoke((Action)(() => {
+                    try {
+                        WindowActivation.Focus(modal); editor.Focus(); Application.DoEvents();
+                        foreground = modal.Handle;
+                        if (WindowActivation.CanReceiveFocus(main) || !editor.ContainsFocus) throw new Exception("Modal setup must disable its owner and focus its editor.");
+                        PressMainShortcut(app);
+                        Is(main.Visible && !WindowActivation.CanReceiveFocus(main) && !main.IsDisposed);
+                        if (!modal.Visible || !editor.ContainsFocus) throw new Exception("T must retain the visible modal and its focused editor.");
+                        Equal("unsaved modal draft", editor.Text); Equal(3, tabs.SelectedIndex);
+                    } catch (Exception error) { failure = error; }
+                    finally { modal.Close(); }
+                }));
+                modal.ShowDialog(main);
+                if (failure is not null) throw failure;
+                Is(main.Visible && main.Enabled);
+            }, foregroundWindow: () => foreground);
         });
     }
 }

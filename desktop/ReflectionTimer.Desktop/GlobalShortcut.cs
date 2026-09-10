@@ -91,15 +91,28 @@ internal sealed class WindowsHotKeyRegistration : IHotKeyRegistration
 
 internal static class WindowActivation
 {
+    internal static bool CanReceiveFocus(Form window) =>
+        !window.IsDisposed && window.Enabled && (!window.IsHandleCreated || IsWindowEnabled(window.Handle));
+
+    internal static bool IsForeground(Form window, nint? foregroundHandle = null) =>
+        CanReceiveFocus(window) && window.IsHandleCreated && window.Visible &&
+        window.WindowState != FormWindowState.Minimized && (foregroundHandle ?? GetForegroundWindow()) == window.Handle;
+
     public static void Focus(Form window)
     {
         window.Show();
         if (window.WindowState == FormWindowState.Minimized) ShowWindow(window.Handle, 9); // SW_RESTORE
         else ShowWindow(window.Handle, 5); // SW_SHOW also overrides a hidden launcher STARTUPINFO on first open.
-        window.BringToFront(); window.Activate();
         // An owned modal (including a native file picker) must remain in front of
         // its disabled owner; never dismiss it or redirect typing behind it.
-        SetForegroundWindow(window.Enabled ? window.Handle : GetLastActivePopup(window.Handle));
+        if (CanReceiveFocus(window)) {
+            window.BringToFront(); window.Activate(); SetForegroundWindow(window.Handle);
+        }
+        else {
+            var popup = GetLastActivePopup(window.Handle);
+            if (Form.FromHandle(popup) is Form modal && modal != window) { modal.BringToFront(); modal.Activate(); }
+            SetForegroundWindow(popup);
+        }
     }
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -109,4 +122,9 @@ internal static class WindowActivation
     private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")]
     private static extern nint GetLastActivePopup(nint window);
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(nint window);
 }

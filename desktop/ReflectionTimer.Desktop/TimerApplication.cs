@@ -20,6 +20,7 @@ public sealed class TimerApplication : ApplicationContext
     private ScheduleConflictWindow? scheduleConflict;
     private GlobalShortcut? focusShortcut, endEarlyShortcut, compactShortcut, compactFocusShortcut, reflectionFocusShortcut;
     private readonly ConsecutiveShortcutPresses timerFocusPresses;
+    private readonly Func<nint>? shortcutForegroundWindow;
     private readonly CountdownPresentation countdownPresentation = new();
     private int syncing;
     private long lastSync;
@@ -32,9 +33,10 @@ public sealed class TimerApplication : ApplicationContext
 
     public TimerApplication(EncryptedStore store, string directory, EventWaitHandle showRequest, bool enableAudio = false,
         IAlertAudioBackend? audioBackend = null, TimeProvider? audioTimeProvider = null, Action<bool>? updateStartup = null,
-        TimeProvider? shortcutTimeProvider = null)
+        TimeProvider? shortcutTimeProvider = null, Func<nint>? shortcutForegroundWindow = null)
     {
         timerFocusPresses = new(shortcutTimeProvider);
+        this.shortcutForegroundWindow = shortcutForegroundWindow;
         this.enableAudio = enableAudio; // Tests opt out by default; the desktop entry point opts in.
         Sounds = new(audioBackend, timeProvider: audioTimeProvider);
         this.showRequest = showRequest;
@@ -98,13 +100,13 @@ public sealed class TimerApplication : ApplicationContext
     {
         if (quitting || main.IsDisposed) return;
         WindowActivation.Focus(main);
-        if (main.Enabled) main.FocusDuration();
+        if (WindowActivation.CanReceiveFocus(main)) main.FocusDuration();
     }
     public void OpenTimerPage()
     {
         if (quitting || main.IsDisposed) return;
         WindowActivation.Focus(main);
-        if (main.Enabled) main.FocusTimerPage();
+        if (WindowActivation.CanReceiveFocus(main)) main.FocusTimerPage();
     }
     public void EnableGlobalShortcut(IHotKeyRegistration? registration = null)
     {
@@ -112,7 +114,11 @@ public sealed class TimerApplication : ApplicationContext
         try {
             focusShortcut = new GlobalShortcut(() => {
                 if (quitting) return;
-                timerFocusPresses.Reset(); Log.Record("shortcut.used"); Open();
+                timerFocusPresses.Reset(); Log.Record("shortcut.used");
+                // Use the title-bar X path only for the actual foreground main
+                // window, never a compact/reflection window or owned modal.
+                if (WindowActivation.IsForeground(main, shortcutForegroundWindow?.Invoke())) main.Close();
+                else Open();
             }, registration);
         }
         catch { Log.Record("error.unexpected"); }
@@ -137,7 +143,7 @@ public sealed class TimerApplication : ApplicationContext
                 Log.Record("shortcut.used", value: 3);
                 if (timerFocusPresses.Press()) {
                     WindowActivation.Focus(main);
-                    if (main.Enabled) main.FocusTimerPage();
+                    if (WindowActivation.CanReceiveFocus(main)) main.FocusTimerPage();
                 }
                 else FocusCompactTimer();
             }, registration, GlobalShortcut.CompactFocusKey, GlobalShortcut.CompactFocusId);

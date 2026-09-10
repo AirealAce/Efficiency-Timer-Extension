@@ -32,6 +32,7 @@ internal static partial class Program
                         var values = new[] { example.Item1 / 3600, example.Item1 / 60 % 60, example.Item1 % 60 };
                         for (var i = 0; i < 3; i++) CompactPart(full, parts[i]).Text = values[i].ToString();
                         if (chord.Item1 == "slash") { app.SetFloatingTimer(false); Application.DoEvents(); }
+                        if (chord.Item1 == "T") main.Hide(); // T now closes an already-focused main window.
                         clock.Milliseconds += 801; // Separate presses, not period's double-press gesture.
                         Is(shortcut.Dispatch(GlobalShortcut.HotKeyMessage, chord.Item3)); Application.DoEvents();
                         var target = chord.Item1 == "T" ? full : Application.OpenForms.OfType<FloatingTimerWindow>().Single().Duration;

@@ -347,7 +347,7 @@ public sealed class MainWindow : Form
         reflectionFocusNotice.Text = reflectionFocusAvailable ? "Ctrl+Alt+, (comma) · open a check-in for the current session. Sending records elapsed active time without stopping the timer. Repeated presses focus the same draft. Use Pending reflections for older entries."
             : "Ctrl+Alt+, (comma) could not be registered (another app may use it). Use the tray menu's Check in to current session instead. Pending reflections opens older drafts.";
         AppTheme.SetTextColor(reflectionFocusNotice, reflectionFocusAvailable ? ThemeTextRole.Muted : ThemeTextRole.Warning);
-        shortcutNotice.Text = available ? "Ctrl+Alt+T · focus Reflection Timer from any app, including the tray. On the Timer tab, select the first positive duration field from left to right (Hours if all are zero). The app must be running."
+        shortcutNotice.Text = available ? "Ctrl+Alt+T · hide the main window like its X button when it is focused; otherwise bring it forward, including from the tray. On the Timer tab, opening selects the first positive duration field from left to right (Hours if all are zero). The timer keeps running."
             : "Ctrl+Alt+T is unavailable. Another app may have reserved it. Close that app and reopen Reflection Timer to try again. The timer still works normally.";
         AppTheme.SetTextColor(shortcutNotice, available ? ThemeTextRole.Muted : ThemeTextRole.Warning);
         endEarlyNotice.Text = endEarlyAvailable ? "Ctrl+Alt+` (backtick) · start using the Timer page's duration and options, or resume a paused timer. If running, end the session now and open its reflection. Auto-start and its cutoff work as usual; future schedules stay unchanged."

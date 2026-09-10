@@ -141,6 +141,10 @@ internal static partial class Program
             TestTimerFocusShortcut();
             Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
         }
+        if (args is ["--main-window-toggle"]) {
+            TestMainWindowToggleShortcut();
+            Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;
+        }
         if (args is ["--compact-transport"]) {
             TestCompactTransport();
             Console.WriteLine($"\n{passed} passed; {failed} failed."); return failed == 0 ? 0 : 1;

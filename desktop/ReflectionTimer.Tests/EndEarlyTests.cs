@@ -222,12 +222,16 @@ internal static partial class Program
         return (main, tabs, duration, shortcut);
     }
 
-    private static void WithEndEarlyApp(Action<TimerApplication, string> test, AppState? initial = null, TimeProvider? shortcutClock = null)
+    private static void WithEndEarlyApp(Action<TimerApplication, string> test, AppState? initial = null, TimeProvider? shortcutClock = null,
+        Func<nint>? foregroundWindow = null)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ReflectionTimer-QA-end-early-" + Guid.NewGuid().ToString("N"));
         var store = new EncryptedStore(directory); store.Save(initial ?? new AppState { ExtensionDisabledConfirmed = true, Timer = new() { Volume = 0 } });
         using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
-        using var app = new TimerApplication(store, directory, show, updateStartup: _ => { }, shortcutTimeProvider: shortcutClock);
+        // Background test runners cannot reliably acquire Windows foreground
+        // rights. Inject the active test form; production uses GetForegroundWindow.
+        using var app = new TimerApplication(store, directory, show, updateStartup: _ => { }, shortcutTimeProvider: shortcutClock,
+            shortcutForegroundWindow: foregroundWindow ?? (() => Form.ActiveForm?.Handle ?? 0));
         test(app, directory);
     }
 }
