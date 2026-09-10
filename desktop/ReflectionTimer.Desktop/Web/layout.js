@@ -2,7 +2,7 @@
 // underneath the familiar layout; it must not add App controls to compact mode.
 export function arrangeApp(view) {
   const $=id=>document.getElementById(id);
-  if(view!=='main') return {select(){}};
+  if(view!=='main') return {select(){},cycle(){}};
   const nav=document.querySelector('nav'),main=$('main');nav.replaceChildren();nav.setAttribute('role','tablist');nav.setAttribute('aria-label','App views');
   const definitions=[['timer','Timer'],['schedules','Scheduler'],['outbox','Outbox'],['settings','Settings'],['diagnostics','Diagnostics']];
   const panels=new Map(),buttons=new Map(),scroll=new Map();let current='timer';
@@ -17,6 +17,17 @@ export function arrangeApp(view) {
     });
   }
   function select(id){if(!panels.has(id))return;scroll.set(current,main.scrollTop);for(const [key,panel] of panels){panel.hidden=key!==id;const button=buttons.get(key);button.setAttribute('aria-selected',String(key===id));button.tabIndex=key===id?0:-1;}current=id;document.body.dataset.tab=id;document.querySelector('footer').hidden=id!=='settings';document.dispatchEvent(new CustomEvent('appTabChanged',{detail:id}));main.scrollTop=scroll.get(id)||0;}
+  function cycle(backward=false){
+    if(document.querySelector('dialog[open]'))return;
+    const next=definitions[(definitions.findIndex(([id])=>id===current)+(backward?-1:1)+definitions.length)%definitions.length][0];
+    select(next);buttons.get(next).focus();
+  }
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Tab'&&event.ctrlKey&&!event.altKey&&!event.metaKey){
+      if(document.querySelector('dialog[open]'))return;
+      event.preventDefault();cycle(event.shiftKey);
+    }
+  });
   document.querySelector('.page-header>.main-only').classList.add('sr-only');
   document.querySelector('.eyebrow').classList.add('sr-only');
   const timer=$('timer');$('timer-heading').classList.add('sr-only');$('timer-state').after($('time-snapshot'));
@@ -41,5 +52,5 @@ export function arrangeApp(view) {
   $('appearance-heading').textContent='App theme';$('audio-heading').textContent='Audio';
   $('practice').textContent='Test reflection prompt';$('open-compact').textContent='Show / hide floating timer';
   $('reset').textContent='Reset';
-  select('timer');return {select};
+  select('timer');return {select,cycle};
 }

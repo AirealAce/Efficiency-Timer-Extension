@@ -1,4 +1,4 @@
-import {setText,formatClock,durationSeconds} from './ui.js';
+import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration} from './ui.js';
 const $=id=>document.getElementById(id),bridge=window.chrome?.webview,requests=new Map();
 let sequence=0,state,dirty=false,tiny=false,revealed=false,lastRunning=false,lastDeadline;
 function send(action,data={}){return new Promise((resolve,reject)=>{const requestId=String(++sequence);if(!bridge)return reject(new Error('Open the compact timer through Reflection Timer.'));const timeout=setTimeout(()=>{requests.delete(requestId);reject(new Error('The app did not respond.'));},35000);requests.set(requestId,{resolve,reject,timeout});bridge.postMessage({requestId,action,data});});}
@@ -7,7 +7,11 @@ function bind(id,action){$(id).addEventListener('click',()=>{if($(id).getAttribu
 function announce(text){setText($('status'),'');setTimeout(()=>setText($('status'),text),50);}
 function duration(){return durationSeconds(['hours','minutes','seconds'].map(id=>$(id).value.trim()));}
 function fill(seconds){$('hours').value=Math.floor(seconds/3600);$('minutes').value=Math.floor(seconds/60)%60;$('seconds').value=seconds%60;}
-function sharedDuration(parts){dirty=Array.isArray(parts);if(parts)['hours','minutes','seconds'].forEach((id,i)=>{if($(id).value!==parts[i])$(id).value=parts[i];});else if(state)fill(state.timer.durationSeconds);if(state?.clock.status!=='Running'){try{setText($('visual-clock'),formatClock(dirty?duration():state.clock.seconds));}catch{setText($('visual-clock'),'—');}}}
+function sharedDuration(parts){dirty=Array.isArray(parts);if(parts)['hours','minutes','seconds'].forEach((id,i)=>{if($(id).value!==parts[i])$(id).value=parts[i];});else if(state)fill(state.timer.durationSeconds);if(state?.clock.status!=='Running')renderDuration();}
+function renderDuration(){
+  try{setText($('visual-clock'),formatClock(dirty?durationPreviewSeconds(['hours','minutes','seconds'].map(id=>$(id).value)):state.clock.seconds));}
+  catch{ /* Keep the last valid time while an invalid value is being edited. */ }
+}
 function resize(){if(state)send('compactSize',{width:Math.ceil(document.body.getBoundingClientRect().width),height:Math.ceil(document.body.getBoundingClientRect().height),tiny}).catch(e=>setText($('error'),e.message));}
 function mode(value){tiny=value;document.body.dataset.tiny=String(value);$('shrink').setAttribute('aria-label',value?'Hide compact timer':'Shrink to time-only view');$('expand').setAttribute('aria-label',value?'Expand compact view':'Open main timer page');['shrink','expand'].forEach(id=>$(id).title=$(id).getAttribute('aria-label'));}
 function focusDuration(){const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
@@ -21,7 +25,7 @@ function render(next){const previous=state;state=next;document.documentElement.d
   const action=running?'Pause':state.clock.status==='Paused'&&!dirty?'Resume':'Start';$('toggle').setAttribute('aria-label',`${action} timer`);$('toggle').title=`${action} timer`;setText($('toggle').firstElementChild,running?'Ⅱ':'▶');
   $('end').setAttribute('aria-disabled',String(!running));$('reset').setAttribute('aria-disabled',String(!dirty&&state.clock.status==='Ready'));
   setText($('visual-clock'),formatClock(state.clock.seconds));
-  if(dirty&&!running){try{setText($('visual-clock'),formatClock(duration()));}catch{setText($('visual-clock'),'—');}}
+  if(dirty&&!running)renderDuration();
   document.body.style.setProperty('--tiny-width',`${Math.max(96,formatClock(state.timer.durationSeconds).length*15+16)}px`);
   if(tiny&&['hours','minutes','seconds','toggle','repeat','app','reset','end'].includes(document.activeElement.id))$('read-time').focus();
 }
@@ -36,7 +40,10 @@ bridge?.addEventListener('message',event=>{const m=event.data;if(m.type==='reply
   else if(m.type==='shrinkCompact'){mode(true);$('read-time').focus();}
   else if(m.type==='measureCompact')resize();
 });
-['hours','minutes','seconds'].forEach(id=>$(id).addEventListener('input',()=>{const parts=['hours','minutes','seconds'].map(id=>$(id).value);sharedDuration(parts);run(()=>send('durationDraft',{parts}));$('reset').setAttribute('aria-disabled','false');}));
+['hours','minutes','seconds'].forEach(id=>{
+  const changed=()=>{const parts=['hours','minutes','seconds'].map(id=>$(id).value);sharedDuration(parts);run(()=>send('durationDraft',{parts}));$('reset').setAttribute('aria-disabled','false');};
+  $(id).addEventListener('input',changed);normalizeEmptyDuration($(id),changed);
+});
 $('timer-editor').addEventListener('submit',event=>{event.preventDefault();run(async()=>{await send('toggle',{seconds:duration(),repeat:$('repeat').checked,lowTime:state.timer.enabled,threshold:state.timer.threshold});dirty=false;fill(state.timer.durationSeconds);});});
 $('repeat').addEventListener('change',()=>run(()=>send('repeat',{enabled:$('repeat').checked})));
 bind('read-time',()=>send('readTime'));bind('app',()=>send('main'));bind('end',()=>send('end'));

@@ -22,7 +22,7 @@ internal sealed partial class PreviewWindow : Form
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · 4.0.0" : view == "compact" ? "Reflection Timer — Compact view · 4.0.0" : "Reflection Timer — Session end · 4.0.0";
+        Text = view == "main" ? "Reflection Timer — App view · 4.0.1" : view == "compact" ? "Reflection Timer — Compact view · 4.0.1" : "Reflection Timer — Session end · 4.0.1";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(368, 284) : new(560, app.Session.Engine.Snapshot.Prompts.Any(p=>p.Id==prompt&&p.EndedEarly)?525:440);
         MinimumSize = view == "main" ? new(420, 400) : view == "compact" ? new(80,32) : new(420,360);
@@ -32,6 +32,13 @@ internal sealed partial class PreviewWindow : Form
             : new(view == "compact" ? area.Left + 16 : Math.Max(area.Left, area.Right - Width - 16), Math.Max(area.Top, area.Bottom - Height - 16));
         TopMost = view == "compact";
         Controls.Add(browser);
+        // WebView2 handles browser accelerators before DOM keyboard events.
+        // Defer the message until its synchronous key handler has returned.
+        browser.KeyDown+=(_,e)=>{
+            if(View!="main"||!ready||e.KeyCode!=Keys.Tab||(e.Modifiers!=Keys.Control&&e.Modifiers!=(Keys.Control|Keys.Shift)))return;
+            var backward=e.Shift;e.Handled=true;e.SuppressKeyPress=true;
+            BeginInvoke(()=>Post(new{type="cycleAppTab",backward}));
+        };
         HandleCreated+=(_,_)=>ApplyWindowTheme();
         Shown += async (_, _) => await InitializeAsync();
         ResizeEnd+=(_,_)=>{if(View=="compact")try{app.Session.Engine.SetFloatingTimerPosition(Left,Top);}catch{app.Announce("Could not save the compact position.");}};
@@ -145,7 +152,7 @@ internal sealed partial class PreviewWindow : Form
                 if(View!="compact") throw new ArgumentException("Only the compact window can request this size.");
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.0.0";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.0.1";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }

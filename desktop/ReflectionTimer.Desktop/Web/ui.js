@@ -12,10 +12,22 @@ export function formatClock(seconds) {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 }
 export function durationSeconds(values) {
-  if (values.some(v => !/^\d+$/.test(v))) throw new Error('Enter whole, non-negative numbers for hours, minutes, and seconds.');
-  const result = Number(values[0]) * 3600 + Number(values[1]) * 60 + Number(values[2]);
-  if (!Number.isSafeInteger(result) || result < 1 || result > 31536000) throw new Error('Enter a duration between one second and one year.');
+  const result = durationPreviewSeconds(values);
+  if (result < 1) throw new Error('Enter a duration between one second and one year.');
   return result;
+}
+// An empty unit is zero while editing; a zero preview is valid, but cannot start a session.
+export function durationPreviewSeconds(values) {
+  const parts = values.map(v => v.trim() || '0');
+  if (parts.some(v => !/^\d+$/.test(v))) throw new Error('Enter whole, non-negative numbers for hours, minutes, and seconds.');
+  const result = Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
+  if (!Number.isSafeInteger(result) || result > 31536000) throw new Error('Enter a duration between one second and one year.');
+  return result;
+}
+export function normalizeEmptyDuration(input, changed) {
+  input.addEventListener('blur', () => {
+    if (input.value === '' && !input.validity.badInput) { input.value = '0'; changed(); }
+  });
 }
 // Keep existing rows, cells, and buttons attached. Updates must not replace the
 // focused element or the objects a screen reader is currently navigating.

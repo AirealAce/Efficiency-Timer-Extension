@@ -1,4 +1,4 @@
-import {setText, formatClock, durationSeconds, reconcileRows} from './ui.js';
+import {setText, formatClock, durationSeconds, durationPreviewSeconds, normalizeEmptyDuration, reconcileRows} from './ui.js';
 import {settingsUI, localDateTime} from './settings.js';
 import {arrangeApp} from './layout.js';
 
@@ -40,7 +40,11 @@ function applyDuration(seconds) {
 function sharedDuration(parts){
   durationDirty=Array.isArray(parts);
   if(parts)['hours','minutes','seconds'].forEach((id,i)=>{if($(id).value!==parts[i])$(id).value=parts[i];});else if(state)applyDuration(state.timer.durationSeconds);
-  if(state?.clock.status!=='Running'){setText($('toggle'),durationDirty?'Start':state?.clock.status==='Paused'?'Resume':'Start');try{setText($('visual-clock'),formatClock(durationDirty?readDuration():state.clock.seconds));}catch{setText($('visual-clock'),'—');}}
+  if(state?.clock.status!=='Running'){setText($('toggle'),durationDirty?'Start':state?.clock.status==='Paused'?'Resume':'Start');renderDuration();}
+}
+function renderDuration(){
+  try{setText($('visual-clock'),formatClock(durationDirty?durationPreviewSeconds(['hours','minutes','seconds'].map(id=>$(id).value)):state.clock.seconds));}
+  catch{ /* Keep the last valid time while an invalid value is being edited. */ }
 }
 function draft() { return {id: promptId, text: $('reflection-text').value, reason: $('early-reason').value}; }
 function saveDraft() {
@@ -168,7 +172,7 @@ function render(next) {
     tables();
   }
   initial = false;
-  if(durationDirty&&!running){try{setText($('visual-clock'),formatClock(readDuration()));}catch{setText($('visual-clock'),'—');}}
+  if(durationDirty&&!running)renderDuration();
 }
 bridge?.addEventListener('message', event => {
   const message = event.data;
@@ -190,6 +194,7 @@ bridge?.addEventListener('message', event => {
   else if (message.type === 'durationDraft'&&view!=='reflection')sharedDuration(message.parts);
   else if (message.type === 'focusReflection') {if(view==='reflection'&&!document.querySelector('dialog[open]'))$('reflection-text').focus();}
   else if (message.type === 'focusTimer') {if(document.querySelector('dialog[open]'))return;if(message.selectTimer)layout.select('timer');if(document.body.dataset.tab!=='timer')return;const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
+  else if (message.type === 'cycleAppTab') layout.cycle(message.backward);
   else if (message.type === 'flush') {
     saveDraft().then(()=>send('flushed')).catch(e=>{ error(e.message); send('flushFailed').catch(()=>{}); });
   } else settings.message(message);
@@ -199,7 +204,11 @@ bind('delivery-confirm',async()=>{
   const decision=deliveryDecision;await send(decision.action,{id:decision.id,confirmed:true});$('delivery-dialog').close();
   $('retry-selected').focus();
 });
-['hours','minutes','seconds'].forEach(id => $(id).addEventListener('input',()=>{const parts=['hours','minutes','seconds'].map(id=>$(id).value);sharedDuration(parts);run(()=>send('durationDraft',{parts}));}));
+['hours','minutes','seconds'].forEach(id => {
+  const changed=()=>{const parts=['hours','minutes','seconds'].map(id=>$(id).value);sharedDuration(parts);run(()=>send('durationDraft',{parts}));};
+  $(id).addEventListener('input',changed);normalizeEmptyDuration($(id),changed);
+});
+['schedule-hours','schedule-minutes','schedule-seconds'].forEach(id=>normalizeEmptyDuration($(id),()=>{}));
 $('timer-editor').addEventListener('submit',event=>{ event.preventDefault(); run(async()=>{
   const seconds = readDuration(), threshold = Number($('threshold').value);
   await send('toggle',{seconds,threshold,repeat:$('repeat').checked,lowTime:$('low-time').checked}); durationDirty=false; applyDuration(state.timer.durationSeconds); render(state);

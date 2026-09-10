@@ -34,6 +34,30 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
     await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);
     async function capture(name,target=page){if(process.env.REFLECTION_PREVIEW_SCREENSHOTS){await fs.mkdir(process.env.REFLECTION_PREVIEW_SCREENSHOTS,{recursive:true});await target.locator('body').screenshot({path:path.join(process.env.REFLECTION_PREVIEW_SCREENSHOTS,name+'.png')});}}
+    async function emptyDurationFields(target,view){
+      await target.locator('#hours').fill('');
+      check(await target.locator('#visual-clock').textContent()==='15:00',view+' treats an empty Hours field as zero');
+      await target.keyboard.press('Tab');
+      check(await target.locator('#hours').inputValue()==='0',view+' restores zero when leaving an empty duration field');
+      await target.locator('#minutes').fill('');
+      check(await target.locator('#visual-clock').textContent()==='0:00',view+' shows zero time while all duration units are empty or zero');
+      const starts=await target.evaluate(()=>window.previewMessages.filter(m=>m.action==='toggle').length);
+      await target.locator('#toggle').click();
+      await target.waitForFunction(()=>document.querySelector('#error').textContent.includes('one second'));
+      check(await target.evaluate(()=>window.previewMessages.filter(m=>m.action==='toggle').length)===starts,view+' cannot start a zero-length timer');
+      await target.locator('#seconds').fill('25');
+      await target.evaluate(()=>window.previewDispatch({type:'durationDraft',parts:['','', '25']}));
+      check(await target.locator('#visual-clock').textContent()==='0:25',view+' renders a shared duration draft with empty units');
+      if(view==='Compact'){
+        await target.locator('#shrink').click();
+        check(await target.locator('#visual-clock').textContent()==='0:25'&&await target.locator('#minutes').isHidden(),'Time-only retains a numeric time for an empty-unit draft');
+        await target.locator('#expand').click();
+      }
+      await target.locator('#toggle').click();
+      await target.waitForFunction(()=>window.previewMessages.some(m=>m.action==='toggle'&&m.data.seconds===25));
+      check(true,view+' starts a positive duration with omitted units treated as zero');
+      await target.evaluate(state=>{window.previewDispatch({type:'durationDraft',parts:null});window.previewDispatch({type:'state',state});},initial);
+    }
     async function themes(target,state,view){
       const palettes=[
         ['Dark','rgb(22, 26, 34)','rgb(35, 42, 54)','rgb(239, 244, 250)'],
@@ -71,6 +95,23 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     for(const name of ['Timer','Scheduler','Outbox','Settings','Diagnostics']){await page.getByRole('tab',{name,exact:true}).click();check(await page.getByRole('button',{name:'Save settings',exact:true}).isVisible()===(name==='Settings'),'Save settings visibility matches original on '+name);}
     await page.getByRole('tab',{name:'Timer',exact:true}).click();
     check(await page.getByRole('tab').allTextContents().then(t=>JSON.stringify(t)===JSON.stringify(['Timer','Scheduler','Outbox','Settings','Diagnostics'])),'App exposes the five tabs with the renamed Scheduler');
+    await emptyDurationFields(page,'App');
+    await page.locator('#minutes').fill('12');
+    for(const [chord,names] of [['Control+Tab',['Scheduler','Outbox','Settings','Diagnostics','Timer']],['Control+Shift+Tab',['Diagnostics','Settings','Outbox','Scheduler','Timer']]]){
+      for(const name of names){
+        await page.keyboard.press(chord);
+        const tab=page.getByRole('tab',{name,exact:true});
+        check(await tab.getAttribute('aria-selected')==='true'&&await tab.evaluate(e=>e===document.activeElement),chord+' switches to '+name+' and focuses its accessible tab');
+      }
+    }
+    check(await page.locator('#minutes').inputValue()==='12','Cycling App tabs retains an unfinished duration edit');
+    await page.evaluate(()=>window.previewDispatch({type:'cycleAppTab',backward:true}));
+    check(await page.getByRole('tab',{name:'Diagnostics',exact:true}).getAttribute('aria-selected')==='true','Native Ctrl+Shift+Tab forwarding wraps from Timer to Diagnostics');
+    await page.evaluate(()=>window.previewDispatch({type:'cycleAppTab',backward:false}));
+    check(await page.getByRole('tab',{name:'Timer',exact:true}).getAttribute('aria-selected')==='true','Native Ctrl+Tab forwarding wraps from Diagnostics to Timer');
+    await page.locator('#minutes').focus();await page.keyboard.press('Tab');
+    check(await page.getByRole('tab',{name:'Timer',exact:true}).getAttribute('aria-selected')==='true'&&await page.locator('#seconds').evaluate(e=>e===document.activeElement),'Ordinary Tab continues moving between input controls');
+    await page.evaluate(state=>{window.previewDispatch({type:'durationDraft',parts:null});window.previewDispatch({type:'state',state});},initial);
     for(const width of [940,739,420,336]){
       await page.setViewportSize({width,height:642});
       for(const name of ['Timer','Scheduler','Outbox','Settings','Diagnostics']){
@@ -149,6 +190,9 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.getByRole('button',{name:'Guided setup / another PC',exact:true}).click();
     check(await page.getByRole('dialog',{name:'Your timer. Your spreadsheet.',exact:true}).isVisible()&&await page.getByRole('tab',{name:'1 · Your sheet',exact:true}).isVisible(),'Guided setup opens its own labeled three-step dialog');
     await page.getByRole('textbox',{name:'Google Sheets URL',exact:true}).fill('https://docs.google.com/spreadsheets/d/setup-draft/edit');
+    await page.keyboard.press('Control+Tab');await page.keyboard.press('Control+Shift+Tab');
+    await page.evaluate(()=>window.previewDispatch({type:'cycleAppTab',backward:false}));
+    check(await page.getByRole('tab',{name:'Settings',exact:true}).getAttribute('aria-selected')==='true'&&await page.getByRole('dialog',{name:'Your timer. Your spreadsheet.',exact:true}).evaluate(e=>e.contains(document.activeElement)),'App tab shortcuts do not move behind an open dialog');
     await page.evaluate(()=>window.previewDispatch({type:'focusTimer'}));
     check(await page.getByRole('textbox',{name:'Google Sheets URL',exact:true}).evaluate(e=>document.activeElement===e),'Opening App does not move focus behind a setup dialog');
     await page.getByRole('button',{name:'Next',exact:true}).click();
@@ -241,6 +285,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
     await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);
     check(await page.getByRole('spinbutton').count()===3&&await page.getByRole('checkbox').count()===1&&await page.getByRole('button').count()===8,'Compact exposes only the original fields, Auto-start, App, transport, and caption actions');
+    await emptyDurationFields(page,'Compact');
     await capture('Compact-view');
     await themes(page,initial,'Compact');
     const mode=page.getByRole('button',{name:'Shrink to time-only view',exact:true});await mode.click();
