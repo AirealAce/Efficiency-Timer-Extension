@@ -1,4 +1,4 @@
-# Reflection Timer 4.1.0
+# Reflection Timer 4.1.1
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 
@@ -11,3 +11,5 @@ Compact has a two-line Auto/Start toggle that lights up when enabled. Screen rea
 The App button stays highlighted while App view is shown, even when another window has focus. It dims when App view is hidden or minimized. Its accessible description reports that state; clicking it always shows App view or brings it forward.
 
 Open START-HERE.html for setup and keyboard help. Normal launches use the installed profile. Developers may use --profile NAME for isolated test data; old preview samples remain local. APP-PAGE-AUDIT.md records the earlier interface parity review.
+
+Reflection prompts use Save to keep a local draft and close; Save & send remains the submission action. Ctrl+Alt+comma focuses the first reflection box when neither box is focused, and acts as Save when either box is focused. From another window it brings a reflection forward without saving, reopens the latest pending draft, or opens a running/paused-session check-in. It never redirects to App. Failed draft saves leave the text editable and the prompt open.

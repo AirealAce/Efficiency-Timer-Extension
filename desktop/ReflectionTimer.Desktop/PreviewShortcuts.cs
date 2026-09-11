@@ -2,6 +2,26 @@ using ReflectionTimer.Desktop;
 
 namespace ReflectionTimer.Accessible;
 
+internal interface IReflectionShortcutTarget
+{
+    bool IsForegroundReflection { get; }
+    void FocusOrSaveDraft();
+    void FocusReflection();
+}
+
+internal static class ReflectionShortcut
+{
+    internal static void Invoke(IEnumerable<IReflectionShortcutTarget> windows, Action openPendingOrCheckIn)
+    {
+        // Check the real foreground window, not the app's last activated window.
+        var reflections = windows.ToArray();
+        var reflection = reflections.FirstOrDefault(window => window.IsForegroundReflection);
+        if (reflection is not null) reflection.FocusOrSaveDraft();
+        else if (reflections.LastOrDefault() is { } background) background.FocusReflection();
+        else openPendingOrCheckIn();
+    }
+}
+
 // Register just the five original chords; retry only registrations another app owns.
 internal sealed class PreviewShortcuts : IDisposable
 {

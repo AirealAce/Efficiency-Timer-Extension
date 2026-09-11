@@ -446,6 +446,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
       }
     }
     await promptLayout.close();
+    await require('./reflection-save.cjs')(context,initial,check);
     check(failures.length===0,'No browser JavaScript errors');
     console.log(`${count} browser checks passed.`);
   } finally { await browser.close(); }

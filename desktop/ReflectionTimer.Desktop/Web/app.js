@@ -11,11 +11,12 @@ const layout=arrangeApp(view);
 const bridge = window.chrome?.webview;
 const requests = new Map();
 let requestSequence = 0, state, promptId, initial = true, durationDirty = false, loadedPrompt;
-let reflectionBusy=false;
+let reflectionBusy=false, savingAndClosing=false;
 function setReflectionBusy(busy){
-  reflectionBusy=busy;$('reflection-form').setAttribute('aria-busy',String(busy));
-  ['reflection-text','early-reason'].forEach(id=>$(id).readOnly=busy);
-  document.querySelectorAll('#reflection-form button').forEach(button=>available(button,!busy));
+  reflectionBusy=busy;const blocked=busy||savingAndClosing;
+  $('reflection-form').setAttribute('aria-busy',String(blocked));
+  ['reflection-text','early-reason'].forEach(id=>$(id).readOnly=blocked);
+  document.querySelectorAll('#reflection-form button').forEach(button=>available(button,!blocked));
 }
 let saveDelay, saving = Promise.resolve(), queued = false, lastSavedDraft = '', scheduleEdit, deliveryDecision, selectedSchedule, selectedOutbox;
 
@@ -200,6 +201,12 @@ bridge?.addEventListener('message', event => {
   else if (message.type === 'announcement') announce(message.message);
   else if (message.type === 'durationDraft'&&view!=='reflection')sharedDuration(message.parts);
   else if (message.type === 'focusReflection') {if(view==='reflection'&&!document.querySelector('dialog[open]'))$('reflection-text').focus();}
+  else if (message.type === 'reflectionShortcut') {
+    if(view!=='reflection'||!loadedPrompt||queued||reflectionBusy||savingAndClosing||document.querySelector('dialog[open]'))return;
+    if(['reflection-text','early-reason'].some(id=>$(id)===document.activeElement))$('later').click();
+    else $('reflection-text').focus();
+  }
+  else if (message.type === 'reflectionCloseFailed') {savingAndClosing=false;setReflectionBusy(reflectionBusy);error(message.message);}
   else if (message.type === 'focusTimer') {if(document.querySelector('dialog[open]'))return;if(message.selectTimer)layout.select('timer');if(document.body.dataset.tab!=='timer')return;const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
   else if (message.type === 'cycleAppTab') layout.cycle(message.backward);
   else if (message.type === 'flush') {
@@ -255,12 +262,17 @@ bind('schedule-cancel',()=>{clearScheduleEdit();$('schedule-start').focus();});
   setText($('draft-status'),'Saving draft…'); clearTimeout(saveDelay); saveDelay=setTimeout(()=>saveDraft().catch(e=>error(e.message)),300);
 }));
 $('reflection-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{
-  if(reflectionBusy)return;
+  if(reflectionBusy||savingAndClosing)return;
   if(!$('reflection-text').value.trim()) { $('reflection-text').setAttribute('aria-invalid','true'); $('reflection-text').focus(); throw new Error('Write a reflection before saving.'); }
   $('reflection-text').removeAttribute('aria-invalid'); await saveDraft(); queued=true;
   try { await send('queue',draft()); } catch(e) { queued=false; throw e; }
 });});
-bind('later',async()=>{await saveDraft();await send('close');});
+bind('later',async()=>{
+  if(!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
+  savingAndClosing=true;setReflectionBusy(reflectionBusy);
+  try {await saveDraft();await send('close');}
+  catch(e){savingAndClosing=false;setReflectionBusy(reflectionBusy);throw e;}
+});
 bind('skip-reflection',async()=>{clearTimeout(saveDelay);await saving.catch(()=>{});queued=true;try{await send('skip',{id:promptId});}catch(e){queued=false;throw e;}});
 ['reflection-text','early-reason'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();$('reflection-form').requestSubmit();}}));
 ['hours','minutes','seconds'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();if(state?.clock.status!=='Running')$('timer-editor').requestSubmit();}}));

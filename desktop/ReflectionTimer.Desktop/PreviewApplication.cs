@@ -53,7 +53,7 @@ internal sealed class PreviewApplication : ApplicationContext
             Shortcut(1, ()=>{compactPresses.Reset();var result=Session.Execute("startOrEnd",System.Text.Json.JsonSerializer.SerializeToElement(new{}));if(result.OpenReflection is {} id)Open("reflection",id);}),
             Shortcut(2, ()=>{compactPresses.Reset();var compact=windows.FirstOrDefault(w=>w.View=="compact");if(compact is null)Open("compact");else if(compact.IsTimeOnly)ToggleCompactVisibility();else compact.Post(new{type="shrinkCompact"});}),
             Shortcut(3, ()=>{if(compactPresses.Press())Open("main",timerPage:true);else Open("compact");}),
-            Shortcut(4, ()=>{compactPresses.Reset();Open("reflection",Session.Engine.CheckIn());})
+            Shortcut(4, ()=>{compactPresses.Reset();ReflectionShortcut.Invoke(windows.Where(w=>w.View=="reflection"&&!w.IsDisposed),OpenPendingOrCheckIn);})
         ], (id,available)=>Services.Log.Record(available?"shortcut.registered":"shortcut.unavailable",value:id));
         ApplyTheme();pulse.Start(); if(!startInTray)MainForm.Show(); ApplyDisplayPreferences();
     }
@@ -69,8 +69,13 @@ internal sealed class PreviewApplication : ApplicationContext
         if(closing)return;
         Services.Log.Record("shortcut.used",value:id);
         try { action(); }
-        catch(Exception e) { Open("main"); Announce(e is ArgumentException?e.Message:"That action is unavailable. Your timer is retained."); }
+        catch(Exception e) { if(id!=4)Open("main"); Announce(e is ArgumentException?e.Message:"That action is unavailable. Your timer is retained."); }
     };
+    private void OpenPendingOrCheckIn()
+    {
+        if(Session.ReflectionForShortcut() is {} id)Open("reflection",id);
+        else Announce("No pending reflection. Start a timer before making a check-in.");
+    }
     internal void SetStartup(bool enabled)
     {
         var previous=Session.Engine.Snapshot.StartAtLogin;

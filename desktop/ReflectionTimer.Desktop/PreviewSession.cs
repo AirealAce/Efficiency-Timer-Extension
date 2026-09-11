@@ -61,6 +61,13 @@ public sealed class PreviewSession
     }
     public static string Status(TimerState timer) => timer.IsRunning ? "Running" : TimerEngine.IsPaused(timer) ? "Paused" : timer.RemainingSeconds == 0 ? "Finished" : "Ready";
     internal bool AutoSendReflection(Guid id) => Engine.AutoSendReflection(id, isolatedProfile && SheetsClient.Validate(Engine.Snapshot.Connection) is not null);
+    internal Guid? ReflectionForShortcut()
+    {
+        var state=Engine.Snapshot;
+        if(state.Prompts.LastOrDefault() is {} pending)return pending.Id;
+        return (state.Timer.IsRunning||TimerEngine.IsPaused(state.Timer))&&TimerEngine.Remaining(state.Timer,Engine.Now)>0
+            ? Engine.CheckIn() : null;
+    }
     public static string SpeakTime(int total)
     {
         var parts = new List<string>();

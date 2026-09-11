@@ -38,6 +38,28 @@ static class DefaultsThemeShortcutTests
         var retained=new PreviewSession(store).Engine.Snapshot;
         check(!retained.ShowFloatingTimer&&retained.Timer.Volume==31&&AudioSettings.From(retained).Success.Track==LibrarySound.PokemonHealed&&AudioSettings.From(retained).Success.Volume==42,"Reopening preserves explicit saved preferences instead of resetting defaults");
 
+        var background=new ReflectionTarget();var foreground=new ReflectionTarget{IsForegroundReflection=true};var checkIns=0;
+        ReflectionShortcut.Invoke([background,foreground],()=>checkIns++);
+        check(foreground.Saves==1&&background.Saves==0&&checkIns==0,"Comma saves only the foreground reflection without creating another check-in");
+        foreground.IsForegroundReflection=false;
+        ReflectionShortcut.Invoke([background,foreground],()=>checkIns++);
+        check(foreground.Saves==1&&background.Saves==0&&foreground.FocusCalls==1&&checkIns==0,"Comma focuses an existing background reflection instead of saving it or opening App");
+        ReflectionShortcut.Invoke([],()=>checkIns++);
+        check(checkIns==1,"Comma checks pending reflections or check-ins when no reflection window is open");
+        foreground.IsForegroundReflection=true;foreground.SaveFailure=true;
+        try{ReflectionShortcut.Invoke([foreground],()=>checkIns++);throw new Exception("Save failure ignored");}catch(IOException){}
+        check(checkIns==1,"A failed foreground save never falls back to creating a check-in");
+        var shortcutSession=new PreviewSession(new MemoryStore());
+        check(shortcutSession.ReflectionForShortcut() is null&&shortcutSession.Engine.Snapshot.Prompts.Count==0,"Idle comma with no pending draft has no target and does not start a timer");
+        shortcutSession.Engine.Start(900,false,0);
+        var timerBefore=shortcutSession.Engine.Snapshot.Timer;
+        var checkIn=shortcutSession.ReflectionForShortcut();
+        check(checkIn.HasValue&&shortcutSession.Engine.Snapshot.Timer==timerBefore&&shortcutSession.Engine.Snapshot.Prompts.Single().IsCheckIn,"Comma without pending drafts opens a running-session check-in without altering the countdown");
+        shortcutSession.Engine.SaveDraft(checkIn!.Value,"Retained local draft");
+        shortcutSession.Engine.EndEarly();
+        var pendingBefore=JsonSerializer.Serialize(shortcutSession.Engine.Snapshot);
+        check(shortcutSession.ReflectionForShortcut()==shortcutSession.Engine.Snapshot.Prompts.Last().Id&&JsonSerializer.Serialize(shortcutSession.Engine.Snapshot)==pendingBefore,"Idle comma reopens the latest session-end draft without creating a prompt or changing saved text");
+
         Exception? failure=null;
         var thread=new Thread(()=>{
             try {
@@ -70,6 +92,13 @@ static class DefaultsThemeShortcutTests
         public HashSet<int> Blocked=[];public List<(uint Key,uint Modifiers)> Requests=[];public List<int> Removed=[];
         public bool Register(nint window,int id,uint modifiers,uint key){Requests.Add((key,modifiers));return !Blocked.Contains(id);}
         public bool Unregister(nint window,int id){Removed.Add(id);return true;}
+    }
+    private sealed class ReflectionTarget : IReflectionShortcutTarget
+    {
+        public bool IsForegroundReflection { get; set; }
+        public int Saves,FocusCalls;public bool SaveFailure;
+        public void FocusOrSaveDraft(){if(SaveFailure)throw new IOException("Cannot save draft");Saves++;}
+        public void FocusReflection()=>FocusCalls++;
     }
     private sealed class Clock : TimeProvider
     {

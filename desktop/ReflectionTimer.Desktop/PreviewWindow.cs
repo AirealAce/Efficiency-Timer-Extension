@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace ReflectionTimer.Accessible;
 
-internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow
+internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IReflectionShortcutTarget
 {
     internal const string Origin = "https://reflection-timer.invalid";
     internal string View { get; }
@@ -15,6 +15,9 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow
     private readonly WebView2 browser = new() { Dock = DockStyle.Fill, AccessibleName = "Reflection Timer" };
     private bool ready, allowClose, requestingClose;
     private bool autoSending;
+    bool IReflectionShortcutTarget.IsForegroundReflection => View=="reflection" && ReflectionTimer.Desktop.WindowActivation.IsForeground(this);
+    void IReflectionShortcutTarget.FocusOrSaveDraft(){if(!autoSending&&!requestingClose)Post(new{type="reflectionShortcut"});}
+    void IReflectionShortcutTarget.FocusReflection(){ReflectionTimer.Desktop.WindowActivation.Focus(this);if(ReflectionTimer.Desktop.WindowActivation.CanReceiveFocus(this))FocusControls();}
     Guid IReflectionPromptWindow.ReflectionId => PromptId!.Value;
     async Task IReflectionPromptWindow.PrepareAutoSendAsync(){autoSending=true;await FlushDraftAsync(freeze:true);}
     void IReflectionPromptWindow.ResumeEditing(){autoSending=false;Post(new{type="resumeReflection"});}
@@ -27,7 +30,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · 4.1.0" : view == "compact" ? "Reflection Timer — Compact view · 4.1.0" : "Reflection Timer — Session end · 4.1.0";
+        Text = view == "main" ? "Reflection Timer — App view · 4.1.1" : view == "compact" ? "Reflection Timer — Compact view · 4.1.1" : "Reflection Timer — Session end · 4.1.1";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(228, 200) : new(560, app.Session.Engine.Snapshot.Prompts.Any(p=>p.Id==prompt&&p.EndedEarly)?525:440);
         MinimumSize = view == "main" ? new(420, 400) : view == "compact" ? new(80,32) : new(420,360);
@@ -56,7 +59,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow
             if (requestingClose) return;
             requestingClose = true;
             try { await FlushDraftAsync(); if(View=="compact") app.Session.Engine.SetFloatingTimer(false); CloseAfterSave(); }
-            catch { Post(new { type = "announcement", message = "Draft could not be saved. This window is staying open. Try again." }); }
+            catch { Post(new { type = View=="reflection"?"reflectionCloseFailed":"announcement", message = "Draft could not be saved. This window is staying open. Try again." }); }
             finally { requestingClose = false; }
         };
     }
@@ -167,7 +170,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
                 ApplyTopMost();
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.0";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.1";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }
