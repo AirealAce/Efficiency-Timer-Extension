@@ -294,10 +294,13 @@ bind('schedule-cancel',()=>{clearScheduleEdit();$('schedule-start').focus();});
   setText($('draft-status'),'Saving draft…'); clearTimeout(saveDelay); saveDelay=setTimeout(()=>saveDraft().catch(e=>error(e.message)),300);
 }));
 $('reflection-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{
-  if(reflectionBusy||savingAndClosing)return;
+  if(view!=='reflection'||!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
   if(!$('reflection-text').value.trim()) { $('reflection-text').setAttribute('aria-invalid','true'); $('reflection-text').focus(); throw new Error('Write a reflection before saving.'); }
-  $('reflection-text').removeAttribute('aria-invalid'); await saveDraft(); queued=true;
-  try { await send('queue',draft()); } catch(e) { queued=false; throw e; }
+  $('reflection-text').removeAttribute('aria-invalid');
+  // Lock before the draft flush so another shortcut cannot submit it twice.
+  savingAndClosing=true;setReflectionBusy(reflectionBusy);
+  try { await saveDraft(); queued=true; await send('queue',draft()); }
+  catch(e) { queued=false;savingAndClosing=false;setReflectionBusy(reflectionBusy);throw e; }
 });});
 bind('later',async()=>{
   if(!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
@@ -312,6 +315,11 @@ for(const [id,direction] of [['reflection-prev',-1],['reflection-next',1]])bind(
   finally {setReflectionBusy(false);}
 });
 bind('skip-reflection',async()=>{clearTimeout(saveDelay);await saving.catch(()=>{});queued=true;try{await send('skip',{id:promptId});}catch(e){queued=false;throw e;}});
-['reflection-text','early-reason'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();$('reflection-form').requestSubmit();}}));
+document.addEventListener('keydown',event=>{
+  if(view!=='reflection'||!event.ctrlKey||event.key!=='Enter'||document.querySelector('dialog[open]'))return;
+  // Cancel Enter's focused-button action as well (Save, Skip, Prev, or Next).
+  event.preventDefault();
+  if(!event.repeat)$('reflection-form').requestSubmit();
+});
 if(view==='main')$('schedule-start').value=localDateTime(Date.now()+3600000);
 run(()=>send('ready'));

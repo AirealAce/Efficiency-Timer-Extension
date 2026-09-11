@@ -461,6 +461,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     }
     await promptLayout.close();
     await require('./reflection-save.cjs')(context,initial,check);
+    await require('./reflection-submit.cjs')(context,initial,check);
     await require('./reflection-lifecycle.cjs')(context,initial,check);
     await require('./reflection-navigation.cjs')(context,initial,check);
     await require('./reflection-separators.cjs')(context,initial,settings,check);
