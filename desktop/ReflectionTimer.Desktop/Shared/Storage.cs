@@ -65,7 +65,8 @@ public sealed class DiagnosticLog
         "upload.confirmedByUser", "settings.saved", "connection.checked", "issue.marked", "error.storage", "error.unexpected",
         "sound.changed", "sound.preview", "sound.played", "sound.fallback", "sound.muted", "sound.stopped", "sound.failed", "display.changed", "theme.changed",
         "shortcut.registered", "shortcut.unavailable", "shortcut.used", "timer.endedEarly", "timer.lowTime", "timer.lowTimeOptions", "sound.thresholdChanged", "sound.requested",
-        "schedule.policy", "schedule.resolved", "prompt.checkIn", "webview.processFailed", "webview.failureReason", "webview.exitCode"
+        "schedule.policy", "schedule.resolved", "prompt.checkIn", "webview.processFailed", "webview.failureReason", "webview.exitCode",
+        "webview.recoveryStarted", "webview.recovered", "webview.recoveryFailed"
     };
     public bool Enabled { get; set; } = true;
     public bool StorageAvailable { get; private set; } = true;

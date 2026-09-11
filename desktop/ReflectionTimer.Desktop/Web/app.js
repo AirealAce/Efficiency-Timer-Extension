@@ -11,6 +11,8 @@ setText($('page-title'), view === 'main' ? 'Reflection Timer' : view === 'compac
 const layout=arrangeApp(view);
 const bridge = window.chrome?.webview;
 const requests = new Map();
+// A delayed reply from a crashed document must not resolve a new request.
+const requestPrefix=crypto.randomUUID();
 let requestSequence = 0, state, promptId, initial = true, durationDirty = false, loadedPrompt;
 let reflectionBusy=false, savingAndClosing=false;
 function setReflectionBusy(busy){
@@ -25,7 +27,7 @@ let saveDelay, saving = Promise.resolve(), queued = false, lastSavedDraft = '', 
 function send(action, data = {}) {
   return new Promise((resolve, reject) => {
     if (!bridge) { reject(new Error('Open this interface through the Reflection Timer app.')); return; }
-    const requestId = String(++requestSequence);
+    const requestId = `${requestPrefix}:${++requestSequence}`;
     const nativeDialog=['browseSound','browseLowSound','setupScript','exportDiagnostics','importSchedules'].includes(action);
     const timeout = nativeDialog ? undefined : setTimeout(() => { requests.delete(requestId); reject(new Error('The app did not respond. Check its status before trying again.')); }, 35000);
     requests.set(requestId, {resolve, reject, timeout});
@@ -208,6 +210,7 @@ bridge?.addEventListener('message', event => {
     else {const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
     settings.load();
     if(view==='reflection')run(()=>send('reflectionReady',{id:promptId}));
+    else run(()=>send('interfaceReady'));
   } else if(message.type==='showReflection'&&view==='reflection') {
     // The host flushed and froze both fields. Rebind the same document and
     // controls to a saved reflection, keeping WebView2 alive across Prev/Next.
@@ -215,7 +218,7 @@ bridge?.addEventListener('message', event => {
       run(()=>send('reflectionLoadFailed',{id:message.promptId}));return;
     }
     clearTimeout(saveDelay);promptId=message.promptId;loadedPrompt=undefined;
-    queued=false;savingAndClosing=false;
+    queued=false;savingAndClosing=false;setReflectionBusy(false);
     $('reflection-text').removeAttribute('aria-invalid');error('');
     render(message.state);setText($('draft-status'),'Draft saved locally.');
     $('reflection-text').focus();$('reflection-text').selectionStart=$('reflection-text').value.length;

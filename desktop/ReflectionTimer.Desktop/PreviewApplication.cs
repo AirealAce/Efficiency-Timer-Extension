@@ -3,7 +3,7 @@ using ReflectionTimer.Desktop;
 
 namespace ReflectionTimer.Accessible;
 
-internal sealed class PreviewApplication : ApplicationContext
+internal sealed partial class PreviewApplication : ApplicationContext
 {
     internal PreviewSession Session { get; }
     internal string ProfileDirectory { get; }
@@ -28,7 +28,7 @@ internal sealed class PreviewApplication : ApplicationContext
     {
         Session = session; ProfileDirectory = directory; ProfileName=profileName; StartInTray=startInTray; RecoveryNotice=recoveryNotice;
         Services = new(session.Engine, directory); Services.Announcement += Announce;
-        promptCoordinator=new(session,()=>windows.Where(w=>w.View=="reflection"&&!w.IsDisposed).Cast<IReflectionPromptWindow>().ToArray(),ShowReflection,()=>{_ = Services.Sync();});
+        promptCoordinator=new(session,()=>windows.Where(w=>w.ReflectionOpen&&!w.IsDisposed).Cast<IReflectionPromptWindow>().ToArray(),ShowReflection,()=>{_ = Services.Sync();});
         MainForm = Create("main");
         var menu=new ContextMenuStrip();
         menu.Items.Add("App view",null,(_,_)=>Open("main"));menu.Items.Add("Compact view",null,(_,_)=>Open("compact"));
@@ -51,9 +51,9 @@ internal sealed class PreviewApplication : ApplicationContext
         shortcuts = new PreviewShortcuts([
             Shortcut(0, ()=>{compactPresses.Reset();if(WindowActivation.IsForeground(MainForm))MainForm.Hide();else Open("main");}),
             Shortcut(1, ()=>{compactPresses.Reset();var result=Session.Execute("startOrEnd",System.Text.Json.JsonSerializer.SerializeToElement(new{}));if(result.OpenReflection is {} id)Open("reflection",id,sessionCompleted:result.SessionCompleted);}),
-            Shortcut(2, ()=>{compactPresses.Reset();var compact=windows.FirstOrDefault(w=>w.View=="compact");if(compact is null)Open("compact");else if(compact.IsTimeOnly)ToggleCompactVisibility();else compact.Post(new{type="shrinkCompact"});}),
+            Shortcut(2, ()=>{compactPresses.Reset();var compact=windows.FirstOrDefault(w=>w.View=="compact");if(compact is null||!compact.Visible)Open("compact");else if(compact.IsTimeOnly)ToggleCompactVisibility();else compact.Post(new{type="shrinkCompact"});}),
             Shortcut(3, ()=>{if(compactPresses.Press())Open("main",timerPage:true);else Open("compact");}),
-            Shortcut(4, ()=>{compactPresses.Reset();ReflectionShortcut.Invoke(windows.Where(w=>w.View=="reflection"&&!w.IsDisposed),OpenPendingOrCheckIn);})
+            Shortcut(4, ()=>{compactPresses.Reset();ReflectionShortcut.Invoke(windows.Where(w=>w.ReflectionOpen&&!w.IsDisposed),OpenPendingOrCheckIn);})
         ], (id,available)=>Services.Log.Record(available?"shortcut.registered":"shortcut.unavailable",value:id));
         ApplyTheme();pulse.Start(); if(!startInTray)MainForm.Show(); ApplyDisplayPreferences();
     }
@@ -121,13 +121,17 @@ internal sealed class PreviewApplication : ApplicationContext
         var window=windows.FirstOrDefault(w=>w.View=="reflection"&&w.PromptId==id);
         // Keep the visible browser and its accessibility objects alive while
         // browsing. Prev/Next must not tear down one WebView2 and create another.
-        window??=windows.FirstOrDefault(w=>w.View=="reflection"&&w.Visible);
+        window??=windows.FirstOrDefault(w=>w.View=="reflection");
         if(window is null){window=Create("reflection",id);window.ApplyPosition();}
-        try {if(window.PromptId!=id)await window.SwitchReflectionAsync(id);else await window.PrepareReflectionAsync();}
+        try {
+            await window.PrepareReflectionAsync();
+            if(window.PromptId!=id||!window.ReflectionOpen)await window.SwitchReflectionAsync(id);
+            window.ReflectionOpen=true;
+        }
         catch {
             // Failed hidden targets must not replace the working editor or stay
             // in the shortcut/navigation window list. A retry gets a fresh view.
-            if(!window.IsDisposed&&!window.Visible)window.CloseAfterSave();
+            if(!window.IsDisposed&&!window.Visible)window.ClosePermanently();
             throw;
         }
         if(closing||window.IsDisposed||!Session.Engine.Snapshot.Prompts.Any(p=>p.Id==id)){if(!window.IsDisposed)window.CloseAfterSave();return;}
@@ -139,7 +143,7 @@ internal sealed class PreviewApplication : ApplicationContext
     {
         var compact=windows.FirstOrDefault(w=>w.View=="compact");
         if(Session.Engine.Snapshot.ShowFloatingTimer) { compact ??= Create("compact"); compact.Show(); }
-        else compact?.CloseAfterSave();
+        else compact?.Hide();
         compact?.ApplyPosition();
     }
     internal void Broadcast(object message) { foreach (var window in windows.ToArray()) window.Post(message); }
@@ -163,8 +167,8 @@ internal sealed class PreviewApplication : ApplicationContext
             await promptCoordinator.ExclusivelyAsync(async()=>{
                 foreach (var window in windows.ToArray()) await window.FlushDraftAsync();
                 Services.Log.Record("app.exiting");pulse.Stop();
-                foreach (var window in windows.Where(w => w != MainForm).ToArray()) window.CloseAfterSave();
-                ((PreviewWindow)MainForm!).CloseAfterSave();
+                foreach (var window in windows.Where(w => w != MainForm).ToArray()) window.ClosePermanently();
+                ((PreviewWindow)MainForm!).ClosePermanently();
             });
         }
         catch { Announce("Could not save a reflection draft. The app is staying open. Try again."); }

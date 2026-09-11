@@ -1,8 +1,9 @@
 import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration,bindTimerEditor,announceSelectChanges} from './ui.js';
 announceSelectChanges();
 const $=id=>document.getElementById(id),bridge=window.chrome?.webview,requests=new Map();
+const requestPrefix=crypto.randomUUID();
 let sequence=0,state,dirty=false,tiny=false,revealed=false,lastRunning=false,lastDeadline,repeatPending=false;
-function send(action,data={}){return new Promise((resolve,reject)=>{const requestId=String(++sequence);if(!bridge)return reject(new Error('Open the compact timer through Reflection Timer.'));const timeout=setTimeout(()=>{requests.delete(requestId);reject(new Error('The app did not respond.'));},35000);requests.set(requestId,{resolve,reject,timeout});bridge.postMessage({requestId,action,data});});}
+function send(action,data={}){return new Promise((resolve,reject)=>{const requestId=`${requestPrefix}:${++sequence}`;if(!bridge)return reject(new Error('Open the compact timer through Reflection Timer.'));const timeout=setTimeout(()=>{requests.delete(requestId);reject(new Error('The app did not respond.'));},35000);requests.set(requestId,{resolve,reject,timeout});bridge.postMessage({requestId,action,data});});}
 function run(action){setText($('error'),'');Promise.resolve().then(action).catch(e=>setText($('error'),e.message));}
 function bind(id,action){$(id).addEventListener('click',()=>{if($(id).getAttribute('aria-disabled')!=='true')run(action);});}
 function announce(text){setText($('status'),'');setTimeout(()=>setText($('status'),text),50);}
@@ -39,7 +40,7 @@ function render(next){const previous=state;state=next;document.documentElement.d
   if(tiny&&['hours','minutes','seconds','toggle','repeat','app','reset','end'].includes(document.activeElement.id))$('read-time').focus();
 }
 bridge?.addEventListener('message',event=>{const m=event.data;if(m.type==='reply'){const p=requests.get(m.requestId);if(!p)return;clearTimeout(p.timeout);requests.delete(m.requestId);m.error?p.reject(new Error(m.error)):p.resolve();}
-  else if(m.type==='init'){render(m.state);setAppVisibility(m.appViewVisible);if(m.state.durationDraft)sharedDuration(m.state.durationDraft);resize();}
+  else if(m.type==='init'){render(m.state);if(typeof m.timeOnly==='boolean'){mode(m.timeOnly);revealed=!m.timeOnly;}setAppVisibility(m.appViewVisible);if(m.state.durationDraft)sharedDuration(m.state.durationDraft);resize();send('interfaceReady').catch(e=>setText($('error'),e.message));}
   else if(m.type==='appViewVisibility')setAppVisibility(m.visible);
   else if(m.type==='state')render(m.state);
   else if(m.type==='clock'){if(state?.clock.status==='Running'||!dirty)setText($('visual-clock'),formatClock(m.clock.seconds));}

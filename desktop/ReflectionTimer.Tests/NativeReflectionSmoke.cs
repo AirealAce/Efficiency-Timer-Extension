@@ -40,17 +40,17 @@ static class NativeReflectionSmoke
                         Check(!window.IsDisposed,"Comma from a non-text control focuses the first box without closing");
                         await Script(window,"document.querySelector('#reflection-text').value='Latest native draft';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}))");
                         ((IReflectionShortcutTarget)window).FocusOrSaveDraft();
-                        await Until(()=>window.IsDisposed);
+                        await Until(()=>!window.ReflectionOpen&&!window.Visible);
                         Check(session.Engine.Snapshot.Prompts.Single().Draft=="Latest native draft"&&session.Engine.Snapshot.Outbox.Count==0,"Native Save shortcut persists the latest text and closes without submission");
                         app.Open("reflection",id);var reopened=Windows(app).Single(w=>w.View=="reflection");await Until(()=>reopened.Visible);
-                        Check((await Read(reopened)).GetProperty("draft").GetString()=="Latest native draft","Recreated native prompt restores the saved draft before display");
+                        Check(ReferenceEquals(window,reopened)&&(await Read(reopened)).GetProperty("draft").GetString()=="Latest native draft","Reused native prompt restores the saved draft before display");
                         await Script(reopened,"document.querySelector('#reflection-text').value='Typed just before zero';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#early-reason').focus()");
                         now=now.AddSeconds(60);session.Tick();app.Open("reflection",id);
                         await UntilAsync(async()=>!(await Read(reopened)).GetProperty("reasonVisible").GetBoolean());
                         var completed=await Read(reopened);
                         Check(ReferenceEquals(reopened,Windows(app).Single(w=>w.View=="reflection"))&&completed.GetProperty("draft").GetString()=="Typed just before zero","Natural completion updates the existing native editor without blanking in-flight text");
                         Check(completed.GetProperty("focused").GetString()=="reflection-text"&&!completed.GetProperty("reasonVisible").GetBoolean(),"Natural completion hides the reason and leaves focus in the response box");
-                        ((IReflectionShortcutTarget)reopened).FocusOrSaveDraft();await Until(()=>reopened.IsDisposed);
+                        ((IReflectionShortcutTarget)reopened).FocusOrSaveDraft();await Until(()=>!reopened.ReflectionOpen&&!reopened.Visible);
                         Check(session.Engine.Snapshot.Prompts.Single() is {IsCheckIn:false,EndedEarly:false,Draft:"Typed just before zero"}&&session.Engine.Snapshot.Outbox.Count==0,"Completed native draft saves under the original ID without a duplicate entry");
                         session.Engine.SetAutoSendIncompleteReflections(false);
                         session.Engine.Start(60,false,0,lowTime:new(){Enabled=false});now=now.AddSeconds(5);
@@ -88,7 +88,7 @@ static class NativeReflectionSmoke
                         catch(InvalidOperationException error)when(error.Message.Contains("could not be loaded")){}
                         ((IReflectionPromptWindow)next).ResumeEditing();
                         Check(next.PromptId==earlyId&&(await Read(next)).GetProperty("draft").GetString()=="Early saved response","Failed in-place load restores the previous reflection and its saved draft");
-                        ((IReflectionShortcutTarget)next).FocusOrSaveDraft();await Until(()=>next.IsDisposed);
+                        ((IReflectionShortcutTarget)next).FocusOrSaveDraft();await Until(()=>!next.ReflectionOpen&&!next.Visible);
                         app.Open("reflection",session.ReflectionForShortcut());
                         var reload=Windows(app).Single(w=>w.PromptId==earlyId);
                         Check(!reload.Visible,"Comma reopening an early-ended draft does not expose an empty editor");
@@ -105,11 +105,13 @@ static class NativeReflectionSmoke
                         await UntilAsync(async()=>reload.PromptId==id&&(await Read(reload)).GetProperty("draft").GetString()=="Typed just before zero");
                         var retried=Windows(app).Single(w=>w.PromptId==id);
                         Check(ReferenceEquals(reload,retried)&&(await Read(retried)).GetProperty("draft").GetString()=="Typed just before zero"&&Windows(app).Count(w=>w.View=="reflection")==1,"Retry after a hidden target failure reuses the populated working editor successfully");
+                        await ExerciseRecovery(app,retried,Check);
+                        var queuedBeforeFailure=session.Engine.Snapshot.Outbox.Count;
                         typeof(PreviewWindow).GetMethod("ShowFailure",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(retried,["Synthetic running editor failure."]);
                         try {await ((IReflectionPromptWindow)retried).PrepareHandoffAsync();throw new Exception("Failed current editor was auto-sent");}
                         catch(InvalidOperationException error) when(error.Message.Contains("not sent or replaced")){}
                         ((IReflectionPromptWindow)retried).ResumeEditing();
-                        Check(session.Engine.Snapshot.Outbox.Count==0&&session.Engine.Snapshot.Prompts.Any(p=>p.Id==id),"An unavailable current editor cannot silently auto-send its older saved snapshot");
+                        Check(session.Engine.Snapshot.Outbox.Count==queuedBeforeFailure&&session.Engine.Snapshot.Prompts.Any(p=>p.Id==id),"An unavailable current editor cannot silently auto-send its older saved snapshot");
                         Check(session.Engine.Snapshot.Connection.WebAppUrl==""&&session.Engine.Snapshot.Timer.Volume==0,"Native smoke test stays muted and disconnected throughout");
                     } catch(Exception error){failure=error;}
                     finally {await app.CloseMainAsync();}
@@ -119,11 +121,94 @@ static class NativeReflectionSmoke
             finally {app?.Dispose();}
         });
         thread.SetApartmentState(ApartmentState.STA);thread.Start();
-        if(!thread.Join(TimeSpan.FromSeconds(70)))throw new TimeoutException("Native smoke did not finish; inspect its isolated process.");
+        if(!thread.Join(TimeSpan.FromSeconds(150)))throw new TimeoutException("Native smoke did not finish; inspect its isolated process.");
         if(failure is not null)throw new Exception("Native reflection smoke failed",failure);
         Console.WriteLine($"{passed} native smoke checks passed.");
     }
     private static List<PreviewWindow> Windows(PreviewApplication app)=>(List<PreviewWindow>)typeof(PreviewApplication).GetField("windows",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(app)!;
+    private static async Task ExerciseRecovery(PreviewApplication app,PreviewWindow reflection,Action<bool,string> check)
+    {
+        var session=app.Session;var id=reflection.PromptId!.Value;
+        await Script(reflection,"document.querySelector('#reflection-text').value='Saved through browser recovery';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}))");
+        await reflection.FlushDraftAsync();
+        app.Open("main");var main=Windows(app).Single(w=>w.View=="main");
+        await UntilAsync(async()=>Browser(main).CoreWebView2 is not null&&JsonDocument.Parse(await Script(main,"document.querySelector('#sound-behavior-0')?.options.length>0")).RootElement.ValueKind==JsonValueKind.True);
+        app.Open("compact");var compact=Windows(app).Single(w=>w.View=="compact");
+        await ((TaskCompletionSource)typeof(PreviewWindow).GetField("interfaceReady",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(compact)!).Task.WaitAsync(TimeSpan.FromSeconds(20));
+        var compactBrowser=Browser(compact);var reflectionBrowser=Browser(reflection);var process=compactBrowser.CoreWebView2.BrowserProcessId;
+        for(var i=0;i<12;i++){
+            await Script(main,$"document.querySelector('#sound-behavior-0').value='{i%3}';document.querySelector('#sound-behavior-0').dispatchEvent(new Event('change',{{bubbles:true}}))");
+            app.Open("main",timerPage:true);
+            compact.Post(new{type="shrinkCompact"});await Until(()=>compact.IsTimeOnly);
+            app.ToggleCompactVisibility();await Until(()=>!compact.Visible);
+            app.Open("compact");await Until(()=>compact.Visible&&!compact.IsTimeOnly);
+            check(ReferenceEquals(compactBrowser,Browser(compact))&&ReferenceEquals(reflectionBrowser,Browser(reflection))&&process==compactBrowser.CoreWebView2.BrowserProcessId&&(await Read(reflection)).GetProperty("draft").GetString()=="Saved through browser recovery","Audio edit, Timer tab, time-only hide and compact reopen retain both live browsers: cycle "+(i+1));
+        }
+        compact.Close();await Until(()=>!compact.Visible);
+        check(!compact.IsDisposed&&!session.Engine.Snapshot.ShowFloatingTimer,"Floating close button hides the viewer and persists its visibility without disposing WebView2");
+        app.Open("compact");compact.Post(new{type="shrinkCompact"});await Until(()=>compact.IsTimeOnly);
+        session.SetDurationDraft(["0","3","42"]);
+        // Crash only the renderer belonging to this test's disposable, disconnected profile.
+        var rendererFailed=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        reflectionBrowser.CoreWebView2.ProcessFailed+=(_,e)=>{if(e.ProcessFailedKind==CoreWebView2ProcessFailedKind.RenderProcessExited)rendererFailed.TrySetResult();};
+        _=reflectionBrowser.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.crash","{}").ContinueWith(t=>{_ = t.Exception;},TaskContinuationOptions.OnlyOnFaulted);
+        await rendererFailed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        await UntilAsync(async()=>{
+            try{return ReferenceEquals(reflectionBrowser,Browser(reflection))&&reflectionBrowser.Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="Saved through browser recovery"&&!GetFlag(reflection,"recoveringInterface");}catch{return false;}
+        });
+        // The failure callback is asynchronous: require a reload of the actual document.
+        await UntilAsync(async()=>JsonDocument.Parse(await Script(reflection,"document.readyState")).RootElement.GetString()=="complete");
+        check(reflectionBrowser.CoreWebView2.BrowserProcessId==process&&session.Engine.Snapshot.Outbox.Count==0,"Renderer recovery preserves the browser process and never submits the reflection");
+        // The browser process was obtained from this test's own WebView, never a user window.
+        System.Diagnostics.Process.GetProcessById((int)process).Kill();
+        await UntilAsync(async()=>{
+            try{return !app.BrowserRecoveryInProgress&&Browser(reflection).CoreWebView2.BrowserProcessId!=process&&Browser(reflection).Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="Saved through browser recovery";}catch{return false;}
+        });
+        var restarted=Browser(reflection).CoreWebView2.BrowserProcessId;
+        check(Browser(main).CoreWebView2.BrowserProcessId==restarted&&Browser(compact).CoreWebView2.BrowserProcessId==restarted,"Shared browser crash recreates every viewer together in one replacement browser process");
+        check(reflection.Visible&&reflection.PromptId==id&&session.Engine.Snapshot.Outbox.Count==0&&(await Read(reflection)).GetProperty("draft").GetString()=="Saved through browser recovery","Browser crash restores the open reflection's saved draft without closing or submitting it");
+        check(compact.Visible&&compact.IsTimeOnly&&JsonDocument.Parse(await Script(compact,"document.querySelector('#visual-clock').textContent")).RootElement.GetString()=="3:42","Browser recovery preserves time-only mode and the shared duration draft");
+        await Script(reflection,"document.querySelector('#reflection-text').value='Editable after recovery';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}))");
+        await reflection.FlushDraftAsync();
+        check(session.Engine.Snapshot.Prompts.Single(p=>p.Id==id).Draft=="Editable after recovery","Recovered reflection saves new edits through the replacement bridge");
+        compact.Close();await Until(()=>!compact.Visible);
+        session.Engine.Start(600,false,0,lowTime:new(){Enabled=false});var deadline=session.Engine.Snapshot.Timer.EndTime;
+        System.Diagnostics.Process.GetProcessById((int)restarted).Kill();
+        await UntilAsync(async()=>{try{return !app.BrowserRecoveryInProgress&&Browser(reflection).CoreWebView2.BrowserProcessId!=restarted&&Browser(reflection).Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="Editable after recovery";}catch{return false;}});
+        check(!compact.Visible&&!session.Engine.Snapshot.ShowFloatingTimer,"A second browser recovery leaves a closed compact viewer hidden");
+        check(session.Engine.Snapshot.Timer.IsRunning&&session.Engine.Snapshot.Timer.EndTime==deadline,"An active timer keeps its original deadline through browser recovery");
+        var third=Browser(reflection).CoreWebView2.BrowserProcessId;
+        System.Diagnostics.Process.GetProcessById((int)third).Kill();
+        await UntilAsync(async()=>{try{return !app.BrowserRecoveryInProgress&&Browser(reflection).CoreWebView2.BrowserProcessId!=third&&Browser(reflection).Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="Editable after recovery";}catch{return false;}});
+        var fourth=Browser(reflection).CoreWebView2.BrowserProcessId;
+        System.Diagnostics.Process.GetProcessById((int)fourth).Kill();
+        await Until(()=>!app.BrowserRecoveryInProgress&&typeof(PreviewWindow).GetField("retryInterface",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(reflection) is Button {Visible:true});
+        check(!Browser(reflection).Visible&&session.Engine.Snapshot.Prompts.Single(p=>p.Id==id).Draft=="Editable after recovery","Repeated crashes stop automatic restarts and expose an accessible retry button without losing the draft");
+        ((Button)typeof(PreviewWindow).GetField("retryInterface",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(reflection)!).PerformClick();
+        await UntilAsync(async()=>{try{return !app.BrowserRecoveryInProgress&&Browser(reflection).CoreWebView2.BrowserProcessId!=fourth&&Browser(reflection).Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="Editable after recovery";}catch{return false;}});
+        check(session.Engine.Snapshot.Timer.EndTime==deadline&&session.Engine.Snapshot.Outbox.Count==0,"Manual retry restores the shared interface and leaves timer and Outbox intact");
+        var cachedBrowser=Browser(reflection);var firstTest=session.Engine.TestPrompt();app.Open("reflection",firstTest);
+        await UntilAsync(async()=>reflection.PromptId==firstTest&&(await Read(reflection)).GetProperty("draft").GetString()=="");
+        await Script(reflection,"document.querySelector('#reflection-text').value='Explicit native test submission';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#reflection-form').requestSubmit()");
+        await Until(()=>!reflection.ReflectionOpen&&!reflection.Visible);
+        await reflection.FlushDraftAsync();
+        check(session.Engine.Snapshot.Outbox.Count==1&&!session.Engine.Snapshot.Prompts.Any(p=>p.Id==firstTest)&&ReferenceEquals(cachedBrowser,Browser(reflection)),"Save and send closes the logical editor while retaining its browser; a hidden submitted draft is never flushed");
+        var secondTest=session.Engine.TestPrompt();app.Open("reflection",secondTest);
+        await UntilAsync(async()=>reflection.PromptId==secondTest&&reflection.Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="");
+        await Script(reflection,"document.querySelector('#reflection-text').value='New draft in reused editor';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#later').click()");
+        await Until(()=>!reflection.ReflectionOpen&&!reflection.Visible);
+        check(session.Engine.Snapshot.Prompts.Single(p=>p.Id==secondTest).Draft=="New draft in reused editor"&&session.Engine.Snapshot.Outbox.Count==1,"Reopening after submission clears the old submission flag and saves only the new prompt");
+        session.Engine.SetAutoSendIncompleteReflections(true);
+        var thirdTest=session.Engine.TestPrompt();app.Open("reflection",thirdTest,sessionCompleted:true);
+        await UntilAsync(async()=>reflection.PromptId==thirdTest&&reflection.Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="");
+        check(session.Engine.Snapshot.Outbox.Count==2&&!session.Engine.Snapshot.Prompts.Any(p=>p.Id==secondTest)&&session.Engine.Snapshot.Prompts.Any(p=>p.Id==id)&&ReferenceEquals(cachedBrowser,Browser(reflection)),"A new completion auto-sends the prior saved reflection of the same mode and reuses its browser without affecting other drafts");
+        await Script(reflection,"document.querySelector('#skip-reflection').click()");await Until(()=>!reflection.ReflectionOpen&&!reflection.Visible);
+        session.Engine.SetAutoSendIncompleteReflections(false);app.Open("reflection",id);
+        await UntilAsync(async()=>reflection.PromptId==id&&reflection.Visible&&(await Read(reflection)).GetProperty("draft").GetString()=="Editable after recovery");
+        // Restore this test's expected text for the subsequent failed-handoff check.
+        session.Engine.SaveDraft(id,"Typed just before zero","");
+    }
+    private static bool GetFlag(PreviewWindow window,string name)=>(bool)typeof(PreviewWindow).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!;
     private static WebView2 Browser(PreviewWindow window)=>(WebView2)typeof(PreviewWindow).GetField("browser",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!;
     private static Task<string> Script(PreviewWindow window,string script)=>((WebView2)typeof(PreviewWindow).GetField("browser",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!).CoreWebView2.ExecuteScriptAsync(script);
     private static async Task<JsonElement> Read(PreviewWindow window)=>JsonDocument.Parse(await Script(window,"JSON.parse(JSON.stringify({draft:document.querySelector('#reflection-text').value,reason:document.querySelector('#early-reason').value,reasonVisible:!document.querySelector('#reason-group').hidden,theme:document.documentElement.dataset.theme,focused:document.activeElement.id}))")).RootElement.Clone();

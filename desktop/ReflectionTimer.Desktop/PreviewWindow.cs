@@ -11,8 +11,10 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     internal string View { get; }
     internal Guid? PromptId { get; private set; }
     internal bool IsTimeOnly { get; private set; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal bool ReflectionOpen { get; set; }
     private readonly PreviewApplication app;
-    private readonly WebView2 browser = new() { Dock = DockStyle.Fill, AccessibleName = "Reflection Timer" };
+    private WebView2 browser = null!;
     private bool ready, allowClose, requestingClose;
     private Task? initialization;
     private string? reflectionLoadError;
@@ -30,10 +32,11 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     private TaskCompletionSource? flush;
     internal PreviewWindow(PreviewApplication app, string view, Guid? prompt)
     {
-        this.app = app; View = view; PromptId = prompt;
+        this.app = app; View = view; PromptId = prompt; ReflectionOpen=view=="reflection";
+        browser=CreateBrowser();
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · 4.1.7" : view == "compact" ? "Reflection Timer — Compact view · 4.1.7" : "Reflection Timer — Session end · 4.1.7";
+        Text = view == "main" ? "Reflection Timer — App view · 4.1.8" : view == "compact" ? "Reflection Timer — Compact view · 4.1.8" : "Reflection Timer — Session end · 4.1.8";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         var state=app.Session.Engine.Snapshot;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(228, 200) : new(560, state.Prompts.Any(p=>p.Id==prompt&&ReflectionTimer.Core.TimerEngine.ShowEarlyEndReason(p,state.Timer,app.Session.Engine.Now))?525:440);
@@ -46,13 +49,6 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         ApplyTopMost();
         browser.Visible=view!="reflection";
         Controls.Add(browser);
-        // WebView2 handles browser accelerators before DOM keyboard events.
-        // Defer the message until its synchronous key handler has returned.
-        browser.KeyDown+=(_,e)=>{
-            if(View!="main"||!ready||e.KeyCode!=Keys.Tab||(e.Modifiers!=Keys.Control&&e.Modifiers!=(Keys.Control|Keys.Shift)))return;
-            var backward=e.Shift;e.Handled=true;e.SuppressKeyPress=true;
-            BeginInvoke(()=>Post(new{type="cycleAppTab",backward}));
-        };
         HandleCreated+=(_,_)=>ApplyWindowTheme();
         Shown += async (_, _) => await (initialization??=InitializeAsync());
         ResizeEnd+=(_,_)=>{if(View=="compact")try{app.Session.Engine.SetFloatingTimerPosition(Left,Top);}catch{app.Announce("Could not save the compact position.");}};
@@ -131,11 +127,12 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     }
     private async Task InitializeAsync()
     {
+        var initializingBrowser=browser;
         try {
-            var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(app.ProfileDirectory, "WebView2"));
-            if (IsDisposed) return;
-            await browser.EnsureCoreWebView2Async(environment);
-            if (IsDisposed) return;
+            var environment = await app.BrowserEnvironmentAsync();
+            if (IsDisposed||!ReferenceEquals(initializingBrowser,browser)) return;
+            await initializingBrowser.EnsureCoreWebView2Async(environment);
+            if (IsDisposed||!ReferenceEquals(initializingBrowser,browser)) return;
             var core = browser.CoreWebView2;
             core.Settings.AreHostObjectsAllowed = false;
             core.Settings.IsStatusBarEnabled = false;
@@ -153,12 +150,12 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
                 if (!Allowed(e.Request.Uri)) e.Response = environment.CreateWebResourceResponse(null, 403, "Forbidden", "Content-Type: text/plain");
             };
             core.WebMessageReceived += Receive;
-            core.NavigationCompleted += (_, e) => { if (!e.IsSuccess) ShowFailure("The local interface could not be loaded. Close and reopen the app."); };
-            core.ProcessFailed += (_, e) => ProcessFailure(e.ProcessFailedKind,e.Reason,e.ExitCode);
+            core.NavigationCompleted += (_, e) => { if (IsCurrent(core)&&!e.IsSuccess) ShowFailure("The local interface could not be loaded. Close and reopen the app."); };
+            core.ProcessFailed += (_, e) => {if(IsCurrent(core))ProcessFailure(e.ProcessFailedKind,e.Reason,e.ExitCode);};
             core.Navigate(Origin + (View=="compact" ? "/compact.html" : "/index.html?view=" + View));
         }
-        catch (WebView2RuntimeNotFoundException) { ShowFailure("Microsoft Edge WebView2 Runtime is required. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen the app."); }
-        catch { ShowFailure("The local web interface could not start. Close and reopen the app. Your saved data is retained."); }
+        catch (WebView2RuntimeNotFoundException) { if(ReferenceEquals(initializingBrowser,browser))ShowFailure("Microsoft Edge WebView2 Runtime is required. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen the app."); }
+        catch { if(ReferenceEquals(initializingBrowser,browser))ShowFailure("The local web interface could not start. Close and reopen the app. Your saved data is retained."); }
     }
     internal static bool Allowed(string address) => Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Scheme == "https" && uri.Host == "reflection-timer.invalid"
         && uri.IsDefaultPort && uri.UserInfo.Length == 0 && uri.AbsolutePath is "/index.html" or "/app.js" or "/app.css" or "/ui.js" or "/settings.js" or "/audio.js" or "/setup.js" or "/low-time.js" or "/compact.html" or "/compact.js" or "/compact.css" or "/layout.js" or "/themes.css" or "/themes.js";
@@ -171,23 +168,20 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         // GPU/utility processes recover automatically. A busy renderer can also
         // recover; do not hide its still-live editor or discard unsaved text.
         if(kind is not (CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited))return;
-        ready=false;
-        var error=new IOException("Web view unavailable.");
-        flush?.TrySetException(error);reflectionReady.TrySetException(error);
-        ShowFailure("The web interface stopped responding. Close and reopen the app. Previously saved drafts are retained.");
+        if(kind==CoreWebView2ProcessFailedKind.BrowserProcessExited)app.RecoverBrowser();
+        else RecoverRenderer();
     }
     private void ShowFailure(string text)
     {
         if (IsDisposed) return;
         if(View=="reflection")reflectionLoadError=text;
-        browser.Visible = false;
-        var explanation = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, Text = text, AccessibleName = "App startup error", Font = new("Segoe UI", 12) };
-        Controls.Add(explanation); explanation.BringToFront(); explanation.Focus();
+        ShowRecoveryMessage(text,false);
+        interfaceReady.TrySetException(new IOException(text));
         reflectionReady.TrySetResult();
     }
     private async void Receive(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
-        if (!Allowed(e.Source)) return;
+        if (!IsCurrent(sender)||!Allowed(e.Source)) return;
         string? requestId = null;
         try {
             if (e.WebMessageAsJson.Length > 40000) throw new ArgumentException("Message too large.");
@@ -199,23 +193,25 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
             if(handoffInProgress && action is "queue" or "skip" or "close" or "navigateReflection")throw new InvalidOperationException("This reflection is being saved before another prompt opens.");
             var data = root.GetProperty("data");
             if (action == "ready") {
-                ready = true; Post(new { type = "init", view = View, promptId = PromptId, state = app.Session.View(), appViewVisible = app.AppViewVisible });
+                ready = true; Post(new { type = "init", view = View, promptId = PromptId, state = app.Session.View(), appViewVisible = app.AppViewVisible, timeOnly = recoveringInterface ? (bool?)IsTimeOnly : null });
                 if(View=="main" && app.RecoveryNotice is { } notice) { Post(new { type="announcement", message=notice }); app.RecoveryNotice=null; }
                 if(focusOnReady){focusOnReady=false;FocusControls(selectTimerOnReady);}
-                if(View=="main"&&!app.StartInTray)ReflectionTimer.Desktop.WindowActivation.Focus(this);
+                if(View=="main"&&!app.StartInTray&&!recoveringInterface)ReflectionTimer.Desktop.WindowActivation.Focus(this);
                 Reply(requestId); return;
             }
+            if(action=="interfaceReady") {interfaceReady.TrySetResult();Reply(requestId);return;}
             if (action == "flushed") { flush?.TrySetResult(); Reply(requestId); return; }
             if (action == "reflectionReady") {
                 if(View!="reflection")throw new ArgumentException("Only a reflection can finish loading its editor.");
                 if(!data.TryGetProperty("id",out var loaded)||!loaded.TryGetGuid(out var loadedId)||loadedId!=PromptId)throw new ArgumentException("This reflection load is no longer current.");
-                browser.Visible=true;Reply(requestId);reflectionReady.TrySetResult();return;
+                browser.Visible=true;Reply(requestId);reflectionReady.TrySetResult();interfaceReady.TrySetResult();return;
             }
             if(action=="reflectionLoadFailed") {
                 if(View!="reflection"||!data.TryGetProperty("id",out var failed)||!failed.TryGetGuid(out var failedId)||failedId!=PromptId)throw new ArgumentException("This reflection load is no longer current.");
                 Reply(requestId);reflectionReady.TrySetException(new InvalidOperationException("The requested reflection could not be loaded."));return;
             }
             if (action == "flushFailed") { flush?.TrySetException(new IOException("Draft save failed.")); Reply(requestId); return; }
+            if(View=="reflection"&&!ReflectionOpen&&(action is "draft" or "queue" or "skip" or "navigateReflection" or "close"))throw new InvalidOperationException("This reflection is closed. Reopen it before editing.");
             if (action == "compact") { app.Open("compact"); Reply(requestId); return; }
             if(action=="toggleCompact") { app.ToggleCompactVisibility();Reply(requestId);return; }
             if(action=="quit") { if(View!="main")throw new ArgumentException("Quit from the App view.");Reply(requestId);await app.CloseMainAsync();return; }
@@ -233,7 +229,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
                 ApplyTopMost();
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.7";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.8";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }
@@ -241,7 +237,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
             if(action=="navigateReflection") {
                 if(View!="reflection"||PromptId is not {} from)throw new ArgumentException("Navigate from a reflection window.");
                 var direction=ReadInt(data,"direction",-1,1);
-                await app.NavigateReflectionAsync(from,direction);Reply(requestId);return;
+                await app.NavigateReflectionAsync(from,direction);if(IsCurrent(sender))Reply(requestId);return;
             }
             if (action == "close") { Reply(requestId); Close(); return; }
             if (action == "readTime") {
@@ -260,26 +256,31 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         }
         catch (Exception error) {
             var message = error is ArgumentException or InvalidOperationException ? error.Message : "The change could not be saved. Review its current values and try again.";
-            if (requestId is not null) Post(new { type = "reply", requestId, error = message });
+            if (requestId is not null&&IsCurrent(sender)) Post(new { type = "reply", requestId, error = message });
         }
     }
     private void Reply(string requestId) => Post(new { type = "reply", requestId });
     internal void Post(object message)
     {
-        if (ready && !IsDisposed && !browser.IsDisposed) browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message, PreviewSession.Json));
+        if (!ready||IsDisposed||browser.IsDisposed)return;
+        try {browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message, PreviewSession.Json));}
+        catch(Exception error) when(error is InvalidOperationException or COMException) {RecoverRenderer();}
     }
     internal async Task FlushDraftAsync(bool freeze=false)
     {
         if(freeze&&reflectionLoadError is not null)throw new InvalidOperationException("This editor is unavailable, so its reflection was not sent or replaced. Close and reopen it to recover the saved draft.");
         if(flush is {} pending)await pending.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        if (View != "reflection" || !ready || IsDisposed) return;
+        if (View != "reflection" || !ReflectionOpen || !ready || IsDisposed) return;
         var request = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         flush = request;
         Post(new { type = "flush",freeze });
         try { await request.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
         finally { if(ReferenceEquals(flush,request))flush = null; }
     }
-    internal void CloseAfterSave() { allowClose = true; Close(); }
+    // Keep each viewer's browser and accessibility objects alive between uses.
+    // A hidden reflection is no longer an editor: it cannot be flushed/submitted.
+    internal void CloseAfterSave() { ReflectionOpen=false;handoffInProgress=false;Hide(); }
+    internal void ClosePermanently() { allowClose = true; Close(); }
     protected override void Dispose(bool disposing) { if (disposing) browser.Dispose(); base.Dispose(disposing); }
     [DllImport("user32.dll")]private static extern bool ReleaseCapture();
     [DllImport("user32.dll",EntryPoint="SendMessageW")]private static extern nint SendMessage(nint window,int message,nint wParam,nint lParam);

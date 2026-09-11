@@ -1,4 +1,4 @@
-# Reflection Timer 4.1.7
+# Reflection Timer 4.1.8
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 
@@ -6,13 +6,17 @@ The four views, themes, audio controls, window positions and Ctrl+Alt shortcuts 
 
 Prev/Next saves both fields and loads the selected reflection in the same window and WebView2 control. Navigation does not recreate browser controls or submit reflections. A failed load restores the previous saved editor. Recoverable GPU/utility failures or temporary renderer stalls no longer hide a working interface; local diagnostics record WebView2 failure kind, reason, and exit code without page text.
 
+Closing Compact/Time-only or a reflection now hides and reuses its browser control. Closed reflections are excluded from editing, shortcuts, and draft flushing until reopened; a new prompt resets the editor before display. This avoids tearing down WebView2 accessibility objects during normal viewer switching.
+
+If a renderer exits, its document reloads. If the shared browser exits, all viewers rebuild together after WebView2 releases the old process. Recovery reloads saved drafts/settings and preserves timer deadlines, window visibility, and the floating view's mode. It never submits a reflection. Text not yet saved before a crash cannot be recovered. Repeated crashes stop automatic retries and offer a keyboard-accessible Retry interface button. Diagnostics record recovery outcomes without page text.
+
 Settings provides separate always-on-top switches for Compact, Time-only, and reflection prompts, all enabled by default. Prompts are excluded from Alt+Tab. Only one reflection is visible at a time. Bottom-left Prev and Next save both draft fields locally before opening the adjacent pending reflection; browsing never submits it. At either end the unavailable button is disabled. Save and Save & send still close the current window without automatically opening another.
 
 Auto-send incomplete reflections when a session ends is checked by default and saves immediately. A new completion queues older unfinished session reflections (including blank or closed drafts), preserving early-end status and reason and marking them auto-sent. Turn it off to retain older drafts for navigation. The new completion, active check-ins, and the other test/real mode are excluded. Opening a saved or practice prompt never triggers auto-send. An unsent check-in is promoted into its own completion under the same ID, preserving saved text and in-flight edits. Already-submitted entries are never copied or resent. Auto-send first commits to Outbox; failed local saves leave the previous draft editable and the new prompt pending. Network delivery uses the existing connection and retry rules.
 
 The reason field is available while a check-in's session is still running/paused and for a genuine early ending. It disappears after natural completion, independently of any next session. Provisional reasons stay with the draft and are submitted only for an actual early ending. New reflection windows load their saved text and theme before becoming visible.
 
-If a target editor fails to load, navigation retains the current editor and draft. The failed hidden window is disposed and removed so retry can create a fresh one. An unavailable current editor cannot auto-send an older saved snapshot as if its latest text had been flushed; close and reopen it to recover the saved draft.
+If a target editor fails to load, navigation retains the current editor and draft. The failed hidden window is disposed and removed so retry can create a fresh one. An unavailable current editor cannot auto-send an older saved snapshot as if its latest text had been flushed; recovery must finish before it can be replaced.
 
 At natural completion, early ending, and scheduled handoff, the session-end audio's behavior controls overlapping low-time audio: Polite mixes normally, Assertive reduces the other audio to 25% and restores it afterward, and Disruptive stops it. Explicit pause/reset/new-start, disabling low-time audio, or Stop all app audio can still stop playback.
 
