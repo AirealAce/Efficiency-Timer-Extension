@@ -1,4 +1,4 @@
-import {setOptions,setText} from './ui.js';
+import {setOptions,setText,setValue} from './ui.js';
 // Each original sound event keeps its own visible editor and saved settings.
 export function mountAudio({send,run}) {
   const template=document.getElementById('sound-form'),editors=[];let settings;
@@ -35,7 +35,7 @@ export function mountAudio({send,run}) {
     if(sound.custom)choices.push({label:sound.customName?`Custom MP3 · ${sound.customName}`:'Custom MP3',value:'custom'});
     if(!sound.custom&&!choices.some(c=>c.value===sound.track))choices.push({label:'Unavailable on this PC · '+sound.track,value:sound.track});
     setOptions(field('sound-track'),choices,sound.custom?'custom':sound.track);
-    field('sound-behavior').value=sound.behavior;field('sound-volume').value=sound.volume;field('sound-fade').checked=sound.fadeOutEnabled;field('sound-fade-seconds').value=sound.fadeOutAfterSeconds;field('sound-fade-seconds').disabled=!sound.fadeOutEnabled;setText(field('sound-volume-caption'),`Volume (${sound.volume}%)`);
+    setValue(field('sound-behavior'),sound.behavior);field('sound-volume').value=sound.volume;field('sound-fade').checked=sound.fadeOutEnabled;field('sound-fade-seconds').value=sound.fadeOutAfterSeconds;field('sound-fade-seconds').disabled=!sound.fadeOutEnabled;setText(field('sound-volume-caption'),`Volume (${sound.volume}%)`);
     setText(field('sound-default'),`Default: ${sound.defaultName}`);
   }
   return {render(value){settings=value;editors.forEach(renderEditor);},async flush(){for(const editor of editors){if(editor.dirty)await editor.save();else await editor.saving;}}};

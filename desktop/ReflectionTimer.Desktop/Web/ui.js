@@ -2,10 +2,70 @@ export function setText(element, value) {
   const text = String(value ?? '');
   if (element.textContent !== text) element.textContent = text;
 }
+export function setValue(element, value) {
+  if (element.value !== String(value)) element.value = String(value);
+}
+// Delegate once: dropdowns added by audio editors, scheduling, or dialogs get
+// the same WebView2 selection feedback without changing native keyboard behavior.
+export function announceSelectChanges(doc = document) {
+  const regions = new WeakMap(), selections = new WeakMap();
+  let pending, timer;
+  const signature = select => JSON.stringify([select.selectedIndex, select.value, select.selectedOptions[0]?.label]);
+  const eligible = element => element?.tagName === 'SELECT' && !element.multiple && element.size <= 1 && !element.disabled;
+  function regionFor(select) {
+    // A body-level live region is inert while a modal dialog is open.
+    const scope = select.closest('dialog') || doc.body;
+    if (!regions.has(scope)) {
+      const region = doc.createElement('span');
+      region.className = 'sr-only';
+      region.dataset.selectAnnouncement = '';
+      region.setAttribute('role', 'status');
+      region.setAttribute('aria-live', 'polite');
+      region.setAttribute('aria-atomic', 'true');
+      scope.append(region);
+      regions.set(scope, region);
+    }
+    return regions.get(scope);
+  }
+  function cancel() {
+    clearTimeout(timer);
+    if (pending) pending.region.textContent = '';
+    pending = undefined;
+  }
+  doc.addEventListener('focusin', event => {
+    if (eligible(event.target)) {
+      selections.set(event.target, signature(event.target));
+      regionFor(event.target);
+    }
+  });
+  function changed(event) {
+    const select = event.target;
+    if (!event.isTrusted || !eligible(select) || doc.activeElement !== select || !doc.hasFocus()) return;
+    const selected = signature(select), label = select.selectedOptions[0]?.label.trim();
+    if (selections.get(select) === selected) return; // input + change describe one choice.
+    selections.set(select, selected);
+    cancel();
+    if (!label) return;
+    const region = regionFor(select);
+    region.textContent = '';
+    pending = {select, region};
+    // Let native selection and autosave settle. Holding an arrow speaks the
+    // latest choice instead of building a queue of obsolete choices.
+    timer = setTimeout(() => {
+      if (!select.isConnected || doc.activeElement !== select || !doc.hasFocus() ||
+          !eligible(select) || select.closest('[hidden], [inert]') || signature(select) !== selected) { cancel(); return; }
+      region.textContent = label + ' selected.';
+    }, 150);
+  }
+  doc.addEventListener('input', changed, true);
+  doc.addEventListener('change', changed, true);
+  doc.addEventListener('focusout', event => { if (event.target === pending?.select) cancel(); });
+  doc.defaultView.addEventListener('blur', cancel);
+}
 export function setOptions(select, choices, value) {
   const signature=JSON.stringify(choices);
   if(select.dataset.choices!==signature){select.replaceChildren(...choices.map(c=>new Option(c.label,String(c.value))));select.dataset.choices=signature;}
-  if(select.value!==String(value))select.value=String(value);
+  setValue(select,value);
 }
 export function formatClock(seconds) {
   const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = seconds % 60;

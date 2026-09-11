@@ -13,7 +13,8 @@ export function mountTheme(view){
   const contrast=matchMedia('(forced-colors: active)');
   let current=0;
   function update(value=current){
-    current=Number(value)||0;document.documentElement.dataset.theme=String(current);
+    current=Number(value)||0;
+    if(document.documentElement.dataset.theme!==String(current))document.documentElement.dataset.theme=String(current);
     if(view!=='main'||!preview)return;
     const name=['Dark','Light','High Contrast','Glamour'][current]||'Dark';
     const description=contrast.matches?'Windows contrast colors take priority over decorative themes.':[
@@ -25,7 +26,8 @@ export function mountTheme(view){
     setText(document.getElementById('theme-preview-title'),name+' · preview');
     setText(document.getElementById('theme-preview-description'),description);
     setText(document.getElementById('theme-notice'),name+' theme. Saves immediately. Windows contrast themes take priority.');
-    preview.setAttribute('aria-label',name+' theme preview. '+description+' Sample reflection field and save button. This preview is not interactive.');
+    const label=name+' theme preview. '+description+' Sample reflection field and save button. This preview is not interactive.';
+    if(preview.getAttribute('aria-label')!==label)preview.setAttribute('aria-label',label);
   }
   contrast.addEventListener('change',()=>update());update();
   return update;

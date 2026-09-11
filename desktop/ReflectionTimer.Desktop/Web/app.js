@@ -1,8 +1,9 @@
-import {setText, formatClock, durationSeconds, durationPreviewSeconds, normalizeEmptyDuration, bindTimerEditor, reconcileRows} from './ui.js';
+import {setText, formatClock, durationSeconds, durationPreviewSeconds, normalizeEmptyDuration, bindTimerEditor, reconcileRows, announceSelectChanges} from './ui.js';
 import {settingsUI, localDateTime} from './settings.js';
 import {arrangeApp} from './layout.js';
 
 const $ = id => document.getElementById(id);
+announceSelectChanges();
 let view = new URLSearchParams(location.search).get('view') || 'main';
 if (!['main', 'compact', 'reflection'].includes(view)) view = 'main';
 document.body.dataset.view = view;

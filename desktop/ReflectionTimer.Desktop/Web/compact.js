@@ -1,4 +1,5 @@
-import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration,bindTimerEditor} from './ui.js';
+import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration,bindTimerEditor,announceSelectChanges} from './ui.js';
+announceSelectChanges();
 const $=id=>document.getElementById(id),bridge=window.chrome?.webview,requests=new Map();
 let sequence=0,state,dirty=false,tiny=false,revealed=false,lastRunning=false,lastDeadline,repeatPending=false;
 function send(action,data={}){return new Promise((resolve,reject)=>{const requestId=String(++sequence);if(!bridge)return reject(new Error('Open the compact timer through Reflection Timer.'));const timeout=setTimeout(()=>{requests.delete(requestId);reject(new Error('The app did not respond.'));},35000);requests.set(requestId,{resolve,reject,timeout});bridge.postMessage({requestId,action,data});});}

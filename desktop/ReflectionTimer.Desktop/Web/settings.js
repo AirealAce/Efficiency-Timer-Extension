@@ -1,4 +1,4 @@
-import {setText} from './ui.js';
+import {setText,setValue} from './ui.js';
 import {mountTheme} from './themes.js';
 import {mountSetup} from './setup.js';
 import {mountAudio} from './audio.js';
@@ -13,6 +13,8 @@ export function settingsUI({send, run, bind, view, announce}) {
   const lowTime=mountLowTime({send,run});
   const dirty = new Set();
   const dirtyFields=new Map();
+  const displayRevisions=new Map();
+  let displaySaving=Promise.resolve();
   const trackedForms=new Set(['appearance-form','volume-form','settings-volume-form','connection-form','cutoff-form']);
   for(const name of ['input','change'])document.addEventListener(name,event=>{const id=event.target.form?.id;if(!trackedForms.has(id))return;dirty.add(id);if(!dirtyFields.has(id))dirtyFields.set(id,new Set());dirtyFields.get(id).add(event.target.id);});
   function cleanField(form,field){dirtyFields.get(form)?.delete(field);if(!dirtyFields.get(form)?.size)dirty.delete(form);}
@@ -22,12 +24,12 @@ export function settingsUI({send, run, bind, view, announce}) {
   }
   function populateConnection(c) {
     $('sheet-url').value=c.sheetUrl; $('receiver-url').value=c.webAppUrl;
-    $('sheet-mode').value=c.sheetMode; $('sheet-name').value=c.sheetName;$('sheet-name').disabled=c.sheetMode!=='fixed';
+    setValue($('sheet-mode'),c.sheetMode); $('sheet-name').value=c.sheetName;$('sheet-name').disabled=c.sheetMode!=='fixed';
   }
   function populate(form) {
     if(!settings || dirty.has(form)) return;
     if(form==='appearance-form') {
-      ['theme','placement','popup','overlap'].forEach(id=>$(id).value=settings[id]);
+      ['theme','placement','popup','overlap'].forEach(id=>setValue($(id),settings[id]));
       $('show-compact').checked=settings.showFloatingTimer; $('logging').checked=settings.loggingEnabled;$('start-at-login').checked=!!settings.startAtLogin;
       ['compactAlwaysOnTop','timeOnlyAlwaysOnTop','promptAlwaysOnTop','autoSendIncompleteReflections'].forEach(id=>$(id).checked=settings[id]!==false);
       $('default-threshold').value=settings.threshold;
@@ -51,7 +53,7 @@ export function settingsUI({send, run, bind, view, announce}) {
   submit('connection-form','connectionSave',connection);
   async function saveSettings(){
     if(!$('appearance-form').reportValidity())return;
-    await audio.flush();await volumeSaving;await send('saveAppearance',appearance());dirty.delete('appearance-form');dirtyFields.delete('appearance-form');
+    await displaySaving;await audio.flush();await volumeSaving;await send('saveAppearance',appearance());dirty.delete('appearance-form');dirtyFields.delete('appearance-form');
     if(dirty.has('volume-form')){await send('volume',{volume:Number($('app-volume').value),quiet:true});dirty.delete('volume-form');dirtyFields.delete('volume-form');}
     if(dirty.has('connection-form')){await send('connectionStore',connection());dirty.delete('connection-form');dirtyFields.delete('connection-form');populate('connection-form');}
     announce('Settings saved.');
@@ -62,9 +64,17 @@ export function settingsUI({send, run, bind, view, announce}) {
   submit('cutoff-form','setCutoff',cutoffData);
   $('cutoff-enabled').addEventListener('change',()=>run(async()=>{$('cutoff').disabled=!$('cutoff-enabled').checked;if($('cutoff-enabled').checked)$('repeat').checked=true;if($('cutoff-enabled').checked&&(!$('cutoff').value||new Date($('cutoff').value).getTime()<=Date.now()))$('cutoff').value=localDateTime(Date.now()+3600000);await send('setCutoff',cutoffData());dirty.delete('cutoff-form');dirtyFields.delete('cutoff-form');}));
   $('cutoff').addEventListener('change',()=>run(async()=>{if($('cutoff-enabled').checked){await send('setCutoff',cutoffData());dirty.delete('cutoff-form');dirtyFields.delete('cutoff-form');}}));
-  ['theme','placement','popup','overlap'].forEach(id=>$(id).addEventListener('change',()=>run(async()=>{await send('displayOption',{option:id,value:Number($(id).value),quiet:true});cleanField('appearance-form',id);})));
-  $('show-compact').addEventListener('change',()=>run(async()=>{await send('displayOption',{option:'showCompact',value:$('show-compact').checked?1:0,quiet:true});cleanField('appearance-form','show-compact');}));
-  ['compactAlwaysOnTop','timeOnlyAlwaysOnTop','promptAlwaysOnTop','autoSendIncompleteReflections'].forEach(id=>$(id).addEventListener('change',()=>run(async()=>{await send('displayOption',{option:id,value:$(id).checked?1:0,quiet:true});cleanField('appearance-form',id);})));
+  function saveDisplay(id,option,value){
+    const revision=(displayRevisions.get(id)||0)+1;displayRevisions.set(id,revision);
+    // An earlier reply must not clear a later arrow-key edit and repopulate it.
+    const save=displaySaving.catch(()=>{}).then(()=>send('displayOption',{option,value,quiet:true})).then(()=>{
+      if(displayRevisions.get(id)===revision)cleanField('appearance-form',id);
+    });
+    displaySaving=save;run(()=>save);
+  }
+  ['theme','placement','popup','overlap'].forEach(id=>$(id).addEventListener('change',()=>saveDisplay(id,id,Number($(id).value))));
+  $('show-compact').addEventListener('change',()=>saveDisplay('show-compact','showCompact',$('show-compact').checked?1:0));
+  ['compactAlwaysOnTop','timeOnlyAlwaysOnTop','promptAlwaysOnTop','autoSendIncompleteReflections'].forEach(id=>$(id).addEventListener('change',()=>saveDisplay(id,id,$(id).checked?1:0)));
   function setMasterVolume(value){for(const id of ['app-volume','settings-volume']){$(id).value=value;setText($(id+'-caption'),'App sound ('+value+'%)');}}
   for(const id of ['app-volume','settings-volume'])$(id).addEventListener('input',()=>{
     const value=Number($(id).value),revision=++volumeRevision;setMasterVolume(value);dirty.add('volume-form');dirty.add('settings-volume-form');
@@ -103,7 +113,7 @@ export function settingsUI({send, run, bind, view, announce}) {
     },
     message(message) {
       if(view!=='main') return;
-      if(message.type==='settings') { settings=message.settings; ['appearance-form','volume-form','connection-form'].forEach(populate);audio.render(settings);lowTime.settings(settings);const theme=['Dark','Light','High Contrast','Glamour'][settings.theme]||'Dark';setText($('theme-notice'),theme+' theme. Saves immediately. Windows contrast themes take priority.');updateTheme(settings.theme);if(document.activeElement!==$('overlap'))$('overlap').value=settings.overlap; }
+      if(message.type==='settings') { settings=message.settings; ['appearance-form','volume-form','connection-form'].forEach(populate);audio.render(settings);lowTime.settings(settings);const theme=['Dark','Light','High Contrast','Glamour'][settings.theme]||'Dark';setText($('theme-notice'),theme+' theme. Saves immediately. Windows contrast themes take priority.');updateTheme(settings.theme); }
       else if(message.type==='shortcuts'){
         const descriptions=['Ctrl+Alt+T · hide or bring forward App.','Ctrl+Alt+` (backtick) · start, resume, or end the current session.','Ctrl+Alt+/ · cycle compact controls → time-only → hidden → controls.','Ctrl+Alt+. (period) · once for Compact input; twice within 0.8 seconds for App input.','Ctrl+Alt+, (comma) · focus the reflection box; if either reflection box is already focused, Save the draft and close. Otherwise reopen a pending reflection or open a check-in. Never opens App.'];
         $('shortcut-notices').replaceChildren(...descriptions.map((text,i)=>{const p=document.createElement('p');p.textContent=text+(message.shortcuts[i]?.available===false?' Unavailable: quit another running timer or app using this shortcut. Retrying automatically.':'');return p;}));
