@@ -23,6 +23,8 @@ footer.main-only{height:64px;align-items:center;padding:8px 20px}body[data-tab=s
 @media(min-width:800px){.clock{font-size:76px}.page-header h1{font-size:44px}nav[role=tablist]{gap:14px}button{border-radius:3px;min-height:44px}#timer{max-width:750px}#timer-editor .duration{margin-top:6px}}
 @media(max-width:640px){#quick-schedule-form>input{width:100%;max-width:300px}.audio-source-row{gap:8px}.audio-source-row select{max-width:100%}}
 .messages{height:auto;min-height:0;flex:none}.messages:has(p:empty):not(:has(p:not(:empty))){padding:0}body[data-tab=settings] .messages{min-height:64px;padding:8px 190px 8px 24px}footer.main-only{position:absolute;right:0;bottom:0;width:auto;height:64px;padding:8px 20px}#save-settings{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+/* Semantic key labels stay readable without becoming extra focusable controls. */
+kbd{display:inline-block;padding:1px 6px;border:1px solid var(--accent);border-bottom-width:3px;border-radius:4px;background:var(--raised);color:var(--text);font:600 .9em/1.4 Consolas,monospace;white-space:nowrap;vertical-align:baseline}
 /* Keep every App tab visible without shrinking its text. Wrap on narrow windows. */
 body[data-view=main] .page-header{flex:none}
 /* Keep visually hidden reading text inside the page's scrolling container. */
