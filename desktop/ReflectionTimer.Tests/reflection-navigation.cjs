@@ -28,7 +28,7 @@ module.exports=async function reflectionNavigation(context,initial,check){
   check(messages.findIndex(m=>m.action==='draft'&&m.data.text==='Newest response before Prev'&&m.data.reason==='Newest reason before Prev')<messages.findIndex(m=>m.action==='navigateReflection'&&m.data.direction===-1),'Prev durably saves both latest inputs before requesting another reflection');
   check(await page.locator('#reflection-text').evaluate(e=>e.readOnly)&&await page.locator('#reflection-next').getAttribute('aria-disabled')==='true'&&await page.locator('#later').getAttribute('aria-disabled')==='true','Navigation freezes editing and conflicting actions until the handoff finishes');
   await page.locator('#reflection-next').dispatchEvent('click');await page.evaluate(()=>window.previewDispatch({type:'reflectionShortcut'}));
-  check(await page.evaluate(()=>window.previewMessages.filter(m=>m.action==='navigateReflection').length===1&&!window.previewMessages.some(m=>['queue','close','skip'].includes(m.action))),'Repeated navigation and comma cannot submit, close, or duplicate an in-flight handoff');
+  check(await page.evaluate(()=>window.previewMessages.filter(m=>m.action==='navigateReflection').length===1&&!window.previewMessages.some(m=>['queue','saveForLater','close','skip'].includes(m.action))),'Repeated navigation and comma cannot submit, close, or duplicate an in-flight handoff');
   await page.evaluate(()=>window.previewDispatch({type:'reply',requestId:window.navigationRequest.requestId,error:'Test navigation save failed.'}));
   await page.waitForFunction(()=>document.querySelector('#error').textContent==='Test navigation save failed.');
   check(await page.locator('#reflection-text').isEditable()&&await page.locator('#early-reason').inputValue()==='Newest reason before Prev'&&await page.locator('#reflection-next').getAttribute('aria-disabled')==='false','Navigation failure restores editing and controls without losing either field');
@@ -56,7 +56,7 @@ module.exports=async function reflectionNavigation(context,initial,check){
   await page.evaluate(state=>window.previewDispatch({type:'showReflection',state,promptId:'missing'}),{...initial,prompts});
   await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='reflectionLoadFailed'&&m.data.id==='missing'));
   check(await page.locator('#reflection-text').inputValue()==='Newest response before Prev'&&await page.locator('#early-reason').inputValue()==='Newest reason before Prev','A missing target reports failure without replacing the current editor or either field');
-  check(await page.evaluate(()=>!window.previewMessages.some(m=>['queue','skip','close'].includes(m.action))),'Browsing and failed loads never submit, skip, or close a reflection');
+  check(await page.evaluate(()=>!window.previewMessages.some(m=>['queue','saveForLater','skip','close'].includes(m.action))),'Browsing and failed loads never submit, skip, or close a reflection');
   await page.goto('https://reflection-timer.invalid/index.html?view=main');
   await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
   await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);

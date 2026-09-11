@@ -95,7 +95,7 @@ public sealed class PreviewSession
             timer = new { state.Timer.DurationSeconds, state.Timer.AutoRestart, state.Timer.LowTime.Enabled, state.Timer.AutoRestartUntil, state.Timer.EndTime,
                 threshold = state.Timer.LowTime.ThresholdSeconds ?? AudioSettings.From(state).LowTimeThresholdSeconds,
                 low=LowView(state.Timer.LowTime,AudioSettings.From(state).LowTimeThresholdSeconds) },
-            prompts = state.Prompts.Select(p => new { p.Id, p.IsCheckIn, p.EndedEarly, p.Draft, p.EarlyEndReason,
+            prompts = state.Prompts.Select(p => new { p.Id, p.IsCheckIn, p.EndedEarly, draft = ReflectionDrafts.ForEditing(p), p.EarlyEndReason,
                 showEarlyEndReason=TimerEngine.ShowEarlyEndReason(p,state.Timer,Engine.Now),
                 allotted = SpeakTime(p.DurationSeconds), actual = p.ActualDurationSeconds is { } actual ? SpeakTime(actual) : "Unavailable",
                 completed = DateTimeOffset.FromUnixTimeMilliseconds(p.CompletedAt).ToLocalTime().ToString("g") }),
@@ -164,6 +164,9 @@ public sealed class PreviewSession
             case "draft":
                 var draftId = Id(data); RequiredPrompt(draftId);
                 Engine.SaveDraft(draftId, Text(data, "text", 5000), Text(data, "reason", 1000)); return new("");
+            case "saveForLater":
+                Engine.SaveReflectionForLater(Id(data), Text(data, "text", 5000), Text(data, "reason", 1000));
+                return new("Reflection saved locally.", Close: true);
             case "skip":
                 var skipped=Id(data);RequiredPrompt(skipped);Engine.SkipPrompt(skipped);return new("Reflection skipped.",Close:true);
             case "queue":

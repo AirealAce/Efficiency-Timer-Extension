@@ -302,7 +302,7 @@ $('reflection-form').addEventListener('submit',event=>{event.preventDefault();ru
 bind('later',async()=>{
   if(!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
   savingAndClosing=true;setReflectionBusy(reflectionBusy);
-  try {await saveDraft();await send('close');}
+  try {await saveDraft();await send('saveForLater',draft());}
   catch(e){savingAndClosing=false;setReflectionBusy(reflectionBusy);throw e;}
 });
 for(const [id,direction] of [['reflection-prev',-1],['reflection-next',1]])bind(id,async()=>{

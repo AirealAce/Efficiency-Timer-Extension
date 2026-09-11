@@ -43,7 +43,7 @@ static class NativeReflectionSmoke
                         await Until(()=>!window.ReflectionOpen&&!window.Visible);
                         Check(session.Engine.Snapshot.Prompts.Single().Draft=="Latest native draft"&&session.Engine.Snapshot.Outbox.Count==0,"Native Save shortcut persists the latest text and closes without submission");
                         app.Open("reflection",id);var reopened=Windows(app).Single(w=>w.View=="reflection");await Until(()=>reopened.Visible);
-                        Check(ReferenceEquals(window,reopened)&&(await Read(reopened)).GetProperty("draft").GetString()=="Latest native draft","Reused native prompt restores the saved draft before display");
+                        Check(ReferenceEquals(window,reopened)&&(await Read(reopened)).GetProperty("draft").GetString()=="Latest native draft\n","Reused native prompt restores the saved draft with its default newline before display");
                         await Script(reopened,"document.querySelector('#reflection-text').value='Typed just before zero';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#early-reason').focus()");
                         now=now.AddSeconds(60);session.Tick();app.Open("reflection",id);
                         await UntilAsync(async()=>!(await Read(reopened)).GetProperty("reasonVisible").GetBoolean());
@@ -67,9 +67,9 @@ static class NativeReflectionSmoke
                             Check(retainedBrowser.Visible&&(await Read(earlyWindow)).ValueKind==JsonValueKind.Object,"Recoverable WebView2 event keeps the editor available: "+kind);
                         }
                         await Script(earlyWindow,"document.querySelector('#reflection-text').value='Early saved response';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#early-reason').value='Needed a break';document.querySelector('#early-reason').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#reflection-prev').click()");
-                        await UntilAsync(async()=>earlyWindow.PromptId==id&&(await Read(earlyWindow)).GetProperty("draft").GetString()=="Typed just before zero");
+                        await UntilAsync(async()=>earlyWindow.PromptId==id&&(await Read(earlyWindow)).GetProperty("draft").GetString()=="Typed just before zero\n");
                         var previous=Windows(app).Single(w=>w.PromptId==id);
-                        Check(Windows(app).Count(w=>w.View=="reflection"&&w.Visible)==1&&(await Read(previous)).GetProperty("draft").GetString()=="Typed just before zero","Prev displays only one native reflection and restores the older saved response");
+                        Check(Windows(app).Count(w=>w.View=="reflection"&&w.Visible)==1&&(await Read(previous)).GetProperty("draft").GetString()=="Typed just before zero\n","Prev displays only one native reflection and restores the older saved response");
                         Check(session.Engine.Snapshot.Prompts.Single(p=>p.Id==earlyId) is {Draft:"Early saved response",EarlyEndReason:"Needed a break"}&&session.Engine.Snapshot.Outbox.Count==0,"Native navigation flushes both newly typed fields without submitting them");
                         Check(!(await Read(previous)).GetProperty("reasonVisible").GetBoolean(),"Prev to a naturally completed session hides only that session's reason box");
                         Check(ReferenceEquals(earlyWindow,previous)&&ReferenceEquals(retainedBrowser,Browser(previous))&&retainedProcess==retainedBrowser.CoreWebView2.BrowserProcessId,"Prev keeps the same native window, browser control, and browser process alive");
@@ -93,18 +93,18 @@ static class NativeReflectionSmoke
                         var reload=Windows(app).Single(w=>w.PromptId==earlyId);
                         Check(!reload.Visible,"Comma reopening an early-ended draft does not expose an empty editor");
                         await Until(()=>reload.Visible);var reloaded=await Read(reload);
-                        Check(reloaded.GetProperty("draft").GetString()=="Early saved response"&&reloaded.GetProperty("reasonVisible").GetBoolean()&&reloaded.GetProperty("reason").GetString()=="Needed a break","Reopened early-ended popup has both saved text fields at its first native display");
+                        Check(reloaded.GetProperty("draft").GetString()=="Early saved response\n"&&reloaded.GetProperty("reasonVisible").GetBoolean()&&reloaded.GetProperty("reason").GetString()=="Needed a break","Reopened early-ended popup has both saved text fields at its first native display");
                         var broken=(PreviewWindow)typeof(PreviewApplication).GetMethod("Create",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(app,["reflection",id])!;
                         typeof(PreviewWindow).GetMethod("ShowFailure",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(broken,["Synthetic target editor load failure."]);
                         try {await app.NavigateReflectionAsync(earlyId,-1);throw new Exception("Failed native target was treated as ready");}
                         catch(InvalidOperationException error) when(error.Message=="Synthetic target editor load failure."){}
                         await UntilAsync(async()=>!JsonDocument.Parse(await Script(reload,"document.querySelector('#reflection-text').readOnly")).RootElement.GetBoolean());
                         Check(broken.IsDisposed&&!reload.IsDisposed&&reload.Visible&&Windows(app).Count(w=>w.View=="reflection")==1,"A real native target-load failure removes the hidden failed view and retains the current visible editor");
-                        Check((await Read(reload)).GetProperty("draft").GetString()=="Early saved response"&&session.Engine.Snapshot.Outbox.Count==0,"Failed native navigation leaves the original saved text editable and unsent");
+                        Check((await Read(reload)).GetProperty("draft").GetString()=="Early saved response\n"&&session.Engine.Snapshot.Outbox.Count==0,"Failed native navigation leaves the original saved text editable and unsent");
                         await Script(reload,"document.querySelector('#reflection-prev').click()");
-                        await UntilAsync(async()=>reload.PromptId==id&&(await Read(reload)).GetProperty("draft").GetString()=="Typed just before zero");
+                        await UntilAsync(async()=>reload.PromptId==id&&(await Read(reload)).GetProperty("draft").GetString()=="Typed just before zero\n");
                         var retried=Windows(app).Single(w=>w.PromptId==id);
-                        Check(ReferenceEquals(reload,retried)&&(await Read(retried)).GetProperty("draft").GetString()=="Typed just before zero"&&Windows(app).Count(w=>w.View=="reflection")==1,"Retry after a hidden target failure reuses the populated working editor successfully");
+                        Check(ReferenceEquals(reload,retried)&&(await Read(retried)).GetProperty("draft").GetString()=="Typed just before zero\n"&&Windows(app).Count(w=>w.View=="reflection")==1,"Retry after a hidden target failure reuses the populated working editor successfully");
                         await ExerciseRecovery(app,retried,Check);
                         var queuedBeforeFailure=session.Engine.Snapshot.Outbox.Count;
                         typeof(PreviewWindow).GetMethod("ShowFailure",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(retried,["Synthetic running editor failure."]);
@@ -133,6 +133,11 @@ static class NativeReflectionSmoke
         await reflection.FlushDraftAsync();
         app.Open("main");var main=Windows(app).Single(w=>w.View=="main");
         await UntilAsync(async()=>Browser(main).CoreWebView2 is not null&&JsonDocument.Parse(await Script(main,"document.querySelector('#sound-behavior-0')?.options.length>0")).RootElement.ValueKind==JsonValueKind.True);
+        for(var separator=0;separator<4;separator++){
+            await Script(main,$"document.querySelector('#reflectionSeparator').value='{separator}';document.querySelector('#reflectionSeparator').dispatchEvent(new Event('change',{{bubbles:true}}))");
+            await Until(()=>session.Engine.Snapshot.ReflectionSeparator==(ReflectionSeparator)separator);
+            check((await Read(reflection)).GetProperty("draft").GetString()=="Saved through browser recovery","Native separator setting persists without changing an open response: option "+separator);
+        }
         app.Open("compact");var compact=Windows(app).Single(w=>w.View=="compact");
         await ((TaskCompletionSource)typeof(PreviewWindow).GetField("interfaceReady",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(compact)!).Task.WaitAsync(TimeSpan.FromSeconds(20));
         var compactBrowser=Browser(compact);var reflectionBrowser=Browser(reflection);var process=compactBrowser.CoreWebView2.BrowserProcessId;

@@ -52,7 +52,7 @@ public sealed class TimerEngine
         // an already-open editor keep even keystrokes still awaiting autosave.
         var completed=new ReflectionPrompt(draft?.Id??Guid.NewGuid(),Math.Min(timer.EndTime??now,now),timer.DurationSeconds,timer.Volume,false,draft?.Draft??"") {
             ActualDurationSeconds=ActualSeconds(timer,now),EndedEarly=RemainingMilliseconds(timer,now)>0,
-            EarlyEndReason=draft?.EarlyEndReason??""
+            EarlyEndReason=draft?.EarlyEndReason??"",ContinuationSeparator=draft?.ContinuationSeparator
         };
         if(draft is not null)state.Prompts.RemoveAll(p=>p.Id==draft.Id);
         state.Prompts.Add(completed);
@@ -318,11 +318,27 @@ public sealed class TimerEngine
         if (earlyEndReason?.Length > 1000) earlyEndReason = earlyEndReason[..1000];
         lock (gate)
         {
+            var prompt = state.Prompts.SingleOrDefault(x => x.Id == id);
+            if (prompt is null) return;
+            text = ReflectionDrafts.Content(prompt, text);
             if (!state.Prompts.Any(x => x.Id == id && (x.Draft != text || ((x.EndedEarly||x.IsCheckIn) && earlyEndReason is not null && x.EarlyEndReason != earlyEndReason)))) return;
             Change("prompt.draftSaved", s => s.Prompts = s.Prompts.Select(x => x.Id == id ? x with {
-                Draft = text, EarlyEndReason = x.EndedEarly||x.IsCheckIn ? earlyEndReason ?? x.EarlyEndReason : x.EarlyEndReason
+                Draft = text, ContinuationSeparator = x.Draft == text ? x.ContinuationSeparator : null,
+                EarlyEndReason = x.EndedEarly||x.IsCheckIn ? earlyEndReason ?? x.EarlyEndReason : x.EarlyEndReason
             } : x).ToList(), id);
         }
+    }
+    public void SaveReflectionForLater(Guid id, string text, string? earlyEndReason = null)
+    {
+        if (text.Length > 5000 || earlyEndReason?.Length > 1000) throw new ArgumentException("Keep the reflection within 5,000 characters and the reason within 1,000 characters.");
+        Change("prompt.later", s => {
+            var prompt = s.Prompts.SingleOrDefault(p => p.Id == id) ?? throw new ArgumentException("That reflection is no longer pending.");
+            var saved = prompt with {
+                Draft = ReflectionDrafts.Content(prompt, text), ContinuationSeparator = s.ReflectionSeparator,
+                EarlyEndReason = prompt.EndedEarly || prompt.IsCheckIn ? earlyEndReason ?? prompt.EarlyEndReason : prompt.EarlyEndReason
+            };
+            s.Prompts = s.Prompts.Select(p => p.Id == id ? saved : p).ToList();
+        }, id);
     }
     public void SkipPrompt(Guid id) => Change("prompt.skipped", s => s.Prompts.RemoveAll(x => x.Id == id), id);
     public bool AutoSendReflection(Guid promptId, bool localOnly = false)
@@ -336,6 +352,7 @@ public sealed class TimerEngine
     }
     public void QueueReflection(Guid promptId, string text, string? earlyEndReason = null, bool localOnly = false, bool autoSent = false)
     {
+        if (Snapshot.Prompts.SingleOrDefault(p => p.Id == promptId) is {} saved) text = ReflectionDrafts.Content(saved, text);
         text = text.Trim();
         if ((!autoSent && text.Length < 1) || text.Length > 5000) throw new ArgumentException("Write a reflection between 1 and 5,000 characters.");
         if (earlyEndReason?.Trim().Length > 1000) throw new ArgumentException("Keep the reason for ending early under 1,001 characters.");
@@ -395,6 +412,11 @@ public sealed class TimerEngine
         s.Outbox = s.Outbox.Select(x => x.Id == id && x.Status == DeliveryStatus.NeedsReview ? x with { Status = DeliveryStatus.Sent, ErrorKind = "" } : x).ToList(), id);
     public void SetFloatingTimer(bool visible) => Change("display.changed", s => s.ShowFloatingTimer = visible);
     public void SetAutoSendIncompleteReflections(bool enabled) => Change("settings.saved", s => s.AutoSendIncompleteReflections = enabled);
+    public void SetReflectionSeparator(ReflectionSeparator separator)
+    {
+        if (!Enum.IsDefined(separator)) throw new ArgumentException("Choose a saved reflection separator from the list.");
+        Change("settings.saved", s => s.ReflectionSeparator = separator);
+    }
     public void SetAlwaysOnTop(bool compact, bool timeOnly, bool prompt) => Change("display.changed", s => {
         s.CompactAlwaysOnTop = compact; s.TimeOnlyAlwaysOnTop = timeOnly; s.PromptAlwaysOnTop = prompt;
     });

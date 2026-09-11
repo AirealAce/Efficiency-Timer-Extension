@@ -1,8 +1,10 @@
-# Reflection Timer 4.1.10
+# Reflection Timer 4.1.11
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 
 The four views, themes, audio controls, window positions and Ctrl+Alt shortcuts are retained. App and reflection prompts can coexist with either Compact or Time-only. Semantic HTML supports screen-reader web navigation; quiet countdown updates do not interrupt reading.
+
+Settings → Display and behavior → Reflection prompts includes “Continue saved reflections with”: None, Comma, Bullet (newline and `- `), or Newline (default). Save, including the reflection shortcut, prepares the separator for the next visit and places the caret after it. Empty responses remain empty; reopening without typing does not accumulate separators. Unused separators are omitted from submitted responses. The setting also applies to check-ins.
 
 Prev/Next saves both fields and loads the selected reflection in the same window and WebView2 control. Navigation does not recreate browser controls or submit reflections. A failed load restores the previous saved editor. Recoverable GPU/utility failures or temporary renderer stalls no longer hide a working interface; local diagnostics record WebView2 failure kind, reason, and exit code without page text.
 

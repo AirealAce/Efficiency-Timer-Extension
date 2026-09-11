@@ -25,22 +25,22 @@ module.exports=async function reflectionSave(context,initial,check){
     const page=await open();
     check(await page.getByRole('button',{name:'Save',exact:true}).count()===1&&await page.getByRole('button',{name:'Later',exact:true}).count()===0,'Reflection action is named Save, separate from Save & send');
     await writeAndSave(page,withShortcut);
-    await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='close'));
+    await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='saveForLater'));
     const messages=await page.evaluate(()=>window.previewMessages);
     const saved=messages.findIndex(m=>m.action==='draft'&&m.data.id==='save-test'&&m.data.text==='Newest reflection'&&m.data.reason==='Newest early-end reason');
-    check(saved>=0&&saved<messages.findIndex(m=>m.action==='close'),(withShortcut?'Comma':'Save button')+' saves the latest reflection and early-end reason before closing');
+    check(saved>=0&&saved<messages.findIndex(m=>m.action==='saveForLater'),(withShortcut?'Comma':'Save button')+' saves the latest reflection and early-end reason before closing');
     check(!messages.some(m=>['queue','skip','checkIn','toggle','startOrEnd'].includes(m.action)),'Draft save does not submit, discard, open another prompt, or change the timer');
     await shortcut(page);
-    check((await actions(page)).filter(a=>a==='close').length===1,'Repeated Save while closing cannot duplicate the close request');
+    check((await actions(page)).filter(a=>a==='saveForLater').length===1,'Repeated Save while closing cannot duplicate the close request');
     await page.close();
   }
   const focusPage=await open();
   await focusPage.locator('#later').focus();await shortcut(focusPage);
-  check(await focusPage.locator('#reflection-text').evaluate(e=>e===document.activeElement)&&!(await actions(focusPage)).includes('close'),'Comma from a reflection button focuses the first text box without saving');
+  check(await focusPage.locator('#reflection-text').evaluate(e=>e===document.activeElement)&&!(await actions(focusPage)).includes('saveForLater'),'Comma from a reflection button focuses the first text box without saving');
   await focusPage.evaluate(()=>document.activeElement.blur());await shortcut(focusPage);
-  check(await focusPage.locator('#reflection-text').evaluate(e=>e===document.activeElement)&&!(await actions(focusPage)).includes('close'),'Comma from the reflection page background focuses the first text box');
+  check(await focusPage.locator('#reflection-text').evaluate(e=>e===document.activeElement)&&!(await actions(focusPage)).includes('saveForLater'),'Comma from the reflection page background focuses the first text box');
   await focusPage.locator('#early-reason').fill('Reason saved from second box');await shortcut(focusPage);
-  await focusPage.waitForFunction(()=>window.previewMessages.some(m=>m.action==='close'));
+  await focusPage.waitForFunction(()=>window.previewMessages.some(m=>m.action==='saveForLater'));
   check(await focusPage.evaluate(()=>window.previewMessages.some(m=>m.action==='draft'&&m.data.reason==='Reason saved from second box')),'Comma from the second text box saves both fields and closes');
   await focusPage.close();
   const page=await open();
@@ -56,16 +56,16 @@ module.exports=async function reflectionSave(context,initial,check){
   });
   await writeAndSave(page,true);
   await page.waitForFunction(()=>document.querySelector('#error').textContent==='Draft storage unavailable.');
-  check(!(await actions(page)).includes('close')&&await page.locator('#reflection-text').isEditable()&&await page.locator('#early-reason').inputValue()==='Newest early-end reason','Failed draft save retains editable text and reason without closing');
+  check(!(await actions(page)).includes('saveForLater')&&await page.locator('#reflection-text').isEditable()&&await page.locator('#early-reason').inputValue()==='Newest early-end reason','Failed draft save retains editable text and reason without closing');
   await page.evaluate(()=>window.failDraft=false);
   await shortcut(page);
   await page.waitForFunction(()=>window.pendingDraft);
   await shortcut(page);await page.locator('#reflection-text').press('Control+Enter');
-  check(await page.locator('#reflection-text').evaluate(e=>e.readOnly)&&await page.locator('#later').getAttribute('aria-disabled')==='true'&&!(await actions(page)).some(a=>['close','queue'].includes(a)),'Pending Save blocks duplicate shortcuts and Ctrl+Enter until durable storage succeeds');
+  check(await page.locator('#reflection-text').evaluate(e=>e.readOnly)&&await page.locator('#later').getAttribute('aria-disabled')==='true'&&!(await actions(page)).some(a=>['saveForLater','queue'].includes(a)),'Pending Save blocks duplicate shortcuts and Ctrl+Enter until durable storage succeeds');
   check((await actions(page)).filter(a=>a==='draft').length===2,'Retrying Save writes once after the original failed attempt');
   await page.evaluate(()=>window.previewDispatch({type:'reply',requestId:window.pendingDraft.requestId}));
-  await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='close'));
-  check((await actions(page)).filter(a=>a==='close').length===1,'Successful retry closes only after the delayed draft is acknowledged');
+  await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='saveForLater'));
+  check((await actions(page)).filter(a=>a==='saveForLater').length===1,'Successful retry closes only after the delayed draft is acknowledged');
   await page.evaluate(()=>window.previewDispatch({type:'reflectionCloseFailed',message:'Close flush failed.'}));
   check(await page.locator('#reflection-text').isEditable()&&await page.locator('#error').textContent()==='Close flush failed.','Native close-flush failure restores editing with an error');
   await page.close();
@@ -73,20 +73,20 @@ module.exports=async function reflectionSave(context,initial,check){
   const guarded=await open();
   await guarded.evaluate(()=>{const dialog=document.createElement('dialog');dialog.textContent='Modal test';document.body.append(dialog);dialog.showModal();});
   await shortcut(guarded);
-  check(!(await actions(guarded)).includes('close'),'Comma does not save through an open modal dialog');
+  check(!(await actions(guarded)).includes('saveForLater'),'Comma does not save through an open modal dialog');
   await guarded.evaluate(()=>{document.querySelector('dialog[open]').close();window.previewDispatch({type:'flush',freeze:true});});
   await guarded.waitForFunction(()=>window.previewMessages.some(m=>m.action==='flushed'));
   await shortcut(guarded);
-  check(!(await actions(guarded)).includes('close'),'Comma does not interfere with automatic session-end submission');
+  check(!(await actions(guarded)).includes('saveForLater'),'Comma does not interfere with automatic session-end submission');
   await guarded.evaluate(()=>window.previewDispatch({type:'resumeReflection'}));
   await guarded.getByRole('button',{name:'Save',exact:true}).focus();await guarded.keyboard.press('Enter');
-  await guarded.waitForFunction(()=>window.previewMessages.some(m=>m.action==='close'));
+  await guarded.waitForFunction(()=>window.previewMessages.some(m=>m.action==='saveForLater'));
   check(!(await actions(guarded)).includes('queue'),'Keyboard Save also preserves a blank draft without sending it');
   await guarded.close();
 
   for(const options of [{initialize:false},{view:'main'}]){
     const other=await open(options);await shortcut(other);
-    check(!(await actions(other)).includes('close'),'Save message is ignored outside an initialized reflection');
+    check(!(await actions(other)).includes('saveForLater'),'Save message is ignored outside an initialized reflection');
     await other.close();
   }
 };

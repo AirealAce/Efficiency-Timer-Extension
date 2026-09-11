@@ -34,6 +34,7 @@ public enum ScheduleOverlapPolicy { EndWithReflection = 0, Ask = 1, Wait = 2 }
 public enum ScheduleDecision { StartNow = 0, Wait = 1, Skip = 2 }
 public record ReflectionPrompt(Guid Id, long CompletedAt, int DurationSeconds, int Volume, bool IsTest, string Draft = "")
 {
+    public ReflectionSeparator? ContinuationSeparator { get; init; }
     // Null means an older prompt did not capture actual elapsed time.
     public int? ActualDurationSeconds { get; init; }
     public bool EndedEarly { get; init; }
@@ -106,6 +107,7 @@ public record AppState
     public bool TimeOnlyAlwaysOnTop { get; set; } = true;
     public bool PromptAlwaysOnTop { get; set; } = true;
     public bool AutoSendIncompleteReflections { get; set; } = true;
+    public ReflectionSeparator ReflectionSeparator { get; set; } = ReflectionSeparator.Newline;
     public int? FloatingTimerLeft { get; set; }
     public int? FloatingTimerTop { get; set; }
     public FloatingTimerPlacement FloatingPlacement { get; set; } = FloatingTimerPlacement.BottomLeft;

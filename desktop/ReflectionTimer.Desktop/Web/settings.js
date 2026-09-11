@@ -30,6 +30,7 @@ export function settingsUI({send, run, bind, view, announce}) {
     if(!settings || dirty.has(form)) return;
     if(form==='appearance-form') {
       ['theme','placement','popup','overlap'].forEach(id=>setValue($(id),settings[id]));
+      setValue($('reflectionSeparator'),settings.reflectionSeparator??3);
       $('show-compact').checked=settings.showFloatingTimer; $('logging').checked=settings.loggingEnabled;$('start-at-login').checked=!!settings.startAtLogin;
       ['compactAlwaysOnTop','timeOnlyAlwaysOnTop','promptAlwaysOnTop','autoSendIncompleteReflections'].forEach(id=>$(id).checked=settings[id]!==false);
       $('default-threshold').value=settings.threshold;
@@ -46,7 +47,7 @@ export function settingsUI({send, run, bind, view, announce}) {
     });});
   }
   const appearance=()=>({theme:Number($('theme').value),placement:Number($('placement').value),popup:Number($('popup').value),
-    overlap:Number($('overlap').value),threshold:Number($('default-threshold').value),logging:$('logging').checked,showCompact:$('show-compact').checked,startAtLogin:$('start-at-login').checked,
+    overlap:Number($('overlap').value),reflectionSeparator:Number($('reflectionSeparator').value),threshold:Number($('default-threshold').value),logging:$('logging').checked,showCompact:$('show-compact').checked,startAtLogin:$('start-at-login').checked,
     compactAlwaysOnTop:$('compactAlwaysOnTop').checked,timeOnlyAlwaysOnTop:$('timeOnlyAlwaysOnTop').checked,promptAlwaysOnTop:$('promptAlwaysOnTop').checked,autoSendIncompleteReflections:$('autoSendIncompleteReflections').checked,quiet:true});
   submit('appearance-form','saveAppearance',appearance);
   submit('volume-form','volume',()=>({volume:Number($('app-volume').value)}));
@@ -72,7 +73,7 @@ export function settingsUI({send, run, bind, view, announce}) {
     });
     displaySaving=save;run(()=>save);
   }
-  ['theme','placement','popup','overlap'].forEach(id=>$(id).addEventListener('change',()=>saveDisplay(id,id,Number($(id).value))));
+  ['theme','placement','popup','overlap','reflectionSeparator'].forEach(id=>$(id).addEventListener('change',()=>saveDisplay(id,id,Number($(id).value))));
   $('show-compact').addEventListener('change',()=>saveDisplay('show-compact','showCompact',$('show-compact').checked?1:0));
   ['compactAlwaysOnTop','timeOnlyAlwaysOnTop','promptAlwaysOnTop','autoSendIncompleteReflections'].forEach(id=>$(id).addEventListener('change',()=>saveDisplay(id,id,$(id).checked?1:0)));
   function setMasterVolume(value){for(const id of ['app-volume','settings-volume']){$(id).value=value;setText($(id+'-caption'),'App sound ('+value+'%)');}}

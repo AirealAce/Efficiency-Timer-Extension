@@ -27,7 +27,7 @@ module.exports=async function reflectionLifecycle(context,initial,check){
     check(await page.locator('#reflection-heading').textContent()==='Session reflection'&&(await page.locator('#reflection-context').textContent()).includes('1 minute spent'),'Promoted prompt updates its heading and actual time without recreating the editor: theme '+theme);
     check(await page.locator('#reflection-text').evaluate(e=>e===document.activeElement),'Hiding the focused reason moves focus safely to the reflection box: theme '+theme);
     await page.evaluate(()=>window.previewDispatch({type:'reflectionShortcut'}));
-    await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='close'));
+    await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='saveForLater'));
     check(await page.evaluate(()=>window.previewMessages.some(m=>m.action==='draft'&&m.data.text==='Final unsaved keystroke')),'Save after completion retains the latest text under the original prompt ID: theme '+theme);
     await reopen({...state,prompts:[{...completed,draft:'Final unsaved keystroke'}]});
     check(await page.locator('#reflection-text').inputValue()==='Final unsaved keystroke'&&await page.locator('#reason-group').isHidden(),'Reopened completed prompt restores its saved response and has no early-end field: theme '+theme);
