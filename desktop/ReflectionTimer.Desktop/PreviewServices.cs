@@ -28,6 +28,8 @@ public sealed class PreviewServices : IDisposable
     private void Record(Activity activity)
     {
         Log.Record(activity);
+        // Activity is raised only after the skipped prompt is saved to disk.
+        if(activity.Event=="prompt.skipped") _ = Play(SoundEvent.Success);
         // Session transitions must let the incoming sound's playback behavior
         // decide whether existing audio is mixed, ducked, or interrupted.
         var state=engine.Snapshot;

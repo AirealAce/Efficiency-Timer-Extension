@@ -7,7 +7,7 @@ namespace ReflectionTimer.Accessible;
 
 internal sealed partial class PreviewWindow
 {
-    private static readonly HashSet<string> SettingsCommands = ["settingsLoad", "connectionSave", "connectionPause", "setupImport", "setupExport", "setupScript", "setupRestore", "setupNewToken", "saveAppearance", "displayOption", "saveSound", "browseSound", "previewSound", "stopSound", "volume", "diagnostics", "exportDiagnostics", "markIssue", "sendPending", "setCutoff", "importSchedules", "openSheet", "clearDiagnostics", "editScheduleDraft", "browseLowSound", "previewLowSound", "connectionStore", "setupGuide"];
+    private static readonly HashSet<string> SettingsCommands = ["settingsSaveComplete", "settingsLoad", "connectionSave", "connectionPause", "setupImport", "setupExport", "setupScript", "setupRestore", "setupNewToken", "saveAppearance", "displayOption", "saveSound", "browseSound", "previewSound", "stopSound", "volume", "diagnostics", "exportDiagnostics", "markIssue", "sendPending", "setCutoff", "importSchedules", "openSheet", "clearDiagnostics", "editScheduleDraft", "browseLowSound", "previewLowSound", "connectionStore", "setupGuide"];
     private static string ReadString(JsonElement data, string key, int max = 4096) => data.TryGetProperty(key,out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { } text && text.Length <= max
         ? text : throw new ArgumentException($"Enter valid {key}.");
     private static int ReadInt(JsonElement data, string key, int min, int max) => data.TryGetProperty(key,out var value) && value.TryGetInt32(out var result) && result >= min && result <= max
@@ -27,6 +27,8 @@ internal sealed partial class PreviewWindow
         var engine = app.Session.Engine; var services = app.Services; var state = engine.Snapshot;
         string message = "";
         switch (action) {
+            case "settingsSaveComplete":
+                _=services.Play(SoundEvent.Success);Reply(requestId);return true;
             case "settingsLoad": Post(new{type="shortcuts",shortcuts=app.ShortcutState});break;
             case "setupGuide": System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(AppContext.BaseDirectory,"START-HERE.html")){UseShellExecute=true});break;
             case "connectionStore": services.SaveConnection(ReadConnection(data),ReadFlag(data,"enabled"));message="Settings saved.";break;

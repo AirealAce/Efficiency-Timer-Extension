@@ -99,6 +99,7 @@ Check(!shortcutSession.Engine.Snapshot.Timer.IsRunning&&shortcutEnd.OpenReflecti
 await PromotionTests.Run(Check);
 await PromptPolicyTests.Run(Check);
 await ServiceTests.Run(Check);
+await SuccessAudioTests.Run(Check);
 await AudioBehaviorTests.Run(Check);
 Console.WriteLine($"{passed} tests passed.");
 

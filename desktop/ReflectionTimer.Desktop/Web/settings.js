@@ -57,6 +57,8 @@ export function settingsUI({send, run, bind, view, announce}) {
     await displaySaving;await audio.flush();await volumeSaving;await send('saveAppearance',appearance());dirty.delete('appearance-form');dirtyFields.delete('appearance-form');
     if(dirty.has('volume-form')){await send('volume',{volume:Number($('app-volume').value),quiet:true});dirty.delete('volume-form');dirtyFields.delete('volume-form');}
     if(dirty.has('connection-form')){await send('connectionStore',connection());dirty.delete('connection-form');dirtyFields.delete('connection-form');populate('connection-form');}
+    // One success sound after every part of this explicit save has succeeded.
+    await send('settingsSaveComplete');
     announce('Settings saved.');
   }
   bind('save-settings',saveSettings);
