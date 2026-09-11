@@ -322,7 +322,14 @@ bind('skip-reflection',async()=>{
 });
 document.addEventListener('keydown',event=>{
   const submit=event.ctrlKey&&event.key==='Enter',dismiss=event.key==='Escape';
-  if(view!=='reflection'||(!submit&&!dismiss)||document.querySelector('dialog[open]'))return;
+  if(document.querySelector('dialog[open]'))return;
+  if(view==='main'&&dismiss){
+    event.preventDefault();
+    // Native App close hides and retains this document, just like Ctrl+Alt+T.
+    if(!event.repeat&&state)run(()=>send('close'));
+    return;
+  }
+  if(view!=='reflection'||(!submit&&!dismiss))return;
   // Cancel Enter's focused-button action as well (Save, Skip, Prev, or Next).
   event.preventDefault();
   if(event.repeat||!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
