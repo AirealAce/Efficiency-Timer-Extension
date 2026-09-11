@@ -76,6 +76,22 @@ static class NativeReflectionSmoke
                         Check(!reload.Visible,"Comma reopening an early-ended draft does not expose an empty editor");
                         await Until(()=>reload.Visible);var reloaded=await Read(reload);
                         Check(reloaded.GetProperty("draft").GetString()=="Early saved response"&&reloaded.GetProperty("reasonVisible").GetBoolean()&&reloaded.GetProperty("reason").GetString()=="Needed a break","Reopened early-ended popup has both saved text fields at its first native display");
+                        var broken=(PreviewWindow)typeof(PreviewApplication).GetMethod("Create",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(app,["reflection",id])!;
+                        typeof(PreviewWindow).GetMethod("ShowFailure",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(broken,["Synthetic target editor load failure."]);
+                        try {await app.NavigateReflectionAsync(earlyId,-1);throw new Exception("Failed native target was treated as ready");}
+                        catch(InvalidOperationException error) when(error.Message=="Synthetic target editor load failure."){}
+                        await UntilAsync(async()=>!JsonDocument.Parse(await Script(reload,"document.querySelector('#reflection-text').readOnly")).RootElement.GetBoolean());
+                        Check(broken.IsDisposed&&!reload.IsDisposed&&reload.Visible&&Windows(app).Count(w=>w.View=="reflection")==1,"A real native target-load failure removes the hidden failed view and retains the current visible editor");
+                        Check((await Read(reload)).GetProperty("draft").GetString()=="Early saved response"&&session.Engine.Snapshot.Outbox.Count==0,"Failed native navigation leaves the original saved text editable and unsent");
+                        await Script(reload,"document.querySelector('#reflection-prev').click()");
+                        await Until(()=>reload.IsDisposed&&Windows(app).Any(w=>w.PromptId==id&&w.Visible));
+                        var retried=Windows(app).Single(w=>w.PromptId==id);
+                        Check((await Read(retried)).GetProperty("draft").GetString()=="Typed just before zero"&&Windows(app).Count(w=>w.View=="reflection")==1,"Retry after a native load failure creates a fresh, populated editor successfully");
+                        typeof(PreviewWindow).GetMethod("ShowFailure",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(retried,["Synthetic running editor failure."]);
+                        try {await ((IReflectionPromptWindow)retried).PrepareHandoffAsync();throw new Exception("Failed current editor was auto-sent");}
+                        catch(InvalidOperationException error) when(error.Message.Contains("not sent or replaced")){}
+                        ((IReflectionPromptWindow)retried).ResumeEditing();
+                        Check(session.Engine.Snapshot.Outbox.Count==0&&session.Engine.Snapshot.Prompts.Any(p=>p.Id==id),"An unavailable current editor cannot silently auto-send its older saved snapshot");
                         Check(session.Engine.Snapshot.Connection.WebAppUrl==""&&session.Engine.Snapshot.Timer.Volume==0,"Native smoke test stays muted and disconnected throughout");
                     } catch(Exception error){failure=error;}
                     finally {await app.CloseMainAsync();}

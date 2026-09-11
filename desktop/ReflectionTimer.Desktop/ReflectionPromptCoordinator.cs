@@ -3,7 +3,8 @@ namespace ReflectionTimer.Accessible;
 internal interface IReflectionPromptWindow
 {
     Guid ReflectionId { get; }
-    Task PrepareAutoSendAsync();
+    // Freeze editing and durably save the current draft; this never submits it.
+    Task PrepareHandoffAsync();
     void ResumeEditing();
     void CloseAfterSave();
 }
@@ -44,7 +45,7 @@ internal sealed class ReflectionPromptCoordinator(PreviewSession session,
                 if(stopping?.Invoke()==true)return;
                 var window=openWindows().FirstOrDefault(w=>w.ReflectionId==prior.Id);
                 try {
-                    if(window is not null)await window.PrepareAutoSendAsync();
+                    if(window is not null)await window.PrepareHandoffAsync();
                     if(session.AutoSendReflection(prior.Id))queued();
                     window?.CloseAfterSave();
                 } catch {window?.ResumeEditing();throw;}
@@ -54,7 +55,7 @@ internal sealed class ReflectionPromptCoordinator(PreviewSession session,
         try {
             foreach(var previous in openWindows().Where(w=>w.ReflectionId!=id).ToArray()) {
                 prepared.Add(previous);
-                await previous.PrepareAutoSendAsync();
+                await previous.PrepareHandoffAsync();
             }
             if(stopping?.Invoke()==true||!session.Engine.Snapshot.Prompts.Any(p=>p.Id==id))return;
             // The host preloads the target, then closes previous editors before

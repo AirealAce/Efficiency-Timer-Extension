@@ -103,7 +103,7 @@ static class PromptPolicyTests
         public Guid ReflectionId=>id;
         internal Func<Task> Prepare=()=>Task.CompletedTask;
         internal int Resumed;
-        public Task PrepareAutoSendAsync()=>Prepare();
+        public Task PrepareHandoffAsync()=>Prepare();
         public void ResumeEditing()=>Resumed++;
         public void CloseAfterSave()=>close();
     }

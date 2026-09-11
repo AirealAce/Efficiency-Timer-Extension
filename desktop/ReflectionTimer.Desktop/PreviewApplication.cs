@@ -95,7 +95,9 @@ internal sealed class PreviewApplication : ApplicationContext
             window.VisibleChanged+=(_,_)=>PublishAppViewVisibility();
             window.Resize+=(_,_)=>PublishAppViewVisibility();
         }
-        window.FormClosed += (_, _) => { windows.Remove(window); if (active == window) active = null; };
+        // A preload can fail before a native handle exists; disposing that hidden
+        // form does not necessarily raise FormClosed. Never retain dead editors.
+        window.Disposed += (_, _) => { windows.Remove(window); if (active == window) active = null; };
         return window;
     }
     internal void Open(string view, Guid? prompt = null, bool timerPage=false, bool sessionCompleted=false)
@@ -111,14 +113,20 @@ internal sealed class PreviewApplication : ApplicationContext
     private async Task OpenReflectionAsync(Guid id,bool activate,bool sessionCompleted=false)
     {
         try {await promptCoordinator.OpenAsync(id,activate,()=>closing,sessionCompleted);}
-        catch {Announce("The previous reflection could not be saved. It stays open; the new reflection is saved under Pending reflections. Try opening it again.");}
+        catch {Announce("The reflection could not be opened. Existing drafts are retained; any current editor stays open. Try Pending reflections again.");}
     }
     internal Task NavigateReflectionAsync(Guid from,int direction)=>promptCoordinator.NavigateAsync(from,direction,()=>closing);
     private async Task ShowReflection(Guid id,bool activate)
     {
         var window=windows.FirstOrDefault(w=>w.View=="reflection"&&w.PromptId==id);
         if(window is null){window=Create("reflection",id);window.ApplyPosition();}
-        await window.PrepareReflectionAsync();
+        try {await window.PrepareReflectionAsync();}
+        catch {
+            // Failed hidden targets must not replace the working editor or stay
+            // in the shortcut/navigation window list. A retry gets a fresh view.
+            if(!window.IsDisposed&&!window.Visible)window.CloseAfterSave();
+            throw;
+        }
         if(closing||window.IsDisposed||!Session.Engine.Snapshot.Prompts.Any(p=>p.Id==id)){if(!window.IsDisposed)window.CloseAfterSave();return;}
         foreach(var previous in windows.Where(w=>w.View=="reflection"&&w!=window).ToArray())previous.CloseAfterSave();
         if(activate){WindowActivation.Focus(window);if(WindowActivation.CanReceiveFocus(window))window.FocusControls();}

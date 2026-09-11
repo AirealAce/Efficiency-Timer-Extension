@@ -17,7 +17,11 @@ static class SessionDraftTests
                 session.Engine.SetScheduleOverlap(ending=="scheduled"?ScheduleOverlapPolicy.EndWithReflection:ScheduleOverlapPolicy.Ask);
                 var schedule=session.Engine.SaveSchedule(null,now.AddSeconds(5),30,false,50);
                 now=now.AddSeconds(5);session.Tick();
-                if(ending=="schedule-choice")session.Engine.ResolveSchedule(schedule,ScheduleDecision.StartNow);
+                if(ending=="schedule-choice"){
+                    var result=session.Execute("resolveSchedule",JsonSerializer.SerializeToElement(new{id=schedule,decision=(int)ScheduleDecision.StartNow}));
+                    opened=result.OpenReflection;
+                    check(result.SessionCompleted,"Starting a due schedule through the UI reports completion for the reflection policy");
+                }
             } else if(ending=="early") {
                 now=now.AddSeconds(10);opened=session.Execute("end",JsonSerializer.SerializeToElement(new{})).OpenReflection;
             } else {
@@ -28,7 +32,7 @@ static class SessionDraftTests
             var early=ending is "early" or "scheduled" or "schedule-choice";
             check(prompt.Id==id&&!prompt.IsCheckIn&&prompt.CheckInSessionId is null&&prompt.Draft=="Same-session saved response","Completion promotes the same draft ID instead of making a blank or duplicate prompt: "+ending);
             check(prompt.EndedEarly==early&&Reason(session,id)==early,"Reason visibility follows this session's completion, not a restarted or scheduled timer: "+ending);
-            if(ending is "early" or "pause-at-deadline")check(opened==id,"Completion command opens the promoted reflection ID: "+ending);
+            if(ending is "early" or "pause-at-deadline" or "schedule-choice")check(opened==id,"Completion command opens the promoted reflection ID: "+ending);
             session.Engine.SaveDraft(id,"Last keystroke after completion","Updated reason");
             check(session.Engine.Snapshot.Prompts.Single().Draft=="Last keystroke after completion","In-flight draft saves still address the same reflection after completion: "+ending);
             var actual=prompt.ActualDurationSeconds;
@@ -51,6 +55,12 @@ static class SessionDraftTests
         check(JsonSerializer.Serialize(current.Engine.Snapshot)==before,"Failed completion storage preserves all existing drafts and the timer atomically");
         memory.Fail=false;current.Tick();
         check(current.Engine.Snapshot.Prompts.Count==2&&current.Engine.Snapshot.Prompts.Last().Draft==""&&current.Engine.Snapshot.Prompts.First().Draft=="Earlier session","A different session never inherits an older session's reflection text");
+        var pausedStore=new MemoryStore();var pausedSession=new PreviewSession(pausedStore,()=>clock);
+        pausedSession.Engine.Start(20,false,50);clock=clock.AddMilliseconds(8123);pausedSession.Engine.Pause();
+        var pausedTimer=pausedSession.Engine.Snapshot.Timer;
+        clock=clock.AddDays(1);var afterRestart=new PreviewSession(pausedStore,()=>clock);afterRestart.Tick();
+        check(afterRestart.Engine.Snapshot.Timer==pausedTimer&&TimerEngine.IsPaused(afterRestart.Engine.Snapshot.Timer),"A paused session survives reopening and later ticks with its precise remaining time unchanged");
+        check(afterRestart.Engine.Snapshot.Prompts.Count==0&&afterRestart.Engine.Snapshot.Outbox.Count==0,"Reopening a paused session does not finish it or create/send a reflection");
     }
     private static bool Reason(PreviewSession session,Guid id)=>JsonSerializer.SerializeToElement(session.View(),PreviewSession.Json)
         .GetProperty("prompts").EnumerateArray().Single(p=>p.GetProperty("id").GetGuid()==id).GetProperty("showEarlyEndReason").GetBoolean();

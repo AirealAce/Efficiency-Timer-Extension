@@ -15,14 +15,15 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     private readonly WebView2 browser = new() { Dock = DockStyle.Fill, AccessibleName = "Reflection Timer" };
     private bool ready, allowClose, requestingClose;
     private Task? initialization;
+    private string? reflectionLoadError;
     private readonly TaskCompletionSource reflectionReady=new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private bool autoSending;
+    private bool handoffInProgress;
     bool IReflectionShortcutTarget.IsForegroundReflection => View=="reflection" && ReflectionTimer.Desktop.WindowActivation.IsForeground(this);
-    void IReflectionShortcutTarget.FocusOrSaveDraft(){if(!autoSending&&!requestingClose)Post(new{type="reflectionShortcut"});}
+    void IReflectionShortcutTarget.FocusOrSaveDraft(){if(!handoffInProgress&&!requestingClose)Post(new{type="reflectionShortcut"});}
     void IReflectionShortcutTarget.FocusReflection()=>app.Open("reflection",PromptId);
     Guid IReflectionPromptWindow.ReflectionId => PromptId!.Value;
-    async Task IReflectionPromptWindow.PrepareAutoSendAsync(){autoSending=true;await FlushDraftAsync(freeze:true);}
-    void IReflectionPromptWindow.ResumeEditing(){autoSending=false;Post(new{type="resumeReflection"});}
+    async Task IReflectionPromptWindow.PrepareHandoffAsync(){handoffInProgress=true;await FlushDraftAsync(freeze:true);}
+    void IReflectionPromptWindow.ResumeEditing(){handoffInProgress=false;Post(new{type="resumeReflection"});}
     void IReflectionPromptWindow.CloseAfterSave()=>CloseAfterSave();
     private bool focusOnReady, selectTimerOnReady;
     private (ReflectionTimer.Core.AppColorTheme Theme,bool Contrast)? appliedTheme;
@@ -32,7 +33,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · 4.1.4" : view == "compact" ? "Reflection Timer — Compact view · 4.1.4" : "Reflection Timer — Session end · 4.1.4";
+        Text = view == "main" ? "Reflection Timer — App view · 4.1.5" : view == "compact" ? "Reflection Timer — Compact view · 4.1.5" : "Reflection Timer — Session end · 4.1.5";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         var state=app.Session.Engine.Snapshot;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(228, 200) : new(560, state.Prompts.Any(p=>p.Id==prompt&&ReflectionTimer.Core.TimerEngine.ShowEarlyEndReason(p,state.Timer,app.Session.Engine.Now))?525:440);
@@ -59,7 +60,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
             if (allowClose) return;
             e.Cancel = true;
             if (View == "main") { Hide(); return; }
-            if(autoSending)return;
+            if(handoffInProgress)return;
             if (requestingClose) return;
             requestingClose = true;
             try { await FlushDraftAsync(); if(View=="compact") app.Session.Engine.SetFloatingTimer(false); CloseAfterSave(); }
@@ -79,12 +80,14 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     internal async Task PrepareReflectionAsync()
     {
         if(View!="reflection"||IsDisposed)return;
+        if(reflectionLoadError is {} previousError)throw new InvalidOperationException(previousError);
         // Load the themed editor and its saved text before exposing the native
         // window. Reopening no longer flashes an empty/default-colored WebView.
         _=Handle;_=browser.Handle;
         await (initialization??=InitializeAsync());
         try {await reflectionReady.Task.WaitAsync(TimeSpan.FromSeconds(15));}
-        catch(TimeoutException){ShowFailure("The reflection editor did not finish loading. Close and reopen this prompt. Your saved draft is retained.");}
+        catch(TimeoutException error){throw new InvalidOperationException("The reflection editor did not finish loading. Your current draft is retained; try opening the pending reflection again.",error);}
+        if(reflectionLoadError is {} loadError)throw new InvalidOperationException(loadError);
     }
     internal void ApplyWindowTheme()
     {
@@ -141,6 +144,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     private void ShowFailure(string text)
     {
         if (IsDisposed) return;
+        if(View=="reflection")reflectionLoadError=text;
         browser.Visible = false;
         var explanation = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, Text = text, AccessibleName = "App startup error", Font = new("Segoe UI", 12) };
         Controls.Add(explanation); explanation.BringToFront(); explanation.Focus();
@@ -157,7 +161,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
             requestId = root.GetProperty("requestId").GetString();
             if (requestId is null || requestId.Length > 64) throw new ArgumentException("Invalid request.");
             var action = root.GetProperty("action").GetString() ?? "";
-            if(autoSending && action is "queue" or "skip" or "close" or "navigateReflection")throw new InvalidOperationException("This reflection is being saved before another prompt opens.");
+            if(handoffInProgress && action is "queue" or "skip" or "close" or "navigateReflection")throw new InvalidOperationException("This reflection is being saved before another prompt opens.");
             var data = root.GetProperty("data");
             if (action == "ready") {
                 ready = true; Post(new { type = "init", view = View, promptId = PromptId, state = app.Session.View(), appViewVisible = app.AppViewVisible });
@@ -189,7 +193,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
                 ApplyTopMost();
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.4";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.5";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }
@@ -226,6 +230,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     }
     internal async Task FlushDraftAsync(bool freeze=false)
     {
+        if(freeze&&reflectionLoadError is not null)throw new InvalidOperationException("This editor is unavailable, so its reflection was not sent or replaced. Close and reopen it to recover the saved draft.");
         if(flush is {} pending)await pending.Task.WaitAsync(TimeSpan.FromSeconds(10));
         if (View != "reflection" || !ready || IsDisposed) return;
         var request = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
