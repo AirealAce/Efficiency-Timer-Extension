@@ -1,4 +1,4 @@
-# Reflection Timer 4.1.13
+# Reflection Timer 4.1.14
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 

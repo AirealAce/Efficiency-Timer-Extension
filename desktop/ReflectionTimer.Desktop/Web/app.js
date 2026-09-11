@@ -314,12 +314,23 @@ for(const [id,direction] of [['reflection-prev',-1],['reflection-next',1]])bind(
   try {await saveDraft();await send('navigateReflection',{direction});}
   finally {setReflectionBusy(false);}
 });
-bind('skip-reflection',async()=>{clearTimeout(saveDelay);await saving.catch(()=>{});queued=true;try{await send('skip',{id:promptId});}catch(e){queued=false;throw e;}});
+bind('skip-reflection',async()=>{
+  if(view!=='reflection'||!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
+  savingAndClosing=true;setReflectionBusy(reflectionBusy);clearTimeout(saveDelay);
+  try {await saving.catch(()=>{});queued=true;await send('skip',{id:promptId});}
+  catch(e){queued=false;savingAndClosing=false;setReflectionBusy(reflectionBusy);throw e;}
+});
 document.addEventListener('keydown',event=>{
-  if(view!=='reflection'||!event.ctrlKey||event.key!=='Enter'||document.querySelector('dialog[open]'))return;
+  const submit=event.ctrlKey&&event.key==='Enter',dismiss=event.key==='Escape';
+  if(view!=='reflection'||(!submit&&!dismiss)||document.querySelector('dialog[open]'))return;
   // Cancel Enter's focused-button action as well (Save, Skip, Prev, or Next).
   event.preventDefault();
-  if(!event.repeat)$('reflection-form').requestSubmit();
+  if(event.repeat||!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
+  // Inspect both fields, including a reason retained after natural completion.
+  const empty=['reflection-text','early-reason'].every(id=>$(id).value.length===0);
+  if(empty)$('skip-reflection').click();
+  else if(dismiss)$('later').click();
+  else $('reflection-form').requestSubmit();
 });
 if(view==='main')$('schedule-start').value=localDateTime(Date.now()+3600000);
 run(()=>send('ready'));
