@@ -1,6 +1,6 @@
 // Real browser keyboard events with synthetic native replies; no installed data.
 module.exports = async function selectAnnouncements(context, initial, settings, check) {
-  const page = await context.newPage();
+  let page = await context.newPage();
   try {
     await page.goto('https://reflection-timer.invalid/index.html?view=main');
     await page.waitForFunction(() => window.previewMessages.some(m => m.action === 'ready'));
@@ -81,6 +81,14 @@ module.exports = async function selectAnnouncements(context, initial, settings, 
 
     // Three rapid edits with delayed native replies used to clear dirty state
     // after the first reply, allowing the second reply to overwrite the third.
+    // Use a fresh page so an unrelated unsaved field cannot mask that race.
+    await page.close();page=await context.newPage();
+    await page.goto('https://reflection-timer.invalid/index.html?view=main');
+    await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
+    await page.evaluate(({initial,settings})=>{
+      window.previewDispatch({type:'init',state:initial});
+      window.previewDispatch({type:'settings',settings});
+    },{initial,settings});
     await page.getByRole('tab',{name:'Settings',exact:true}).click();
     await page.evaluate(settings=>{
       window.selectSaved=structuredClone(settings);window.selectReplies=[];
@@ -97,11 +105,12 @@ module.exports = async function selectAnnouncements(context, initial, settings, 
       };
       document.querySelector('#theme').value='0';
     },settings);
-    await theme.focus();await theme.press('ArrowDown');await theme.press('ArrowDown');await theme.press('ArrowDown');
+    const raceTheme=page.locator('#theme');
+    await raceTheme.focus();await raceTheme.press('ArrowDown');await raceTheme.press('ArrowDown');await raceTheme.press('ArrowDown');
     for(let i=0;i<3;i++){
       await page.waitForFunction(()=>window.selectReplies.length>0);
       await page.evaluate(()=>window.finishSelectReply());
-      check(await theme.inputValue()==='3','Delayed settings reply '+(i+1)+' preserves the latest theme selection');
+      check(await raceTheme.inputValue()==='3','Delayed settings reply '+(i+1)+' preserves the latest theme selection');
     }
     await page.waitForFunction(()=>document.querySelector('body > [data-select-announcement]').textContent==='Glamour selected.');
     check(await page.evaluate(()=>window.selectSaved.theme===3),'Rapid dropdown changes persist the final selected theme');
