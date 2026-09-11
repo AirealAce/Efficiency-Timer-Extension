@@ -86,6 +86,7 @@ public sealed class PreviewSession
                 threshold = state.Timer.LowTime.ThresholdSeconds ?? AudioSettings.From(state).LowTimeThresholdSeconds,
                 low=LowView(state.Timer.LowTime,AudioSettings.From(state).LowTimeThresholdSeconds) },
             prompts = state.Prompts.Select(p => new { p.Id, p.IsCheckIn, p.EndedEarly, p.Draft, p.EarlyEndReason,
+                showEarlyEndReason=TimerEngine.ShowEarlyEndReason(p,state.Timer,Engine.Now),
                 allotted = SpeakTime(p.DurationSeconds), actual = p.ActualDurationSeconds is { } actual ? SpeakTime(actual) : "Unavailable",
                 completed = DateTimeOffset.FromUnixTimeMilliseconds(p.CompletedAt).ToLocalTime().ToString("g") }),
             schedules = state.Schedules.Select(s => new { s.Id, start = DateTimeOffset.FromUnixTimeMilliseconds(s.StartTime).ToLocalTime().ToString("g"),
@@ -104,7 +105,7 @@ public sealed class PreviewSession
         var before = Engine.Snapshot;
         Engine.Advance();
         var after = Engine.Snapshot;
-        if (after.Prompts.Any(p => before.Prompts.All(old => old.Id != p.Id)))
+        if (after.Prompts.Any(p => !p.IsCheckIn&&before.Prompts.All(old => old.IsCheckIn||old.Id != p.Id)))
             Announcement?.Invoke("Session finished. A reflection is available under Pending reflections.");
         else if (!before.Timer.IsRunning && after.Timer.IsRunning) Announcement?.Invoke("Scheduled timer started.");
     }
@@ -124,7 +125,11 @@ public sealed class PreviewSession
                 }
                 return Execute("toggle",JsonSerializer.SerializeToElement(new{seconds=duration,repeat=state.Timer.AutoRestart,lowTime=state.Timer.LowTime.Enabled},Json));
             case "toggle":
-                if (state.Timer.IsRunning) { Engine.Pause(); return new("Timer paused."); }
+                if (state.Timer.IsRunning) {
+                    Engine.Pause();
+                    var completed=Engine.Snapshot.Prompts.FirstOrDefault(p=>!p.IsCheckIn&&state.Prompts.All(old=>old.IsCheckIn||old.Id!=p.Id));
+                    return new(completed is null?"Timer paused.":"Session ended. Reflection opened.",completed?.Id);
+                }
                 var seconds = Number(data, "seconds", 1, TimerEngine.MaxDuration);
                 if (TimerEngine.IsPaused(state.Timer) && seconds == state.Timer.DurationSeconds) Engine.Resume();
                 else Engine.Start(seconds, Flag(data, "repeat"), state.Timer.Volume, state.Timer.AutoRestartUntil, lowTime:state.Timer.LowTime with {Enabled=Flag(data,"lowTime")});
@@ -139,9 +144,9 @@ public sealed class PreviewSession
                 Engine.SetLowTime(ReadLow(data,state.Timer.LowTime));
                 return new("Low-time warning saved.");
             case "end":
-                var previous = state.Prompts.Select(p => p.Id).ToHashSet();
+                var previous = state.Prompts.Where(p=>!p.IsCheckIn).Select(p => p.Id).ToHashSet();
                 if (!Engine.EndEarly()) throw new ArgumentException("Start or resume the timer before ending it early.");
-                return new("Session ended. Reflection opened.", Engine.Snapshot.Prompts.First(p => !previous.Contains(p.Id)).Id);
+                return new("Session ended. Reflection opened.", Engine.Snapshot.Prompts.First(p => !p.IsCheckIn&&!previous.Contains(p.Id)).Id);
             case "checkIn": return new("Check-in opened.", Engine.CheckIn());
             case "testReflection": return new("Practice reflection opened.", Engine.TestPrompt());
             case "openReflection":

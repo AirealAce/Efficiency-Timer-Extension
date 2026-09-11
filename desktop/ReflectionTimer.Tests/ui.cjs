@@ -426,11 +426,11 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     const promptLayout=await page.context().newPage();
     for(const [kind,isCheckIn,endedEarly] of [['Session-end',false,false],['Check-in',true,false],['Early-end',false,true]]){
       // CSS viewports inside the existing 560px-wide native prompt at common display scales.
-      for(const [scale,width,height] of [[100,544,endedEarly?486:401],[125,432,endedEarly?381:313],[150,357,endedEarly?311:254]]){
+      for(const [scale,width,height] of [[100,544,isCheckIn||endedEarly?486:401],[125,432,isCheckIn||endedEarly?381:313],[150,357,isCheckIn||endedEarly?311:254]]){
         await promptLayout.setViewportSize({width,height});
         await promptLayout.goto('https://reflection-timer.invalid/index.html?view=reflection');
         await promptLayout.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
-        const promptState={...initial,prompts:[{id:'layout',isCheckIn,endedEarly,draft:'',earlyEndReason:'',actual:'12 minutes 34 seconds',allotted:'15 minutes',completed:'9/10/2026 3:45 PM'}]};
+        const promptState={...initial,prompts:[{id:'layout',isCheckIn,endedEarly,showEarlyEndReason:isCheckIn||endedEarly,draft:'',earlyEndReason:'',actual:'12 minutes 34 seconds',allotted:'15 minutes',completed:'9/10/2026 3:45 PM'}]};
         await promptLayout.evaluate(state=>window.previewDispatch({type:'init',state,promptId:'layout'}),promptState);
         for(const theme of [0,1,2,3]){
           await promptLayout.evaluate(state=>window.previewDispatch({type:'state',state}),{...promptState,theme});
@@ -447,6 +447,7 @@ const web = path.resolve(__dirname, '../ReflectionTimer.Desktop/Web');
     }
     await promptLayout.close();
     await require('./reflection-save.cjs')(context,initial,check);
+    await require('./reflection-lifecycle.cjs')(context,initial,check);
     check(failures.length===0,'No browser JavaScript errors');
     console.log(`${count} browser checks passed.`);
   } finally { await browser.close(); }

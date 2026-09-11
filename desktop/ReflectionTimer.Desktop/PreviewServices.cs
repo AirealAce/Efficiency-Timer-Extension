@@ -20,7 +20,7 @@ public sealed class PreviewServices : IDisposable
     {
         this.engine = engine; this.sheets = sheets ?? new(); sounds = new(audio);
         Log = new(directory) { Enabled = engine.Snapshot.LoggingEnabled };
-        foreach (var prompt in engine.Snapshot.Prompts) sounded.Add(prompt.Id);
+        foreach (var prompt in engine.Snapshot.Prompts.Where(p=>!p.IsCheckIn)) sounded.Add(prompt.Id);
         engine.ActivityRecorded += Record;
         engine.LowTimeReached += LowTime;
         engine.Changed += Changed;
@@ -28,16 +28,20 @@ public sealed class PreviewServices : IDisposable
     private void Record(Activity activity)
     {
         Log.Record(activity);
-        if (activity.Event is "timer.paused" or "timer.reset" or "timer.started" or "timer.endedEarly" or "timer.deadline") sounds.Stop(SoundEvent.LowTime);
+        // Session transitions must let the incoming sound's playback behavior
+        // decide whether existing audio is mixed, ducked, or interrupted.
+        var state=engine.Snapshot;
+        var completed=state.Prompts.Any(p=>!p.IsCheckIn&&!sounded.Contains(p.Id));
+        if (!completed&&(activity.Event is "timer.paused" or "timer.reset" or "timer.started" ||
+            activity.Event=="timer.lowTimeOptions"&&!state.Timer.LowTime.Enabled)) sounds.Stop(SoundEvent.LowTime);
     }
     private void LowTime(TimerState timer) => _ = Play(SoundEvent.LowTime, false, AudioSettings.From(engine.Snapshot).ForLowTime(timer.LowTime));
     private void Changed()
     {
         var state = engine.Snapshot; Log.Enabled = state.LoggingEnabled;
         sounds.UpdateVolumes(state.Timer.Volume, AudioSettings.From(state));
-        if (!state.Timer.LowTime.Enabled) sounds.Stop(SoundEvent.LowTime);
         var added = state.Prompts.Any(p => !p.IsCheckIn && !sounded.Contains(p.Id));
-        sounded.UnionWith(state.Prompts.Select(p => p.Id)); sounded.IntersectWith(state.Prompts.Select(p => p.Id));
+        sounded.UnionWith(state.Prompts.Where(p=>!p.IsCheckIn).Select(p => p.Id)); sounded.IntersectWith(state.Prompts.Select(p => p.Id));
         if (added) _ = Play(SoundEvent.SessionEnd);
     }
     public object Settings()

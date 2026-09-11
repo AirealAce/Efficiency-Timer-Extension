@@ -22,6 +22,7 @@ static class PromptPolicyTests
         var coordinator=new ReflectionPromptCoordinator(session,()=>windows.Cast<IReflectionPromptWindow>().ToArray(),(id,activate)=>{
             if(windows.All(w=>w.ReflectionId!=id))Window(id);shown.Add(id);
             maxEnds=Math.Max(maxEnds,windows.Count(w=>session.Engine.Snapshot.Prompts.Any(p=>p.Id==w.ReflectionId&&!p.IsCheckIn)));
+            return Task.CompletedTask;
         },()=>queued++);
         var openSecond=coordinator.OpenAsync(second,false);var openThird=coordinator.OpenAsync(third,false);
         check(shown.Count==0&&windows.Single()==old,"Concurrent prompt arrivals wait for the previous browser draft to flush");

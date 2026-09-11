@@ -1,6 +1,6 @@
 # Reflection Timer
 
-The primary app is now the accessible Windows desktop version, **4.1.1**. Its HTML interface runs inside a C# / WebView2 desktop host and uses the existing timer engine, encrypted storage, MP3 library, and Google Sheets receiver.
+The primary app is now the accessible Windows desktop version, **4.1.2**. Its HTML interface runs inside a C# / WebView2 desktop host and uses the existing timer engine, encrypted storage, MP3 library, and Google Sheets receiver.
 
 ## Project folders
 
@@ -31,7 +31,7 @@ App, the floating timer, and session-end prompts are separate windows. Compact a
 
 After a session ends, the clock returns to the duration in the input boxes. Paused sessions keep their remaining time, and Auto-start continues the next countdown. Entering zero in every duration field keeps the preview at 0:00.
 
-Compact, Time-only, and reflection prompts each have an independent **always on top** setting, enabled by default. Reflection prompts stay out of Alt+Tab. Only one session-end prompt is shown at a time: a new prompt saves and queues the previous open response, including a blank response, marked **auto-sent**. An early-ended response retains both flags and its reason. Check-ins remain separate. Failed local saves keep the old prompt open and the new prompt pending; offline delivery stays in Outbox.
+Compact, Time-only, and reflection prompts each have an independent **always on top** setting, enabled by default. Reflection prompts stay out of Alt+Tab. Only one session-end prompt is shown at a time: a new prompt saves and queues the previous open response, including a blank response, marked **auto-sent**. An early-ended response retains both flags and its reason. An unsent check-in becomes the same session's completion prompt, keeping its saved text and editor; older sessions' check-ins remain separate. Failed local saves keep the old prompt open and the new prompt pending; offline delivery stays in Outbox.
 
 Existing Sheets receivers show `[auto-sent]` in the reflection text. The bundled receiver 2.8.0 puts `auto-sent` beside `ended early` in column E and keeps the original response in B, including an empty response. A full 5,000-character automatic response requires that receiver update; older deployments keep it safely in Outbox until updated. Receiver code changes are not deployed automatically.
 

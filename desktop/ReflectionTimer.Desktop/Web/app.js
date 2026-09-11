@@ -66,11 +66,13 @@ function saveDraft() {
 }
 function renderReflection() {
   const prompt = state.prompts.find(p => p.id === promptId);
-  if (!prompt || loadedPrompt === prompt.id) return;
-  loadedPrompt = prompt.id;
+  if (!prompt) return;
   setText($('reflection-heading'), prompt.isCheckIn ? 'Session check-in' : 'Session reflection');
   setText($('reflection-context'), `${prompt.endedEarly ? 'Session ended early. ' : ''}${prompt.actual} spent; ${prompt.allotted} allotted. ${prompt.completed}.`);
-  $('reason-group').hidden = !prompt.endedEarly;
+  $('reason-group').hidden = !(prompt.showEarlyEndReason??prompt.endedEarly);
+  if($('reason-group').hidden&&document.activeElement===$('early-reason')&&document.hasFocus())$('reflection-text').focus();
+  if(loadedPrompt===prompt.id)return;
+  loadedPrompt = prompt.id;
   $('reflection-text').value = prompt.draft; $('early-reason').value = prompt.earlyEndReason;
   lastSavedDraft = JSON.stringify(draft());
 }
@@ -195,6 +197,7 @@ bridge?.addEventListener('message', event => {
     if(view==='reflection'){$('reflection-text').focus();$('reflection-text').selectionStart=$('reflection-text').value.length;}
     else {const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
     settings.load();
+    if(view==='reflection')run(()=>send('reflectionReady'));
   } else if (message.type === 'state') render(message.state);
   else if (message.type === 'clock') {if(state?.clock.status==='Running'||!durationDirty)setText($('visual-clock'),formatClock(message.clock.seconds));}
   else if (message.type === 'timeRead') snapshot(message.clock,true);

@@ -41,9 +41,9 @@ internal sealed class PreviewApplication : ApplicationContext
         session.Announcement += Announce;
         session.DurationDraftChanged+=parts=>Broadcast(new{type="durationDraft",parts});
         pulse.Tick += (_, _) => {
-            try { var pending=Session.Engine.Snapshot.Prompts.Select(p=>p.Id).ToHashSet();
+            try { var pending=Session.Engine.Snapshot.Prompts.Where(p=>!p.IsCheckIn).Select(p=>p.Id).ToHashSet();
                 Session.Tick();
-                foreach(var prompt in Session.Engine.Snapshot.Prompts.Where(p=>!pending.Contains(p.Id))) _ = OpenReflectionAsync(prompt.Id,false);
+                foreach(var prompt in Session.Engine.Snapshot.Prompts.Where(p=>!p.IsCheckIn&&!pending.Contains(p.Id))) _ = OpenReflectionAsync(prompt.Id,false);
                 ApplyTheme();Broadcast(new { type = "clock", clock = Session.Clock() }); tickFailed = false;
                 if (Session.Engine.Now - lastSync >= 15000) { lastSync = Session.Engine.Now; _ = Services.Sync(); if(shortcuts?.RetryUnavailable()==true)Broadcast(new{type="shortcuts",shortcuts=ShortcutState}); } }
             catch { if (!tickFailed) Announce("Could not save a timer update. Your last saved state is retained."); tickFailed = true; }
@@ -113,12 +113,14 @@ internal sealed class PreviewApplication : ApplicationContext
         try {await promptCoordinator.OpenAsync(id,activate,()=>closing);}
         catch {Announce("The previous reflection could not be saved. It stays open; the new reflection is saved under Pending reflections. Try opening it again.");}
     }
-    private void ShowReflection(Guid id,bool activate)
+    private async Task ShowReflection(Guid id,bool activate)
     {
         var window=windows.FirstOrDefault(w=>w.View=="reflection"&&w.PromptId==id);
         if(window is null){window=Create("reflection",id);window.ApplyPosition();}
+        await window.PrepareReflectionAsync();
+        if(closing||window.IsDisposed||!Session.Engine.Snapshot.Prompts.Any(p=>p.Id==id)){if(!window.IsDisposed)window.CloseAfterSave();return;}
         if(activate){WindowActivation.Focus(window);if(WindowActivation.CanReceiveFocus(window))window.FocusControls();}
-        else window.Show();
+        else if(!window.Visible)window.Show();
     }
     internal void ApplyDisplayPreferences()
     {

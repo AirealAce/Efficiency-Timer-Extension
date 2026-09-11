@@ -3,12 +3,15 @@ using ReflectionTimer.Accessible;
 using ReflectionTimer.Core;
 using ReflectionTimer.Desktop;
 
+if(args.Contains("--native-smoke")){NativeReflectionSmoke.Run();return;}
+
 var passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception(name); passed++; Console.WriteLine("PASS " + name); }
 JsonElement Data(object value) => JsonSerializer.SerializeToElement(value, PreviewSession.Json);
 var now = DateTimeOffset.Now;
 DefaultsThemeShortcutTests.Run(Check);
 ClockDisplayTests.Run(Check);
+SessionDraftTests.Run(Check);
 var store = new MemoryStore { State = PreviewSession.SampleState(now) };
 var session = new PreviewSession(store, () => now, isolatedProfile: true);
 Check(session.Engine.Snapshot.Timer.DurationSeconds == 900 && session.Engine.Snapshot.Timer.LowTime.Enabled, "Fresh timer and low-time defaults");
@@ -94,6 +97,7 @@ Check(!shortcutSession.Engine.Snapshot.Timer.IsRunning&&shortcutEnd.OpenReflecti
 await PromotionTests.Run(Check);
 await PromptPolicyTests.Run(Check);
 await ServiceTests.Run(Check);
+await AudioBehaviorTests.Run(Check);
 Console.WriteLine($"{passed} tests passed.");
 
 sealed class MemoryStore : IStateStore

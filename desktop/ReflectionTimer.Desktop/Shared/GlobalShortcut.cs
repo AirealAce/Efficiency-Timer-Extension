@@ -100,13 +100,14 @@ internal static class WindowActivation
 
     public static void Focus(Form window)
     {
+        if(IsForeground(window))return;
         window.Show();
         if (window.WindowState == FormWindowState.Minimized) ShowWindow(window.Handle, 9); // SW_RESTORE
         else ShowWindow(window.Handle, 5); // SW_SHOW also overrides a hidden launcher STARTUPINFO on first open.
         // An owned modal (including a native file picker) must remain in front of
         // its disabled owner; never dismiss it or redirect typing behind it.
         if (CanReceiveFocus(window)) {
-            window.BringToFront(); window.Activate(); SetForegroundWindow(window.Handle);
+            window.BringToFront(); SetForegroundWindow(window.Handle);
         }
         else {
             var popup = GetLastActivePopup(window.Handle);

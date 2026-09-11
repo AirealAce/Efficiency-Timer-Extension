@@ -11,7 +11,7 @@ internal interface IReflectionPromptWindow
 // Serialize replacements so no second session-end window opens until the first
 // draft is durably queued. Network delivery is independent of this handoff.
 internal sealed class ReflectionPromptCoordinator(PreviewSession session,
-    Func<IReadOnlyList<IReflectionPromptWindow>> openWindows, Action<Guid,bool> show, Action queued)
+    Func<IReadOnlyList<IReflectionPromptWindow>> openWindows, Func<Guid,bool,Task> show, Action queued)
 {
     private readonly SemaphoreSlim gate = new(1,1);
     internal async Task OpenAsync(Guid id, bool activate, Func<bool>? stopping = null)
@@ -32,7 +32,7 @@ internal sealed class ReflectionPromptCoordinator(PreviewSession session,
                     catch { previous.ResumeEditing();throw; }
                 }
             }
-            if(stopping?.Invoke()!=true&&session.Engine.Snapshot.Prompts.Any(p=>p.Id==id))show(id,activate);
+            if(stopping?.Invoke()!=true&&session.Engine.Snapshot.Prompts.Any(p=>p.Id==id))await show(id,activate);
         }
         finally {gate.Release();}
     }

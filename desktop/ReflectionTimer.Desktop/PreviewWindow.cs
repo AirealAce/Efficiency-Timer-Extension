@@ -14,10 +14,12 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
     private readonly PreviewApplication app;
     private readonly WebView2 browser = new() { Dock = DockStyle.Fill, AccessibleName = "Reflection Timer" };
     private bool ready, allowClose, requestingClose;
+    private Task? initialization;
+    private readonly TaskCompletionSource reflectionReady=new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool autoSending;
     bool IReflectionShortcutTarget.IsForegroundReflection => View=="reflection" && ReflectionTimer.Desktop.WindowActivation.IsForeground(this);
     void IReflectionShortcutTarget.FocusOrSaveDraft(){if(!autoSending&&!requestingClose)Post(new{type="reflectionShortcut"});}
-    void IReflectionShortcutTarget.FocusReflection(){ReflectionTimer.Desktop.WindowActivation.Focus(this);if(ReflectionTimer.Desktop.WindowActivation.CanReceiveFocus(this))FocusControls();}
+    void IReflectionShortcutTarget.FocusReflection()=>app.Open("reflection",PromptId);
     Guid IReflectionPromptWindow.ReflectionId => PromptId!.Value;
     async Task IReflectionPromptWindow.PrepareAutoSendAsync(){autoSending=true;await FlushDraftAsync(freeze:true);}
     void IReflectionPromptWindow.ResumeEditing(){autoSending=false;Post(new{type="resumeReflection"});}
@@ -30,9 +32,10 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · 4.1.1" : view == "compact" ? "Reflection Timer — Compact view · 4.1.1" : "Reflection Timer — Session end · 4.1.1";
+        Text = view == "main" ? "Reflection Timer — App view · 4.1.2" : view == "compact" ? "Reflection Timer — Compact view · 4.1.2" : "Reflection Timer — Session end · 4.1.2";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
-        Size = view == "main" ? new(940, 810) : view == "compact" ? new(228, 200) : new(560, app.Session.Engine.Snapshot.Prompts.Any(p=>p.Id==prompt&&p.EndedEarly)?525:440);
+        var state=app.Session.Engine.Snapshot;
+        Size = view == "main" ? new(940, 810) : view == "compact" ? new(228, 200) : new(560, state.Prompts.Any(p=>p.Id==prompt&&ReflectionTimer.Core.TimerEngine.ShowEarlyEndReason(p,state.Timer,app.Session.Engine.Now))?525:440);
         MinimumSize = view == "main" ? new(420, 400) : view == "compact" ? new(80,32) : new(420,360);
         if(view=="compact") { FormBorderStyle=FormBorderStyle.None; ShowInTaskbar=false; MaximizeBox=false; MinimizeBox=false; }
         if(view=="reflection") { ShowInTaskbar=false; MinimizeBox=false; }
@@ -40,6 +43,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         Location = view == "main" ? ViewPlacement.Calculate(area,Size,1)
             : new(view == "compact" ? area.Left + 16 : Math.Max(area.Left, area.Right - Width - 16), Math.Max(area.Top, area.Bottom - Height - 16));
         ApplyTopMost();
+        browser.Visible=view!="reflection";
         Controls.Add(browser);
         // WebView2 handles browser accelerators before DOM keyboard events.
         // Defer the message until its synchronous key handler has returned.
@@ -49,7 +53,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
             BeginInvoke(()=>Post(new{type="cycleAppTab",backward}));
         };
         HandleCreated+=(_,_)=>ApplyWindowTheme();
-        Shown += async (_, _) => await InitializeAsync();
+        Shown += async (_, _) => await (initialization??=InitializeAsync());
         ResizeEnd+=(_,_)=>{if(View=="compact")try{app.Session.Engine.SetFloatingTimerPosition(Left,Top);}catch{app.Announce("Could not save the compact position.");}};
         FormClosing += async (_, e) => {
             if (allowClose) return;
@@ -72,6 +76,16 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         if(TopMost!=top)TopMost=top;
     }
     internal void FocusControls(bool timerPage=false){if(!ready){focusOnReady=true;selectTimerOnReady=timerPage;return;}Post(new{type=View=="compact"?"expandCompact":View=="reflection"?"focusReflection":"focusTimer",selectTimer=timerPage});}
+    internal async Task PrepareReflectionAsync()
+    {
+        if(View!="reflection"||IsDisposed)return;
+        // Load the themed editor and its saved text before exposing the native
+        // window. Reopening no longer flashes an empty/default-colored WebView.
+        _=Handle;_=browser.Handle;
+        await (initialization??=InitializeAsync());
+        try {await reflectionReady.Task.WaitAsync(TimeSpan.FromSeconds(15));}
+        catch(TimeoutException){ShowFailure("The reflection editor did not finish loading. Close and reopen this prompt. Your saved draft is retained.");}
+    }
     internal void ApplyWindowTheme()
     {
         if(!IsHandleCreated)return;var theme=app.Session.Engine.Snapshot.Theme;var contrast=SystemInformation.HighContrast;
@@ -130,6 +144,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         browser.Visible = false;
         var explanation = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, Text = text, AccessibleName = "App startup error", Font = new("Segoe UI", 12) };
         Controls.Add(explanation); explanation.BringToFront(); explanation.Focus();
+        reflectionReady.TrySetResult();
     }
     private async void Receive(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
@@ -152,6 +167,10 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
                 Reply(requestId); return;
             }
             if (action == "flushed") { flush?.TrySetResult(); Reply(requestId); return; }
+            if (action == "reflectionReady") {
+                if(View!="reflection")throw new ArgumentException("Only a reflection can finish loading its editor.");
+                browser.Visible=true;Reply(requestId);reflectionReady.TrySetResult();return;
+            }
             if (action == "flushFailed") { flush?.TrySetException(new IOException("Draft save failed.")); Reply(requestId); return; }
             if (action == "compact") { app.Open("compact"); Reply(requestId); return; }
             if(action=="toggleCompact") { app.ToggleCompactVisibility();Reply(requestId);return; }
@@ -170,7 +189,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
                 ApplyTopMost();
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.1";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.2";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }

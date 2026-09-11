@@ -44,10 +44,21 @@ public sealed class TimerEngine
         0, timer.DurationSeconds * 1000L);
     public static int ActualSeconds(TimerState timer, long now) =>
         (int)((timer.DurationSeconds * 1000L - RemainingMilliseconds(timer, now)) / 1000);
-    private static ReflectionPrompt CompletedPrompt(TimerState timer, long now) =>
-        new(Guid.NewGuid(), Math.Min(timer.EndTime ?? now, now), timer.DurationSeconds, timer.Volume, false) {
-            ActualDurationSeconds = ActualSeconds(timer, now), EndedEarly = RemainingMilliseconds(timer, now) > 0
+    private static void CompletePrompt(AppState state, long now)
+    {
+        var timer=state.Timer;
+        var draft=state.Prompts.LastOrDefault(p=>p.IsCheckIn&&p.CheckInSessionId is {} sessionId&&sessionId==timer.SessionId);
+        // Promote the same session's unsent draft in place. Keeping its ID lets
+        // an already-open editor keep even keystrokes still awaiting autosave.
+        var completed=new ReflectionPrompt(draft?.Id??Guid.NewGuid(),Math.Min(timer.EndTime??now,now),timer.DurationSeconds,timer.Volume,false,draft?.Draft??"") {
+            ActualDurationSeconds=ActualSeconds(timer,now),EndedEarly=RemainingMilliseconds(timer,now)>0,
+            EarlyEndReason=draft?.EarlyEndReason??""
         };
+        if(draft is not null)state.Prompts.RemoveAll(p=>p.Id==draft.Id);
+        state.Prompts.Add(completed);
+    }
+    public static bool ShowEarlyEndReason(ReflectionPrompt prompt, TimerState timer, long now) => prompt.EndedEarly ||
+        (prompt.IsCheckIn&&prompt.CheckInSessionId is {} id&&id==timer.SessionId&&HasUnfinishedSession(timer)&&RemainingMilliseconds(timer,now)>0);
 
     private void Change(string name, Action<AppState> mutation, Guid? id = null, long? value = null)
     {
@@ -107,7 +118,7 @@ public sealed class TimerEngine
         // A click can arrive after the deadline but before the one-second UI tick.
         // Pausing must not silently discard that completed session's reflection.
         if (s.Timer.IsRunning && s.Timer.EndTime <= now)
-            s.Prompts.Add(CompletedPrompt(s.Timer, now));
+            CompletePrompt(s, now);
         s.Timer = s.Timer with { IsRunning = false, RemainingSeconds = Remaining(s.Timer, now),
             PausedRemainingMilliseconds = RemainingMilliseconds(s.Timer, now), EndTime = null };
     });
@@ -155,7 +166,7 @@ public sealed class TimerEngine
                 ExpireAutoRestart(s, now);
                 // Commit the reflection and the next timer state together. A failed
                 // save must not stop the timer or create an unpersisted popup.
-                s.Prompts.Add(CompletedPrompt(s.Timer, now));
+                CompletePrompt(s, now);
                 ApplyScheduleHandoff(s, now, completed: true);
             }, value: Remaining(state.Timer, now));
             return true;
@@ -182,7 +193,7 @@ public sealed class TimerEngine
                 ExpireAutoRestart(s, now);
                 if (lowTimeDue) s.Timer = s.Timer with { LowTimePlayed = true };
                 if (!deadlineDue) return;
-                if (completed) s.Prompts.Add(CompletedPrompt(s.Timer, now));
+                if (completed) CompletePrompt(s, now);
                 ApplyScheduleHandoff(s, now, completed);
             }, value: dueCount(state, now));
             if (lowTimeDue) lowTimeAlert = state.Timer;
@@ -211,7 +222,7 @@ public sealed class TimerEngine
                 } : x).ToList();
                 return;
             }
-            state.Prompts.Add(CompletedPrompt(state.Timer, now));
+            CompletePrompt(state, now);
         }
 
         // Merge the latest newly due appointment into the existing queue before
@@ -240,7 +251,7 @@ public sealed class TimerEngine
         }
         else if (decision == ScheduleDecision.Skip) s.Schedules.RemoveAll(x => x.Id == id);
         else {
-            if (HasUnfinishedSession(s.Timer)) s.Prompts.Add(CompletedPrompt(s.Timer, Now));
+            if (HasUnfinishedSession(s.Timer)) CompletePrompt(s, Now);
             StartScheduled(s, session, Now);
         }
     }, id, (int)decision);
@@ -307,9 +318,9 @@ public sealed class TimerEngine
         if (earlyEndReason?.Length > 1000) earlyEndReason = earlyEndReason[..1000];
         lock (gate)
         {
-            if (!state.Prompts.Any(x => x.Id == id && (x.Draft != text || (x.EndedEarly && earlyEndReason is not null && x.EarlyEndReason != earlyEndReason)))) return;
+            if (!state.Prompts.Any(x => x.Id == id && (x.Draft != text || ((x.EndedEarly||x.IsCheckIn) && earlyEndReason is not null && x.EarlyEndReason != earlyEndReason)))) return;
             Change("prompt.draftSaved", s => s.Prompts = s.Prompts.Select(x => x.Id == id ? x with {
-                Draft = text, EarlyEndReason = x.EndedEarly ? earlyEndReason ?? x.EarlyEndReason : ""
+                Draft = text, EarlyEndReason = x.EndedEarly||x.IsCheckIn ? earlyEndReason ?? x.EarlyEndReason : x.EarlyEndReason
             } : x).ToList(), id);
         }
     }
