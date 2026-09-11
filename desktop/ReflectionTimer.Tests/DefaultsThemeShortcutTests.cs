@@ -7,7 +7,7 @@ static class DefaultsThemeShortcutTests
 {
     internal static void Run(Action<bool,string> check)
     {
-        var store=new MemoryStore();
+        var store=new MemoryStore{State=AppState.CreateDefault()};
         var session=new PreviewSession(store);
         var state=session.Engine.Snapshot;
         check(state.Timer.DurationSeconds==900&&state.Timer.RemainingSeconds==900&&!state.Timer.IsRunning&&!state.Timer.AutoRestart&&state.Timer.AutoRestartUntil is null,"New profile starts ready at 15 minutes with repeat and cutoff off");
@@ -18,8 +18,16 @@ static class DefaultsThemeShortcutTests
         foreach(var (kind,file) in new[]{(SoundEvent.SessionEnd,"popup.mp3"),(SoundEvent.Success,"pokemon-level-up.mp3"),(SoundEvent.Failure,"kirby-out-of-health.mp3"),(SoundEvent.LowTime,"pokemon-battle-trainer.mp3")}){
             var sound=AudioSettings.From(state).For(kind);
             var path=SoundLibrary.Resolve(kind,sound)!;
-            check(Path.GetFileName(path)==file&&File.Exists(path)&&sound.Behavior==SoundBehavior.Disruptive&&sound.Volume==100&&!sound.FadeOutEnabled&&sound.FadeOutAfterSeconds==10,"Bundled MP3 and original playback defaults for "+kind);
+            var behavior=kind==SoundEvent.SessionEnd?SoundBehavior.Assertive:kind==SoundEvent.LowTime?SoundBehavior.Polite:SoundBehavior.Disruptive;
+            check(Path.GetFileName(path)==file&&File.Exists(path)&&sound.Behavior==behavior&&sound.Volume==100&&!sound.FadeOutEnabled&&sound.FadeOutAfterSeconds==10,"Bundled MP3 and requested new-user playback defaults for "+kind);
         }
+        var newProfile=new EncryptedStore(Path.Combine(Path.GetTempPath(),"ReflectionTimer-Uncreated-"+Guid.NewGuid().ToString("N"))).Load();
+        check(AudioSettings.From(newProfile).SessionEnd.Behavior==SoundBehavior.Assertive&&AudioSettings.From(newProfile).LowTime.Behavior==SoundBehavior.Polite,"A new encrypted profile receives the requested audio behaviors");
+        var legacy=JsonSerializer.Deserialize<AppState>("{}",DataJson.Options)!;
+        check(Enum.GetValues<SoundEvent>().All(kind=>AudioSettings.From(legacy).For(kind).Behavior==SoundBehavior.Disruptive),"Existing profiles without audio settings retain their legacy playback behaviors");
+        var chosen=legacy with{Audio=new(){SessionEnd=new(){Behavior=SoundBehavior.Polite},LowTime=new(){Behavior=SoundBehavior.Assertive}}};
+        var roundTrip=DataJson.Clone(chosen);
+        check(AudioSettings.From(roundTrip).SessionEnd.Behavior==SoundBehavior.Polite&&AudioSettings.From(roundTrip).LowTime.Behavior==SoundBehavior.Assertive,"Existing explicit audio choices are never replaced by new-user defaults");
         foreach(var track in SoundLibrary.Tracks){
             var path=Path.Combine(AppContext.BaseDirectory,SoundLibrary.FileName(track));
             check(Mp3AudioBackend.ValidateCustomFile(path)==path,"Packaged audio decodes: "+SoundLibrary.FileName(track));

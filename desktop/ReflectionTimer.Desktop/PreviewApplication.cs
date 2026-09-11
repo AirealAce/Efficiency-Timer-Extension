@@ -43,14 +43,14 @@ internal sealed class PreviewApplication : ApplicationContext
         pulse.Tick += (_, _) => {
             try { var pending=Session.Engine.Snapshot.Prompts.Where(p=>!p.IsCheckIn).Select(p=>p.Id).ToHashSet();
                 Session.Tick();
-                foreach(var prompt in Session.Engine.Snapshot.Prompts.Where(p=>!p.IsCheckIn&&!pending.Contains(p.Id))) _ = OpenReflectionAsync(prompt.Id,false);
+                foreach(var prompt in Session.Engine.Snapshot.Prompts.Where(p=>!p.IsCheckIn&&!pending.Contains(p.Id))) _ = OpenReflectionAsync(prompt.Id,false,true);
                 ApplyTheme();Broadcast(new { type = "clock", clock = Session.Clock() }); tickFailed = false;
                 if (Session.Engine.Now - lastSync >= 15000) { lastSync = Session.Engine.Now; _ = Services.Sync(); if(shortcuts?.RetryUnavailable()==true)Broadcast(new{type="shortcuts",shortcuts=ShortcutState}); } }
             catch { if (!tickFailed) Announce("Could not save a timer update. Your last saved state is retained."); tickFailed = true; }
         };
         shortcuts = new PreviewShortcuts([
             Shortcut(0, ()=>{compactPresses.Reset();if(WindowActivation.IsForeground(MainForm))MainForm.Hide();else Open("main");}),
-            Shortcut(1, ()=>{compactPresses.Reset();var result=Session.Execute("startOrEnd",System.Text.Json.JsonSerializer.SerializeToElement(new{}));if(result.OpenReflection is {} id)Open("reflection",id);}),
+            Shortcut(1, ()=>{compactPresses.Reset();var result=Session.Execute("startOrEnd",System.Text.Json.JsonSerializer.SerializeToElement(new{}));if(result.OpenReflection is {} id)Open("reflection",id,sessionCompleted:result.SessionCompleted);}),
             Shortcut(2, ()=>{compactPresses.Reset();var compact=windows.FirstOrDefault(w=>w.View=="compact");if(compact is null)Open("compact");else if(compact.IsTimeOnly)ToggleCompactVisibility();else compact.Post(new{type="shrinkCompact"});}),
             Shortcut(3, ()=>{if(compactPresses.Press())Open("main",timerPage:true);else Open("compact");}),
             Shortcut(4, ()=>{compactPresses.Reset();ReflectionShortcut.Invoke(windows.Where(w=>w.View=="reflection"&&!w.IsDisposed),OpenPendingOrCheckIn);})
@@ -98,9 +98,9 @@ internal sealed class PreviewApplication : ApplicationContext
         window.FormClosed += (_, _) => { windows.Remove(window); if (active == window) active = null; };
         return window;
     }
-    internal void Open(string view, Guid? prompt = null, bool timerPage=false)
+    internal void Open(string view, Guid? prompt = null, bool timerPage=false, bool sessionCompleted=false)
     {
-        if(view=="reflection"){if(prompt is {} id)_ = OpenReflectionAsync(id,true);return;}
+        if(view=="reflection"){if(prompt is {} id)_ = OpenReflectionAsync(id,true,sessionCompleted);return;}
         if(view=="compact" && !Session.Engine.Snapshot.ShowFloatingTimer) Session.Engine.SetFloatingTimer(true);
         var window = windows.FirstOrDefault(w => w.View == view && w.PromptId == prompt);
         if(window is null){window=Create(view,prompt);window.ApplyPosition();}
@@ -108,17 +108,19 @@ internal sealed class PreviewApplication : ApplicationContext
         WindowActivation.Focus(window);
         if(WindowActivation.CanReceiveFocus(window))window.FocusControls(timerPage);
     }
-    private async Task OpenReflectionAsync(Guid id,bool activate)
+    private async Task OpenReflectionAsync(Guid id,bool activate,bool sessionCompleted=false)
     {
-        try {await promptCoordinator.OpenAsync(id,activate,()=>closing);}
+        try {await promptCoordinator.OpenAsync(id,activate,()=>closing,sessionCompleted);}
         catch {Announce("The previous reflection could not be saved. It stays open; the new reflection is saved under Pending reflections. Try opening it again.");}
     }
+    internal Task NavigateReflectionAsync(Guid from,int direction)=>promptCoordinator.NavigateAsync(from,direction,()=>closing);
     private async Task ShowReflection(Guid id,bool activate)
     {
         var window=windows.FirstOrDefault(w=>w.View=="reflection"&&w.PromptId==id);
         if(window is null){window=Create("reflection",id);window.ApplyPosition();}
         await window.PrepareReflectionAsync();
         if(closing||window.IsDisposed||!Session.Engine.Snapshot.Prompts.Any(p=>p.Id==id)){if(!window.IsDisposed)window.CloseAfterSave();return;}
+        foreach(var previous in windows.Where(w=>w.View=="reflection"&&w!=window).ToArray())previous.CloseAfterSave();
         if(activate){WindowActivation.Focus(window);if(WindowActivation.CanReceiveFocus(window))window.FocusControls();}
         else if(!window.Visible)window.Show();
     }

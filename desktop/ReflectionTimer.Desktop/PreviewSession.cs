@@ -128,7 +128,7 @@ public sealed class PreviewSession
                 if (state.Timer.IsRunning) {
                     Engine.Pause();
                     var completed=Engine.Snapshot.Prompts.FirstOrDefault(p=>!p.IsCheckIn&&state.Prompts.All(old=>old.IsCheckIn||old.Id!=p.Id));
-                    return new(completed is null?"Timer paused.":"Session ended. Reflection opened.",completed?.Id);
+                    return new(completed is null?"Timer paused.":"Session ended. Reflection opened.",completed?.Id,SessionCompleted:completed is not null);
                 }
                 var seconds = Number(data, "seconds", 1, TimerEngine.MaxDuration);
                 if (TimerEngine.IsPaused(state.Timer) && seconds == state.Timer.DurationSeconds) Engine.Resume();
@@ -146,7 +146,7 @@ public sealed class PreviewSession
             case "end":
                 var previous = state.Prompts.Where(p=>!p.IsCheckIn).Select(p => p.Id).ToHashSet();
                 if (!Engine.EndEarly()) throw new ArgumentException("Start or resume the timer before ending it early.");
-                return new("Session ended. Reflection opened.", Engine.Snapshot.Prompts.First(p => !p.IsCheckIn&&!previous.Contains(p.Id)).Id);
+                return new("Session ended. Reflection opened.", Engine.Snapshot.Prompts.First(p => !p.IsCheckIn&&!previous.Contains(p.Id)).Id,SessionCompleted:true);
             case "checkIn": return new("Check-in opened.", Engine.CheckIn());
             case "testReflection": return new("Practice reflection opened.", Engine.TestPrompt());
             case "openReflection":
@@ -193,7 +193,9 @@ public sealed class PreviewSession
                 if (reviewed.LocalOnly || !Flag(data,"confirmed")) throw new ArgumentException("Confirm that this entry is already in your sheet first.");
                 Engine.MarkAlreadySent(reviewed.Id); return new("Entry marked already sent.");
             case "resolveSchedule":
-                Engine.ResolveSchedule(Id(data),(ScheduleDecision)Number(data,"decision",0,2)); return new("Schedule choice saved.");
+                Engine.ResolveSchedule(Id(data),(ScheduleDecision)Number(data,"decision",0,2));
+                var resolved=Engine.Snapshot.Prompts.FirstOrDefault(p=>!p.IsCheckIn&&state.Prompts.All(old=>old.IsCheckIn||old.Id!=p.Id));
+                return new("Schedule choice saved.",resolved?.Id,SessionCompleted:resolved is not null);
             default: throw new ArgumentException("Unknown preview command.");
         }
     }
@@ -211,4 +213,4 @@ public sealed class PreviewSession
     private static string Text(JsonElement data, string name, int max) => data.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { } text && text.Length <= max
         ? text : throw new ArgumentException($"Enter valid {name} (up to {max} characters).");
 }
-public record CommandResult(string Message, Guid? OpenReflection = null, bool Close = false);
+public record CommandResult(string Message, Guid? OpenReflection = null, bool Close = false, bool SessionCompleted = false);

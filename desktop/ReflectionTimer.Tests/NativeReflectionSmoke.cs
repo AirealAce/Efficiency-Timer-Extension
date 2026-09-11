@@ -51,6 +51,31 @@ static class NativeReflectionSmoke
                         Check(completed.GetProperty("focused").GetString()=="reflection-text"&&!completed.GetProperty("reasonVisible").GetBoolean(),"Natural completion hides the reason and leaves focus in the response box");
                         ((IReflectionShortcutTarget)reopened).FocusOrSaveDraft();await Until(()=>reopened.IsDisposed);
                         Check(session.Engine.Snapshot.Prompts.Single() is {IsCheckIn:false,EndedEarly:false,Draft:"Typed just before zero"}&&session.Engine.Snapshot.Outbox.Count==0,"Completed native draft saves under the original ID without a duplicate entry");
+                        session.Engine.SetAutoSendIncompleteReflections(false);
+                        session.Engine.Start(60,false,0,lowTime:new(){Enabled=false});now=now.AddSeconds(5);
+                        var result=session.Execute("startOrEnd",JsonSerializer.SerializeToElement(new{}));
+                        var earlyId=result.OpenReflection!.Value;
+                        Check(result.SessionCompleted&&session.Engine.Snapshot.Prompts.Single(p=>p.Id==earlyId).EndedEarly,"Backtick ending before zero identifies a genuine early-ended reflection");
+                        app.Open("reflection",earlyId,sessionCompleted:result.SessionCompleted);
+                        await Until(()=>Windows(app).Any(w=>w.PromptId==earlyId&&w.Visible));
+                        var earlyWindow=Windows(app).Single(w=>w.PromptId==earlyId);
+                        Check((await Read(earlyWindow)).GetProperty("reasonVisible").GetBoolean(),"Native early-ended popup shows the smaller reason-for-ending-early box");
+                        await Script(earlyWindow,"document.querySelector('#reflection-text').value='Early saved response';document.querySelector('#reflection-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#early-reason').value='Needed a break';document.querySelector('#early-reason').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#reflection-prev').click()");
+                        await Until(()=>earlyWindow.IsDisposed&&Windows(app).Any(w=>w.PromptId==id&&w.Visible));
+                        var previous=Windows(app).Single(w=>w.PromptId==id);
+                        Check(Windows(app).Count(w=>w.View=="reflection"&&w.Visible)==1&&(await Read(previous)).GetProperty("draft").GetString()=="Typed just before zero","Prev displays only one native reflection and restores the older saved response");
+                        Check(session.Engine.Snapshot.Prompts.Single(p=>p.Id==earlyId) is {Draft:"Early saved response",EarlyEndReason:"Needed a break"}&&session.Engine.Snapshot.Outbox.Count==0,"Native navigation flushes both newly typed fields without submitting them");
+                        Check(!(await Read(previous)).GetProperty("reasonVisible").GetBoolean(),"Prev to a naturally completed session hides only that session's reason box");
+                        await Script(previous,"document.querySelector('#reflection-next').click()");
+                        await Until(()=>previous.IsDisposed&&Windows(app).Any(w=>w.PromptId==earlyId&&w.Visible));
+                        var next=Windows(app).Single(w=>w.PromptId==earlyId);var restored=await Read(next);
+                        Check(Windows(app).Count(w=>w.View=="reflection"&&w.Visible)==1&&restored.GetProperty("reasonVisible").GetBoolean()&&restored.GetProperty("reason").GetString()=="Needed a break"&&restored.GetProperty("draft").GetString()=="Early saved response","Next restores the early-ended response and reason already populated in a single visible window");
+                        ((IReflectionShortcutTarget)next).FocusOrSaveDraft();await Until(()=>next.IsDisposed);
+                        app.Open("reflection",session.ReflectionForShortcut());
+                        var reload=Windows(app).Single(w=>w.PromptId==earlyId);
+                        Check(!reload.Visible,"Comma reopening an early-ended draft does not expose an empty editor");
+                        await Until(()=>reload.Visible);var reloaded=await Read(reload);
+                        Check(reloaded.GetProperty("draft").GetString()=="Early saved response"&&reloaded.GetProperty("reasonVisible").GetBoolean()&&reloaded.GetProperty("reason").GetString()=="Needed a break","Reopened early-ended popup has both saved text fields at its first native display");
                         Check(session.Engine.Snapshot.Connection.WebAppUrl==""&&session.Engine.Snapshot.Timer.Volume==0,"Native smoke test stays muted and disconnected throughout");
                     } catch(Exception error){failure=error;}
                     finally {await app.CloseMainAsync();}

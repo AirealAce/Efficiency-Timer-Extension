@@ -17,6 +17,7 @@ function setReflectionBusy(busy){
   $('reflection-form').setAttribute('aria-busy',String(blocked));
   ['reflection-text','early-reason'].forEach(id=>$(id).readOnly=blocked);
   document.querySelectorAll('#reflection-form button').forEach(button=>available(button,!blocked));
+  renderReflectionNavigation();
 }
 let saveDelay, saving = Promise.resolve(), queued = false, lastSavedDraft = '', scheduleEdit, deliveryDecision, selectedSchedule, selectedOutbox;
 
@@ -65,6 +66,7 @@ function saveDraft() {
   return saving;
 }
 function renderReflection() {
+  renderReflectionNavigation();
   const prompt = state.prompts.find(p => p.id === promptId);
   if (!prompt) return;
   setText($('reflection-heading'), prompt.isCheckIn ? 'Session check-in' : 'Session reflection');
@@ -75,6 +77,13 @@ function renderReflection() {
   loadedPrompt = prompt.id;
   $('reflection-text').value = prompt.draft; $('early-reason').value = prompt.earlyEndReason;
   lastSavedDraft = JSON.stringify(draft());
+}
+function renderReflectionNavigation(){
+  const index=state?.prompts.findIndex(p=>p.id===promptId)??-1,count=state?.prompts.length??0;
+  const ready=index>=0&&!queued&&!reflectionBusy&&!savingAndClosing;
+  available($('reflection-prev'),ready&&index>0);
+  available($('reflection-next'),ready&&index<count-1);
+  setText($('reflection-position'),index>=0?`Reflection ${index+1} of ${count}. Navigation saves your draft without sending it.`:'No pending reflection.');
 }
 function createTableRow(columns) {
   const row = document.createElement('tr');
@@ -276,6 +285,12 @@ bind('later',async()=>{
   savingAndClosing=true;setReflectionBusy(reflectionBusy);
   try {await saveDraft();await send('close');}
   catch(e){savingAndClosing=false;setReflectionBusy(reflectionBusy);throw e;}
+});
+for(const [id,direction] of [['reflection-prev',-1],['reflection-next',1]])bind(id,async()=>{
+  if(!loadedPrompt||queued||reflectionBusy||savingAndClosing)return;
+  setReflectionBusy(true);
+  try {await saveDraft();await send('navigateReflection',{direction});}
+  finally {setReflectionBusy(false);}
 });
 bind('skip-reflection',async()=>{clearTimeout(saveDelay);await saving.catch(()=>{});queued=true;try{await send('skip',{id:promptId});}catch(e){queued=false;throw e;}});
 ['reflection-text','early-reason'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();$('reflection-form').requestSubmit();}}));

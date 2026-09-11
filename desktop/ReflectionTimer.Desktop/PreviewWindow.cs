@@ -32,7 +32,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
         this.app = app; View = view; PromptId = prompt;
         Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Information;
         browser.AccessibleName=view=="main"?"Reflection Timer App view":view=="compact"?"Reflection Timer Compact and Time-only view":"Reflection Timer Session end prompt";
-        Text = view == "main" ? "Reflection Timer — App view · 4.1.3" : view == "compact" ? "Reflection Timer — Compact view · 4.1.3" : "Reflection Timer — Session end · 4.1.3";
+        Text = view == "main" ? "Reflection Timer — App view · 4.1.4" : view == "compact" ? "Reflection Timer — Compact view · 4.1.4" : "Reflection Timer — Session end · 4.1.4";
         StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
         var state=app.Session.Engine.Snapshot;
         Size = view == "main" ? new(940, 810) : view == "compact" ? new(228, 200) : new(560, state.Prompts.Any(p=>p.Id==prompt&&ReflectionTimer.Core.TimerEngine.ShowEarlyEndReason(p,state.Timer,app.Session.Engine.Now))?525:440);
@@ -157,7 +157,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
             requestId = root.GetProperty("requestId").GetString();
             if (requestId is null || requestId.Length > 64) throw new ArgumentException("Invalid request.");
             var action = root.GetProperty("action").GetString() ?? "";
-            if(autoSending && action is "queue" or "skip" or "close")throw new InvalidOperationException("This reflection is being auto-sent before the next prompt opens.");
+            if(autoSending && action is "queue" or "skip" or "close" or "navigateReflection")throw new InvalidOperationException("This reflection is being saved before another prompt opens.");
             var data = root.GetProperty("data");
             if (action == "ready") {
                 ready = true; Post(new { type = "init", view = View, promptId = PromptId, state = app.Session.View(), appViewVisible = app.AppViewVisible });
@@ -189,11 +189,16 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
                 var width=ReadInt(data,"width",80,700);var height=ReadInt(data,"height",32,1000);
                 IsTimeOnly=ReadFlag(data,"tiny");
                 ApplyTopMost();
-                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.3";
+                Text="Reflection Timer — "+(IsTimeOnly?"Time-only":"Compact")+" view · 4.1.4";
                 ClientSize=new((int)Math.Ceiling(width*DeviceDpi/96d*browser.ZoomFactor),(int)Math.Ceiling(height*DeviceDpi/96d*browser.ZoomFactor));
                 ApplyPosition();Reply(requestId);return;
             }
             if (action == "main") { app.Open("main"); Reply(requestId); return; }
+            if(action=="navigateReflection") {
+                if(View!="reflection"||PromptId is not {} from)throw new ArgumentException("Navigate from a reflection window.");
+                var direction=ReadInt(data,"direction",-1,1);
+                await app.NavigateReflectionAsync(from,direction);Reply(requestId);return;
+            }
             if (action == "close") { Reply(requestId); Close(); return; }
             if (action == "readTime") {
                 var clock = app.Session.Clock(); Post(new { type = "timeRead", clock }); Reply(requestId); return;
@@ -206,7 +211,7 @@ internal sealed partial class PreviewWindow : Form, IReflectionPromptWindow, IRe
             var result = app.Session.Execute(action, data);
             Reply(requestId);
             if (result.Close) { CloseAfterSave(); app.Announce(result.Message); }
-            else if (result.OpenReflection is { } prompt) app.Open("reflection", prompt);
+            else if (result.OpenReflection is { } prompt) app.Open("reflection", prompt,sessionCompleted:result.SessionCompleted);
             else app.Announce(result.Message);
         }
         catch (Exception error) {

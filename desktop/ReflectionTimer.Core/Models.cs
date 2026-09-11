@@ -83,6 +83,12 @@ public record OutboxItem
 
 public record AppState
 {
+    // Only brand-new profiles use these defaults; deserialized legacy audio
+    // remains null and retains its original migration behavior.
+    public static AppState CreateDefault() => new() { Audio = new() {
+        SessionEnd = new() { Behavior = SoundBehavior.Assertive },
+        LowTime = new() { Behavior = SoundBehavior.Polite }
+    } };
     public int FormatVersion { get; init; } = 1;
     public TimerState Timer { get; set; } = new();
     public List<ScheduledSession> Schedules { get; set; } = [];
@@ -99,6 +105,7 @@ public record AppState
     public bool CompactAlwaysOnTop { get; set; } = true;
     public bool TimeOnlyAlwaysOnTop { get; set; } = true;
     public bool PromptAlwaysOnTop { get; set; } = true;
+    public bool AutoSendIncompleteReflections { get; set; } = true;
     public int? FloatingTimerLeft { get; set; }
     public int? FloatingTimerTop { get; set; }
     public FloatingTimerPlacement FloatingPlacement { get; set; } = FloatingTimerPlacement.BottomLeft;

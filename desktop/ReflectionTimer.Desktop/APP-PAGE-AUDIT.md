@@ -9,7 +9,7 @@ Compared against the original 3.12.9 `MainWindow.cs`, `Controls.cs`, `AudioContr
 | Timer | Auto-start next session and optional cutoff | Centered checkbox/date row; enabling a cutoff enables repeat. Disabling repeat clears the cutoff. |
 | Timer | Low on time audio, inherited/individual threshold, sound selection, preview, custom MP3 | Present. Threshold drafts survive background updates; individual sound and threshold are sent together. |
 | Timer | App sound slider | Restored and synchronized with the Settings slider. Keyboard changes reach the master-volume command. |
-| Timer | Test reflection prompt, Pending reflections, Mark issue, pending/unsent counts, floating visibility, Quit | Present. Pending reflections opens all waiting prompts. Closing App still hides to tray; Quit flushes drafts. |
+| Timer | Test reflection prompt, Pending reflections, Mark issue, pending/unsent counts, floating visibility, Quit | Present. Pending reflections opens the latest draft; Prev/Next traverse saved unsent drafts with only one visible reflection. Closing App still hides to tray; Quit flushes drafts. |
 | Scheduling | Overlap policy and explanation | Restored to this tab, with the original three choices. |
 | Scheduling | Start time, Duration, Auto-start, Auto-start cutoff, Sound, Low on time, Status | Original seven columns restored. Selection retains native table cells and stable row identities. |
 | Scheduling | Edit selected, Remove selected, Import extension schedules | One action row below the table. No repeated action buttons or added action column. |

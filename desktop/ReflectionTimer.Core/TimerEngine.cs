@@ -394,6 +394,7 @@ public sealed class TimerEngine
     public void MarkAlreadySent(Guid id) => Change("upload.confirmedByUser", s =>
         s.Outbox = s.Outbox.Select(x => x.Id == id && x.Status == DeliveryStatus.NeedsReview ? x with { Status = DeliveryStatus.Sent, ErrorKind = "" } : x).ToList(), id);
     public void SetFloatingTimer(bool visible) => Change("display.changed", s => s.ShowFloatingTimer = visible);
+    public void SetAutoSendIncompleteReflections(bool enabled) => Change("settings.saved", s => s.AutoSendIncompleteReflections = enabled);
     public void SetAlwaysOnTop(bool compact, bool timeOnly, bool prompt) => Change("display.changed", s => {
         s.CompactAlwaysOnTop = compact; s.TimeOnlyAlwaysOnTop = timeOnly; s.PromptAlwaysOnTop = prompt;
     });

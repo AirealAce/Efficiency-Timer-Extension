@@ -1,14 +1,18 @@
-# Reflection Timer 4.1.3
+# Reflection Timer 4.1.4
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 
 The four views, themes, audio controls, window positions and Ctrl+Alt shortcuts are retained. App and reflection prompts can coexist with either Compact or Time-only. Semantic HTML supports screen-reader web navigation; quiet countdown updates do not interrupt reading.
 
-Settings provides separate always-on-top switches for Compact, Time-only, and reflection prompts, all enabled by default. Prompts are excluded from Alt+Tab. A new session-end prompt auto-sends the previous open session-end draft (even blank), preserving any early-end status and reason. An unsent check-in is promoted into its own session's completion prompt under the same ID, preserving saved text and in-flight edits. Other sessions' check-ins stay separate; already-submitted entries are never copied or resent. Auto-send first commits to Outbox; failed local saves leave the old window editable and the new prompt pending. Network delivery uses the existing connection and retry rules.
+Settings provides separate always-on-top switches for Compact, Time-only, and reflection prompts, all enabled by default. Prompts are excluded from Alt+Tab. Only one reflection is visible at a time. Bottom-left Prev and Next save both draft fields locally before opening the adjacent pending reflection; browsing never submits it. At either end the unavailable button is disabled. Save and Save & send still close the current window without automatically opening another.
+
+Auto-send incomplete reflections when a session ends is checked by default and saves immediately. A new completion queues older unfinished session reflections (including blank or closed drafts), preserving early-end status and reason and marking them auto-sent. Turn it off to retain older drafts for navigation. The new completion, active check-ins, and the other test/real mode are excluded. Opening a saved or practice prompt never triggers auto-send. An unsent check-in is promoted into its own completion under the same ID, preserving saved text and in-flight edits. Already-submitted entries are never copied or resent. Auto-send first commits to Outbox; failed local saves leave the previous draft editable and the new prompt pending. Network delivery uses the existing connection and retry rules.
 
 The reason field is available while a check-in's session is still running/paused and for a genuine early ending. It disappears after natural completion, independently of any next session. Provisional reasons stay with the draft and are submitted only for an actual early ending. New reflection windows load their saved text and theme before becoming visible.
 
 At natural completion, early ending, and scheduled handoff, the session-end audio's behavior controls overlapping low-time audio: Polite mixes normally, Assertive reduces the other audio to 25% and restores it afterward, and Disruptive stops it. Explicit pause/reset/new-start, disabling low-time audio, or Stop all app audio can still stop playback.
+
+New installations default to Assertive session-end audio, Polite low-time audio, and Disruptive success/failure audio. Upgrades retain all saved choices, including legacy profiles without per-event audio settings. No personal audio paths or connection data are used as defaults.
 
 Compact has a two-line Auto/Start toggle that lights up when enabled. Screen readers announce it as the "Auto-start next session" toggle button; Space or Enter switches it without starting the timer. The narrower editor retains all three duration fields and the App, reset, start/pause, and end-session actions.
 

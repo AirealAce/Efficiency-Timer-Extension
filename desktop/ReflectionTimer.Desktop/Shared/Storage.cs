@@ -11,7 +11,7 @@ public sealed class EncryptedStore(string directory) : IStateStore
     public string? RecoveryNotice { get; private set; }
     public AppState Load()
     {
-        if (!File.Exists(path)) return new();
+        if (!File.Exists(path)) return AppState.CreateDefault();
         try { return Read<AppState>(path); }
         catch (Exception) when (File.Exists(path + ".bak"))
         {
