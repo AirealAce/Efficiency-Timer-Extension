@@ -27,6 +27,7 @@ function resize(){if(state)send('compactSize',{width:Math.ceil(document.body.get
 function mode(value){tiny=value;document.body.dataset.tiny=String(value);$('shrink').setAttribute('aria-label',value?'Hide compact timer':'Shrink to time-only view');$('expand').setAttribute('aria-label',value?'Expand compact view':'Open main timer page');['shrink','expand'].forEach(id=>$(id).title=$(id).getAttribute('aria-label'));}
 function focusDuration(){const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
 function expand(){revealed=true;mode(false);focusDuration();}
+function shrink(){revealed=false;mode(true);$('read-time').focus();}
 function snapshot(clock,speak=false){try{clock=displayClock(clock,['hours','minutes','seconds'].map(id=>$(id).value),dirty);}catch{}const text=`${clock.text} ${clock.status==='Finished'?'set':'remaining'}. ${clock.status}.`;setText($('time-snapshot'),`Time checked: ${text}`);if(speak)announce(text);}
 function render(next){const previous=state;state=next;document.documentElement.dataset.theme=String(state.theme??0);const running=state.clock.status==='Running';
   if(!previous&&state.durationDraft)sharedDuration(state.durationDraft);
@@ -49,7 +50,7 @@ bridge?.addEventListener('message',event=>{const m=event.data;if(m.type==='reply
   else if(m.type==='announcement')announce(m.message);
   else if(m.type==='durationDraft')sharedDuration(m.parts);
   else if(m.type==='expandCompact')expand();
-  else if(m.type==='shrinkCompact'){mode(true);$('read-time').focus();}
+  else if(m.type==='shrinkCompact')shrink();
   else if(m.type==='measureCompact')resize();
 });
 ['hours','minutes','seconds'].forEach(id=>{
@@ -69,8 +70,13 @@ bind('repeat',async()=>{
 });
 bind('read-time',()=>send('readTime'));bind('app',()=>send('main'));bind('end',()=>send('end'));
 bind('reset',async()=>{await send('reset',{seconds:duration()});dirty=false;fill(state.timer.durationSeconds);});
-bind('close',()=>send('close'));bind('shrink',()=>tiny?send('close'):mode(true));bind('expand',()=>tiny?expand():send('main'));
-document.addEventListener('keydown',event=>{if(event.key==='Escape'&&revealed&&state.clock.status==='Running'){mode(true);$('read-time').focus();}});
+bind('close',()=>send('close'));bind('shrink',()=>tiny?send('close'):shrink());bind('expand',()=>tiny?expand():send('main'));
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Escape'||!state||document.querySelector('dialog[open]'))return;
+  event.preventDefault();
+  // One press shrinks and focuses the clock; a second press hides the viewer.
+  if(!event.repeat)$('shrink').click();
+});
 window.addEventListener('blur',()=>{if(revealed&&state?.clock.status==='Running'){revealed=false;mode(true);}});
 new ResizeObserver(resize).observe(document.body);
 $('caption').addEventListener('pointerdown',event=>{if(event.button===0&&!event.target.closest('button'))run(()=>send('dragCompact'));});
