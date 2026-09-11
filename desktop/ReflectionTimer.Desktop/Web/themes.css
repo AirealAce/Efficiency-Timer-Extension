@@ -4,6 +4,9 @@
 :root[data-theme="2"]{--selection:#ff0;--selection-text:#000;--warning:#ff0;--decoration:#fff;color-scheme:dark}
 :root[data-theme="3"]{--selection:#e9d5f4;--selection-text:#4a1934;--warning:#714014;--decoration:#b77964}
 ::selection{background:var(--selection);color:var(--selection-text)}
+/* Draw inside the existing window footprint without affecting sizing or dragging. */
+body[data-view=compact],body[data-view=reflection]{position:relative}
+body[data-view=compact]::after,body[data-view=reflection]::after{content:"";position:absolute;inset:0;border:2px solid var(--border);z-index:20;pointer-events:none}
 tbody tr[data-selected=true]{background:var(--selection);color:var(--selection-text)}
 .timer-notice{color:var(--warning)!important}
 input:focus-visible,textarea:focus-visible,select:focus-visible{border-color:var(--accent)}
