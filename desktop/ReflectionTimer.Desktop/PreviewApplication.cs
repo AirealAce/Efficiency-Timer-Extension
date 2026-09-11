@@ -119,8 +119,11 @@ internal sealed class PreviewApplication : ApplicationContext
     private async Task ShowReflection(Guid id,bool activate)
     {
         var window=windows.FirstOrDefault(w=>w.View=="reflection"&&w.PromptId==id);
+        // Keep the visible browser and its accessibility objects alive while
+        // browsing. Prev/Next must not tear down one WebView2 and create another.
+        window??=windows.FirstOrDefault(w=>w.View=="reflection"&&w.Visible);
         if(window is null){window=Create("reflection",id);window.ApplyPosition();}
-        try {await window.PrepareReflectionAsync();}
+        try {if(window.PromptId!=id)await window.SwitchReflectionAsync(id);else await window.PrepareReflectionAsync();}
         catch {
             // Failed hidden targets must not replace the working editor or stay
             // in the shortcut/navigation window list. A retry gets a fresh view.

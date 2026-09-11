@@ -207,7 +207,19 @@ bridge?.addEventListener('message', event => {
     if(view==='reflection'){$('reflection-text').focus();$('reflection-text').selectionStart=$('reflection-text').value.length;}
     else {const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
     settings.load();
-    if(view==='reflection')run(()=>send('reflectionReady'));
+    if(view==='reflection')run(()=>send('reflectionReady',{id:promptId}));
+  } else if(message.type==='showReflection'&&view==='reflection') {
+    // The host flushed and froze both fields. Rebind the same document and
+    // controls to a saved reflection, keeping WebView2 alive across Prev/Next.
+    if(!message.state?.prompts?.some(p=>p.id===message.promptId)) {
+      run(()=>send('reflectionLoadFailed',{id:message.promptId}));return;
+    }
+    clearTimeout(saveDelay);promptId=message.promptId;loadedPrompt=undefined;
+    queued=false;savingAndClosing=false;
+    $('reflection-text').removeAttribute('aria-invalid');error('');
+    render(message.state);setText($('draft-status'),'Draft saved locally.');
+    $('reflection-text').focus();$('reflection-text').selectionStart=$('reflection-text').value.length;
+    run(()=>send('reflectionReady',{id:promptId}));
   } else if (message.type === 'state') render(message.state);
   else if (message.type === 'clock') {if(state?.clock.status==='Running'||!durationDirty)setText($('visual-clock'),formatClock(message.clock.seconds));}
   else if (message.type === 'timeRead') snapshot(message.clock,true);

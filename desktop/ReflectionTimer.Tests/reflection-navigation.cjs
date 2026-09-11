@@ -34,6 +34,29 @@ module.exports=async function reflectionNavigation(context,initial,check){
   check(await page.locator('#reflection-text').isEditable()&&await page.locator('#early-reason').inputValue()==='Newest reason before Prev'&&await page.locator('#reflection-next').getAttribute('aria-disabled')==='false','Navigation failure restores editing and controls without losing either field');
   await page.evaluate(state=>window.previewDispatch({type:'state',state}),{...initial,prompts:[prompts[1]]});
   check(await page.locator('#reflection-prev').getAttribute('aria-disabled')==='true'&&await page.locator('#reflection-next').getAttribute('aria-disabled')==='true','Both navigation buttons disable when only one unsent reflection remains');
+  prompts[1].draft='Newest response before Prev';prompts[1].earlyEndReason='Newest reason before Prev';
+  await page.evaluate(({state,promptId})=>{
+    window.keptResponse=document.querySelector('#reflection-text');window.keptReason=document.querySelector('#early-reason');
+    window.previewDispatch({type:'showReflection',state,promptId});window.previewDispatch({type:'resumeReflection'});
+  },{state:{...initial,prompts},promptId:prompts[0].id});
+  await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='reflectionReady'&&m.data.id==='first'));
+  check(await page.locator('#reflection-text').inputValue()==='first saved response'&&await page.locator('#reason-group').isHidden(),'In-place Prev loads the requested saved response and correct reason visibility');
+  check(await page.evaluate(()=>document.querySelector('#reflection-text')===window.keptResponse&&document.querySelector('#early-reason')===window.keptReason),'Reflection browsing keeps both existing text input elements attached');
+  check(await page.locator('#reflection-text').evaluate(e=>e===document.activeElement),'In-place browsing places keyboard focus in the response field');
+  await page.locator('#reflection-text').fill('Edited first reflection');
+  await page.evaluate(()=>window.navigationRequest=null);await page.locator('#reflection-next').click();
+  await page.waitForFunction(()=>window.navigationRequest);
+  check(await page.evaluate(()=>window.previewMessages.some(m=>m.action==='draft'&&m.data.id==='first'&&m.data.text==='Edited first reflection')),'Editing after in-place navigation saves under the newly selected reflection ID');
+  await page.evaluate(({state,promptId})=>{
+    window.previewDispatch({type:'showReflection',state,promptId});window.previewDispatch({type:'resumeReflection'});
+    window.previewDispatch({type:'reply',requestId:window.navigationRequest.requestId});
+  },{state:{...initial,prompts},promptId:prompts[1].id});
+  await page.waitForFunction(()=>document.querySelector('#reflection-text').readOnly===false);
+  check(await page.locator('#reflection-text').inputValue()==='Newest response before Prev'&&await page.locator('#early-reason').inputValue()==='Newest reason before Prev'&&await page.locator('#reason-group').isVisible(),'In-place Next restores both saved fields and enables editing after acknowledgement');
+  await page.evaluate(state=>window.previewDispatch({type:'showReflection',state,promptId:'missing'}),{...initial,prompts});
+  await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='reflectionLoadFailed'&&m.data.id==='missing'));
+  check(await page.locator('#reflection-text').inputValue()==='Newest response before Prev'&&await page.locator('#early-reason').inputValue()==='Newest reason before Prev','A missing target reports failure without replacing the current editor or either field');
+  check(await page.evaluate(()=>!window.previewMessages.some(m=>['queue','skip','close'].includes(m.action))),'Browsing and failed loads never submit, skip, or close a reflection');
   await page.goto('https://reflection-timer.invalid/index.html?view=main');
   await page.waitForFunction(()=>window.previewMessages.some(m=>m.action==='ready'));
   await page.evaluate(state=>window.previewDispatch({type:'init',state}),initial);

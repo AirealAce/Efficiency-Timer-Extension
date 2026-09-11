@@ -1,8 +1,10 @@
-# Reflection Timer 4.1.6
+# Reflection Timer 4.1.7
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 
 The four views, themes, audio controls, window positions and Ctrl+Alt shortcuts are retained. App and reflection prompts can coexist with either Compact or Time-only. Semantic HTML supports screen-reader web navigation; quiet countdown updates do not interrupt reading.
+
+Prev/Next saves both fields and loads the selected reflection in the same window and WebView2 control. Navigation does not recreate browser controls or submit reflections. A failed load restores the previous saved editor. Recoverable GPU/utility failures or temporary renderer stalls no longer hide a working interface; local diagnostics record WebView2 failure kind, reason, and exit code without page text.
 
 Settings provides separate always-on-top switches for Compact, Time-only, and reflection prompts, all enabled by default. Prompts are excluded from Alt+Tab. Only one reflection is visible at a time. Bottom-left Prev and Next save both draft fields locally before opening the adjacent pending reflection; browsing never submits it. At either end the unavailable button is disabled. Save and Save & send still close the current window without automatically opening another.
 
