@@ -1,4 +1,4 @@
-import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration} from './ui.js';
+import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration,bindTimerEditor} from './ui.js';
 const $=id=>document.getElementById(id),bridge=window.chrome?.webview,requests=new Map();
 let sequence=0,state,dirty=false,tiny=false,revealed=false,lastRunning=false,lastDeadline,repeatPending=false;
 function send(action,data={}){return new Promise((resolve,reject)=>{const requestId=String(++sequence);if(!bridge)return reject(new Error('Open the compact timer through Reflection Timer.'));const timeout=setTimeout(()=>{requests.delete(requestId);reject(new Error('The app did not respond.'));},35000);requests.set(requestId,{resolve,reject,timeout});bridge.postMessage({requestId,action,data});});}
@@ -53,7 +53,10 @@ bridge?.addEventListener('message',event=>{const m=event.data;if(m.type==='reply
   const changed=()=>{const parts=['hours','minutes','seconds'].map(id=>$(id).value);sharedDuration(parts);run(()=>send('durationDraft',{parts}));$('reset').setAttribute('aria-disabled','false');};
   $(id).addEventListener('input',changed);normalizeEmptyDuration($(id),changed);
 });
-$('timer-editor').addEventListener('submit',event=>{event.preventDefault();run(async()=>{await send('toggle',{seconds:duration(),repeat:repeatEnabled(),lowTime:state.timer.enabled,threshold:state.timer.threshold});dirty=false;fill(state.timer.durationSeconds);});});
+bindTimerEditor($('timer-editor'),['hours','minutes','seconds'].map($),run,async()=>{
+  if(state?.clock.status==='Running'){await send('toggle');return;}
+  await send('toggle',{seconds:duration(),repeat:repeatEnabled(),lowTime:state.timer.enabled,threshold:state.timer.threshold});dirty=false;fill(state.timer.durationSeconds);
+});
 bind('repeat',async()=>{
   if(repeatPending)return;
   const enabled=!repeatEnabled();repeatPending=true;setRepeat(enabled);$('repeat').setAttribute('aria-disabled','true');
@@ -66,7 +69,6 @@ bind('reset',async()=>{await send('reset',{seconds:duration()});dirty=false;fill
 bind('close',()=>send('close'));bind('shrink',()=>tiny?send('close'):mode(true));bind('expand',()=>tiny?expand():send('main'));
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&revealed&&state.clock.status==='Running'){mode(true);$('read-time').focus();}});
 window.addEventListener('blur',()=>{if(revealed&&state?.clock.status==='Running'){revealed=false;mode(true);}});
-['hours','minutes','seconds'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();if(state?.clock.status!=='Running')$('timer-editor').requestSubmit();}}));
 new ResizeObserver(resize).observe(document.body);
 $('caption').addEventListener('pointerdown',event=>{if(event.button===0&&!event.target.closest('button'))run(()=>send('dragCompact'));});
 $('read-time').addEventListener('pointerdown',event=>{if(event.button===0&&tiny)run(()=>send('dragCompact'));});

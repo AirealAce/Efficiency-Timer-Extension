@@ -1,4 +1,4 @@
-import {setText, formatClock, durationSeconds, durationPreviewSeconds, normalizeEmptyDuration, reconcileRows} from './ui.js';
+import {setText, formatClock, durationSeconds, durationPreviewSeconds, normalizeEmptyDuration, bindTimerEditor, reconcileRows} from './ui.js';
 import {settingsUI, localDateTime} from './settings.js';
 import {arrangeApp} from './layout.js';
 
@@ -228,10 +228,11 @@ bind('delivery-confirm',async()=>{
   $(id).addEventListener('input',changed);normalizeEmptyDuration($(id),changed);
 });
 ['schedule-hours','schedule-minutes','schedule-seconds'].forEach(id=>normalizeEmptyDuration($(id),()=>{}));
-$('timer-editor').addEventListener('submit',event=>{ event.preventDefault(); run(async()=>{
+bindTimerEditor($('timer-editor'),['hours','minutes','seconds'].map($),run,async()=>{
+  if(state?.clock.status==='Running'){await send('toggle');return;}
   const seconds = readDuration(), threshold = Number($('threshold').value);
   await send('toggle',{seconds,threshold,repeat:$('repeat').checked,lowTime:$('low-time').checked}); durationDirty=false; applyDuration(state.timer.durationSeconds); render(state);
-}); });
+});
 bind('read-time',()=>send('readTime'));
 bind('reset',async()=>{ await send('reset',{seconds:readDuration()}); durationDirty=false; applyDuration(state.timer.durationSeconds); render(state); });
 bind('end',()=>send('end')); bind('check-in',()=>send('checkIn')); bind('practice',()=>send('testReflection'));
@@ -278,6 +279,5 @@ bind('later',async()=>{
 });
 bind('skip-reflection',async()=>{clearTimeout(saveDelay);await saving.catch(()=>{});queued=true;try{await send('skip',{id:promptId});}catch(e){queued=false;throw e;}});
 ['reflection-text','early-reason'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();$('reflection-form').requestSubmit();}}));
-['hours','minutes','seconds'].forEach(id=>$(id).addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();if(state?.clock.status!=='Running')$('timer-editor').requestSubmit();}}));
 if(view==='main')$('schedule-start').value=localDateTime(Date.now()+3600000);
 run(()=>send('ready'));

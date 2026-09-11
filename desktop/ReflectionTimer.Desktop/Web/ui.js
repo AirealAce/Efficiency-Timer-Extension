@@ -29,6 +29,25 @@ export function normalizeEmptyDuration(input, changed) {
     if (input.value === '' && !input.validity.badInput) { input.value = '0'; changed(); }
   });
 }
+// One deliberate Enter (or button submit) means one toggle, even while the
+// native app is replying. Holding Enter must not alternate pause and resume.
+export function bindTimerEditor(form, inputs, run, toggle) {
+  let pending = false;
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (pending) return;
+    pending = true;
+    run(async () => {
+      try { await toggle(); }
+      finally { pending = false; }
+    });
+  });
+  inputs.forEach(input => input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    if (!event.repeat) form.requestSubmit();
+  }));
+}
 // Keep existing rows, cells, and buttons attached. Updates must not replace the
 // focused element or the objects a screen reader is currently navigating.
 export function reconcileRows(container, records, create, update) {
