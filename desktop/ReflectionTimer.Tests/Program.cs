@@ -4,6 +4,7 @@ using ReflectionTimer.Core;
 using ReflectionTimer.Desktop;
 
 if(args.Contains("--native-smoke")){NativeReflectionSmoke.Run();return;}
+if(args.Contains("--native-clock")){NativeClockSmoke.Run();return;}
 
 var passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception(name); passed++; Console.WriteLine("PASS " + name); }

@@ -1,6 +1,6 @@
 # Reflection Timer
 
-The primary app is now the accessible Windows desktop version, **4.1.8**. Its HTML interface runs inside a C# / WebView2 desktop host and uses the existing timer engine, encrypted storage, MP3 library, and Google Sheets receiver.
+The primary app is now the accessible Windows desktop version, **4.1.9**. Its HTML interface runs inside a C# / WebView2 desktop host and uses the existing timer engine, encrypted storage, MP3 library, and Google Sheets receiver.
 
 ## Project folders
 
@@ -33,7 +33,7 @@ Dropdown selections provide a short screen-reader status, such as “Light selec
 
 Viewer switching reuses browser controls, including when closing and reopening the floating timer or a reflection. If WebView2 crashes, the app restores the interface from saved state while the timer continues. Saved drafts are reloaded without being submitted; text not yet saved before the crash cannot be recovered. Repeated failures offer a Retry interface button.
 
-After a session ends, the clock returns to the duration in the input boxes. Paused sessions keep their remaining time, and Auto-start continues the next countdown. Entering zero in every duration field keeps the preview at 0:00.
+After a session ends, the clock and read-time feedback use the duration in the input boxes. Finished clock updates containing zero cannot overwrite that preview. Paused sessions keep their remaining time, and Auto-start continues the next countdown. Entering zero in every duration field keeps the preview at 0:00.
 
 Compact, Time-only, and reflection prompts each have an independent **always on top** setting, enabled by default. Reflection prompts stay out of Alt+Tab. Only one session-end prompt is shown at a time: a new prompt saves and queues the previous open response, including a blank response, marked **auto-sent**. An early-ended response retains both flags and its reason. An unsent check-in becomes the same session's completion prompt, keeping its saved text and editor; older sessions' check-ins remain separate. Failed local saves keep the old prompt open and the new prompt pending; offline delivery stays in Outbox.
 

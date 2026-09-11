@@ -1,4 +1,4 @@
-import {setText, formatClock, durationSeconds, durationPreviewSeconds, normalizeEmptyDuration, bindTimerEditor, reconcileRows, announceSelectChanges} from './ui.js';
+import {setText, formatClock, displayClock, durationSeconds, normalizeEmptyDuration, bindTimerEditor, reconcileRows, announceSelectChanges} from './ui.js';
 import {settingsUI, localDateTime} from './settings.js';
 import {arrangeApp} from './layout.js';
 
@@ -40,6 +40,7 @@ function run(action) { error(''); Promise.resolve().then(action).catch(e => erro
 function available(button, yes) { button.setAttribute('aria-disabled', String(!yes)); }
 function bind(id, action) { $(id).addEventListener('click', () => { if ($(id).getAttribute('aria-disabled') !== 'true') run(action); }); }
 function snapshot(clock, speak = false) {
+  try{clock=displayClock(clock,['hours','minutes','seconds'].map(id=>$(id).value),durationDirty);}catch{}
   const text = `${clock.text} ${clock.status==='Finished'?'set':'remaining'}. ${clock.status}.`;
   setText($('time-snapshot'), `Time checked: ${text}`);
   if (speak) announce(text);
@@ -53,8 +54,9 @@ function sharedDuration(parts){
   if(parts)['hours','minutes','seconds'].forEach((id,i)=>{if($(id).value!==parts[i])$(id).value=parts[i];});else if(state)applyDuration(state.timer.durationSeconds);
   if(state?.clock.status!=='Running'){setText($('toggle'),durationDirty?'Start':state?.clock.status==='Paused'?'Resume':'Start');renderDuration();}
 }
-function renderDuration(){
-  try{setText($('visual-clock'),formatClock(durationDirty?durationPreviewSeconds(['hours','minutes','seconds'].map(id=>$(id).value)):state.clock.seconds));}
+function renderDuration(clock=state?.clock){
+  if(!clock)return;
+  try{setText($('visual-clock'),formatClock(displayClock(clock,['hours','minutes','seconds'].map(id=>$(id).value),durationDirty).seconds));}
   catch{ /* Keep the last valid time while an invalid value is being edited. */ }
 }
 function draft() { return {id: promptId, text: $('reflection-text').value, reason: $('early-reason').value}; }
@@ -176,12 +178,13 @@ function render(next) {
   const previous = state; state = next;
   settings.state(state);
   if (view === 'reflection') { renderReflection(); return; }
-  setText($('visual-clock'),formatClock(state.clock.seconds)); setText($('timer-state'),state.clock.status==='Running'&&state.timer.endTime?'Running · ends '+new Date(state.timer.endTime).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):state.clock.status);
-  if (!previous || previous.clock.status !== state.clock.status) snapshot(state.clock);
+  setText($('timer-state'),state.clock.status==='Running'&&state.timer.endTime?'Running · ends '+new Date(state.timer.endTime).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):state.clock.status);
   const running = state.clock.status === 'Running';
   ['hours','minutes','seconds'].forEach(id => $(id).readOnly = running);
   // Readonly duration controls remain focusable. No tick changes their values.
-  if (initial || (!durationDirty && state.timer.durationSeconds !== previous?.timer.durationSeconds)) applyDuration(state.timer.durationSeconds);
+  if(initial&&state.durationDraft)sharedDuration(state.durationDraft);
+  else if (initial || (!durationDirty && state.timer.durationSeconds !== previous?.timer.durationSeconds)) applyDuration(state.timer.durationSeconds);
+  if (!previous || previous.clock.status !== state.clock.status) snapshot(state.clock);
   $('repeat').checked = state.timer.autoRestart;
   setText($('toggle'),running ? 'Pause' : state.clock.status === 'Paused' && !durationDirty ? 'Resume' : 'Start');
   available($('end'),running); available($('check-in'),running || state.clock.status === 'Paused');
@@ -194,7 +197,7 @@ function render(next) {
     tables();
   }
   initial = false;
-  if(durationDirty&&!running)renderDuration();
+  renderDuration();
 }
 bridge?.addEventListener('message', event => {
   const message = event.data;
@@ -224,7 +227,7 @@ bridge?.addEventListener('message', event => {
     $('reflection-text').focus();$('reflection-text').selectionStart=$('reflection-text').value.length;
     run(()=>send('reflectionReady',{id:promptId}));
   } else if (message.type === 'state') render(message.state);
-  else if (message.type === 'clock') {if(state?.clock.status==='Running'||!durationDirty)setText($('visual-clock'),formatClock(message.clock.seconds));}
+  else if (message.type === 'clock') {if(state?.clock.status===message.clock.status)renderDuration(message.clock);}
   else if (message.type === 'timeRead') snapshot(message.clock,true);
   else if (message.type === 'announcement') announce(message.message);
   else if (message.type === 'durationDraft'&&view!=='reflection')sharedDuration(message.parts);

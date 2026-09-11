@@ -71,6 +71,17 @@ export function formatClock(seconds) {
   const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = seconds % 60;
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 }
+// Completed sessions preview the duration in the controls. The engine's zero
+// remaining time (or a late countdown frame) must not become the idle display.
+export function displayClock(clock, values, edited=false) {
+  if(clock.status!=='Finished'&&!(edited&&clock.status!=='Running'))return clock;
+  const seconds=durationPreviewSeconds(values),parts=[];
+  const hours=Math.floor(seconds/3600),minutes=Math.floor(seconds/60)%60,remainder=seconds%60;
+  if(hours)parts.push(`${hours} hour${hours===1?'':'s'}`);
+  if(minutes)parts.push(`${minutes} minute${minutes===1?'':'s'}`);
+  if(remainder||!parts.length)parts.push(`${remainder} second${remainder===1?'':'s'}`);
+  return {...clock,seconds,text:parts.join(' ')};
+}
 export function durationSeconds(values) {
   const result = durationPreviewSeconds(values);
   if (result < 1) throw new Error('Enter a duration between one second and one year.');

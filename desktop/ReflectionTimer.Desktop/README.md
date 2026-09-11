@@ -1,4 +1,4 @@
-# Reflection Timer 4.1.8
+# Reflection Timer 4.1.9
 
 The accessible interface is now the primary desktop app. It uses the existing encrypted ReflectionTimerDesktop profile and retains the original Sheets connection, settings, drafts, schedules and Outbox. No personal connection settings belong in the application package.
 
@@ -25,6 +25,8 @@ New installations default to Assertive session-end audio, Polite low-time audio,
 Compact has a two-line Auto/Start toggle that lights up when enabled. Screen readers announce it as the "Auto-start next session" toggle button; Space or Enter switches it without starting the timer. The narrower editor retains all three duration fields and the App, reset, start/pause, and end-session actions.
 
 The App button stays highlighted while App view is shown, even when another window has focus. It dims when App view is hidden or minimized. Its accessible description reports that state; clicking it always shows App view or brings it forward.
+
+After completion, App, Compact, and Time-only derive the displayed time directly from the duration boxes. Zero-valued finished updates and late running frames cannot overwrite this preview. Read-time feedback follows the same inputs; all-zero inputs keep 0:00. Paused sessions retain their remaining time until the duration is edited, and active/repeating/scheduled sessions keep counting down. Completed-session accounting is unchanged.
 
 Open START-HERE.html for setup and keyboard help. Normal launches use the installed profile. Developers may use --profile NAME for isolated test data; old preview samples remain local. APP-PAGE-AUDIT.md records the earlier interface parity review.
 

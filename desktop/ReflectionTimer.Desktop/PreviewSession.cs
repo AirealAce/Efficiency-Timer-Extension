@@ -57,6 +57,16 @@ public sealed class PreviewSession
         // Keep completion and reflection accounting in the engine, but show the
         // duration ready for the next session once the countdown has ended.
         var seconds = status == "Finished" ? timer.DurationSeconds : TimerEngine.Remaining(timer, Engine.Now);
+        // Read-time feedback and recovery snapshots use the same edited duration
+        // as the idle viewers, including a valid all-zero preview. Never change
+        // the running countdown or the completed session's recorded duration.
+        if(!timer.IsRunning&&durationDraft is {} values){
+            var parts=new long[3];
+            if(values.Select((value,index)=>long.TryParse(value.Trim().Length==0?"0":value.Trim(),NumberStyles.None,CultureInfo.InvariantCulture,out parts[index])&&parts[index]<=TimerEngine.MaxDuration).All(valid=>valid)){
+                var preview=parts[0]*3600+parts[1]*60+parts[2];
+                if(preview<=TimerEngine.MaxDuration)seconds=(int)preview;
+            }
+        }
         return new { seconds, text = SpeakTime(seconds), status };
     }
     public static string Status(TimerState timer) => timer.IsRunning ? "Running" : TimerEngine.IsPaused(timer) ? "Paused" : timer.RemainingSeconds == 0 ? "Finished" : "Ready";

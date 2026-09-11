@@ -24,6 +24,12 @@ static class ClockDisplayTests
         session.Tick();
         var reopened = new PreviewSession(store, () => now);
         check(Seconds(session) == 900 && Seconds(reopened) == 900 && reopened.Engine.Snapshot.Prompts.Count == 1, "Later ticks and reopening a finished timer retain the duration preview without duplicating reflections");
+        session.SetDurationDraft(["0","0","20"]);
+        check(Seconds(session)==20&&Clock(session).GetProperty("text").GetString()=="20 seconds", "Read-time feedback after completion follows the edited duration boxes");
+        session.SetDurationDraft(["","0","0"]);
+        check(Seconds(session)==0&&Clock(session).GetProperty("text").GetString()=="0 seconds", "Empty or zero duration units produce a zero preview after completion");
+        session.SetDurationDraft(null);
+        check(Seconds(session)==900&&session.Engine.Snapshot.Timer.RemainingSeconds==0,"Clearing the edit restores the original duration without changing completed-session accounting");
         session.Engine.Start(120, false, 50);
         now = now.AddSeconds(17);
         session.Engine.EndEarly();

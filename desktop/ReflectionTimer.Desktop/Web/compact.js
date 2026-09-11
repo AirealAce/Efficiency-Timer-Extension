@@ -1,4 +1,4 @@
-import {setText,formatClock,durationSeconds,durationPreviewSeconds,normalizeEmptyDuration,bindTimerEditor,announceSelectChanges} from './ui.js';
+import {setText,formatClock,displayClock,durationSeconds,normalizeEmptyDuration,bindTimerEditor,announceSelectChanges} from './ui.js';
 announceSelectChanges();
 const $=id=>document.getElementById(id),bridge=window.chrome?.webview,requests=new Map();
 const requestPrefix=crypto.randomUUID();
@@ -18,24 +18,25 @@ function setAppVisibility(visible){
 }
 function fill(seconds){$('hours').value=Math.floor(seconds/3600);$('minutes').value=Math.floor(seconds/60)%60;$('seconds').value=seconds%60;}
 function sharedDuration(parts){dirty=Array.isArray(parts);if(parts)['hours','minutes','seconds'].forEach((id,i)=>{if($(id).value!==parts[i])$(id).value=parts[i];});else if(state)fill(state.timer.durationSeconds);if(state?.clock.status!=='Running')renderDuration();}
-function renderDuration(){
-  try{setText($('visual-clock'),formatClock(dirty?durationPreviewSeconds(['hours','minutes','seconds'].map(id=>$(id).value)):state.clock.seconds));}
+function renderDuration(clock=state?.clock){
+  if(!clock)return;
+  try{setText($('visual-clock'),formatClock(displayClock(clock,['hours','minutes','seconds'].map(id=>$(id).value),dirty).seconds));}
   catch{ /* Keep the last valid time while an invalid value is being edited. */ }
 }
 function resize(){if(state)send('compactSize',{width:Math.ceil(document.body.getBoundingClientRect().width),height:Math.ceil(document.body.getBoundingClientRect().height),tiny}).catch(e=>setText($('error'),e.message));}
 function mode(value){tiny=value;document.body.dataset.tiny=String(value);$('shrink').setAttribute('aria-label',value?'Hide compact timer':'Shrink to time-only view');$('expand').setAttribute('aria-label',value?'Expand compact view':'Open main timer page');['shrink','expand'].forEach(id=>$(id).title=$(id).getAttribute('aria-label'));}
 function focusDuration(){const id=['hours','minutes','seconds'].find(id=>Number($(id).value)>0)||'hours';$(id).focus();$(id).select();}
 function expand(){revealed=true;mode(false);focusDuration();}
-function snapshot(clock,speak=false){const text=`${clock.text} ${clock.status==='Finished'?'set':'remaining'}. ${clock.status}.`;setText($('time-snapshot'),`Time checked: ${text}`);if(speak)announce(text);}
+function snapshot(clock,speak=false){try{clock=displayClock(clock,['hours','minutes','seconds'].map(id=>$(id).value),dirty);}catch{}const text=`${clock.text} ${clock.status==='Finished'?'set':'remaining'}. ${clock.status}.`;setText($('time-snapshot'),`Time checked: ${text}`);if(speak)announce(text);}
 function render(next){const previous=state;state=next;document.documentElement.dataset.theme=String(state.theme??0);const running=state.clock.status==='Running';
+  if(!previous&&state.durationDraft)sharedDuration(state.durationDraft);
+  else if(!previous||(!dirty&&state.timer.durationSeconds!==previous.timer.durationSeconds))fill(state.timer.durationSeconds);
   if(!previous||previous.clock.status!==state.clock.status)snapshot(state.clock);
-  if(!previous||(!dirty&&state.timer.durationSeconds!==previous.timer.durationSeconds))fill(state.timer.durationSeconds);
   if(running!==lastRunning||lastDeadline!==state.timer.endTime){revealed=false;mode(running);}lastRunning=running;lastDeadline=state.timer.endTime;
   if(!repeatPending)setRepeat(state.timer.autoRestart);['hours','minutes','seconds'].forEach(id=>$(id).readOnly=running);
   const action=running?'Pause':state.clock.status==='Paused'&&!dirty?'Resume':'Start';$('toggle').setAttribute('aria-label',`${action} timer`);$('toggle').title=`${action} timer`;setText($('toggle').firstElementChild,running?'Ⅱ':'▶');
   $('end').setAttribute('aria-disabled',String(!running));$('reset').setAttribute('aria-disabled',String(!dirty&&state.clock.status==='Ready'));
-  setText($('visual-clock'),formatClock(state.clock.seconds));
-  if(dirty&&!running)renderDuration();
+  renderDuration();
   document.body.style.setProperty('--tiny-width',`${Math.max(96,formatClock(state.timer.durationSeconds).length*15+16)}px`);
   if(tiny&&['hours','minutes','seconds','toggle','repeat','app','reset','end'].includes(document.activeElement.id))$('read-time').focus();
 }
@@ -43,7 +44,7 @@ bridge?.addEventListener('message',event=>{const m=event.data;if(m.type==='reply
   else if(m.type==='init'){render(m.state);if(typeof m.timeOnly==='boolean'){mode(m.timeOnly);revealed=!m.timeOnly;}setAppVisibility(m.appViewVisible);if(m.state.durationDraft)sharedDuration(m.state.durationDraft);resize();send('interfaceReady').catch(e=>setText($('error'),e.message));}
   else if(m.type==='appViewVisibility')setAppVisibility(m.visible);
   else if(m.type==='state')render(m.state);
-  else if(m.type==='clock'){if(state?.clock.status==='Running'||!dirty)setText($('visual-clock'),formatClock(m.clock.seconds));}
+  else if(m.type==='clock'){if(state?.clock.status===m.clock.status)renderDuration(m.clock);}
   else if(m.type==='timeRead')snapshot(m.clock,true);
   else if(m.type==='announcement')announce(m.message);
   else if(m.type==='durationDraft')sharedDuration(m.parts);
